@@ -21,7 +21,7 @@ import json
 import random
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable, Literal, Sequence
+from typing import Any, Iterable, Literal, Mapping, Sequence
 
 import numpy as np
 
@@ -29,6 +29,7 @@ from .reve_baseline import (
     AGE_TASK,
     REVE_MODEL,
     AgeTaskConfig,
+    ReveModelConfig,
     ReveDependencyError,
     build_window_starts,
     pearsonr,
@@ -92,6 +93,67 @@ class PreparedRecording:
     channel_names: tuple[str, ...]
 
 
+def build_global_channel_order(
+    prepared_recordings: Iterable[PreparedRecording],
+) -> tuple[str, ...]:
+    """Build NeuralBench's first-seen global channel order.
+
+    ``EegExtractor.prepare`` does not treat channel position as local to each
+    recording.  It discovers one global order while preparing the study and
+    zero-pads channels that are absent from an individual recording.  Keeping
+    that operation explicit prevents the independent runner from silently
+    feeding different physical channels into the same REVE input position.
+    """
+
+    order: list[str] = []
+    seen: set[str] = set()
+    for prepared in prepared_recordings:
+        data = np.asarray(prepared.data)
+        if data.ndim != 2:
+            raise ValueError("prepared recording data must have shape (channels, time)")
+        if len(prepared.channel_names) != data.shape[0]:
+            raise ValueError("channel_names must match the data channel dimension")
+        if len(set(prepared.channel_names)) != len(prepared.channel_names):
+            raise ValueError("each prepared recording must have unique channel names")
+        for channel_name in prepared.channel_names:
+            if channel_name not in seen:
+                seen.add(channel_name)
+                order.append(channel_name)
+    if not order:
+        raise ValueError("at least one EEG channel is required")
+    return tuple(order)
+
+
+def align_prepared_recording(
+    prepared: PreparedRecording,
+    channel_order: Sequence[str],
+) -> PreparedRecording:
+    """Align one recording to a global channel order with zero-padding."""
+
+    data = np.asarray(prepared.data, dtype=np.float32)
+    order = tuple(channel_order)
+    if data.ndim != 2:
+        raise ValueError("prepared recording data must have shape (channels, time)")
+    if len(prepared.channel_names) != data.shape[0]:
+        raise ValueError("channel_names must match the data channel dimension")
+    if len(set(prepared.channel_names)) != len(prepared.channel_names):
+        raise ValueError("each prepared recording must have unique channel names")
+    if len(set(order)) != len(order) or not order:
+        raise ValueError("channel_order must contain unique channel names")
+
+    target_indices = {name: index for index, name in enumerate(order)}
+    unknown = set(prepared.channel_names).difference(target_indices)
+    if unknown:
+        raise ValueError(
+            "prepared recording contains channels missing from the global order: "
+            f"{sorted(unknown)}"
+        )
+    aligned = np.zeros((len(order), data.shape[1]), dtype=np.float32)
+    for source_index, channel_name in enumerate(prepared.channel_names):
+        aligned[target_indices[channel_name]] = data[source_index]
+    return PreparedRecording(aligned, order)
+
+
 @dataclass(frozen=True)
 class IndependentTrainConfig:
     """Training defaults copied from NeuralBench's global configuration."""
@@ -103,6 +165,7 @@ class IndependentTrainConfig:
     patience: int = 7
     gradient_clip_norm: float = 1.0
     seed: int = 0
+    data_seed: int = 33
     device: str = "auto"
     num_workers: int = 0
     freeze_backbone: bool = False
@@ -116,6 +179,7 @@ class TrainingResult:
     val_pearsonr: float
     test_pearsonr: float
     test_mse: float
+    test_metrics: dict[str, float]
     targets: np.ndarray
     predictions: np.ndarray
 
@@ -139,6 +203,134 @@ class ScoreComparison:
     official_pearsonr: float
     pearsonr_delta: float
     matches: bool
+
+
+_WINDOW_CSV_FIELDS = (
+    "path",
+    "release",
+    "subject",
+    "age",
+    "start_s",
+    "duration_s",
+    "recording_duration_s",
+    "split",
+)
+_PREDICTION_CSV_FIELDS = _WINDOW_CSV_FIELDS + ("prediction",)
+
+
+def _window_row(window: AgeWindow) -> dict[str, Any]:
+    return {
+        "path": str(window.path),
+        "release": window.release,
+        "subject": window.subject,
+        "age": float(window.age),
+        "start_s": float(window.start_s),
+        "duration_s": float(window.duration_s),
+        "recording_duration_s": float(window.recording_duration_s),
+        "split": window.split,
+    }
+
+
+def build_manifest_rows(windows: Sequence[AgeWindow]) -> list[dict[str, Any]]:
+    """Serialize the exact window identity used by the independent runner."""
+
+    return [_window_row(window) for window in windows]
+
+
+def build_prediction_rows(
+    windows: Sequence[AgeWindow], predictions: Sequence[float]
+) -> list[dict[str, Any]]:
+    """Attach predictions to manifest rows without losing window identity."""
+
+    values = np.asarray(predictions, dtype=float).reshape(-1)
+    if len(windows) != values.size:
+        raise ValueError("windows and predictions must have equal lengths")
+    return [
+        {**_window_row(window), "prediction": float(prediction)}
+        for window, prediction in zip(windows, values, strict=True)
+    ]
+
+
+def _write_rows(
+    rows: Sequence[Mapping[str, Any]], path: Path, fieldnames: Sequence[str]
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def write_manifest_rows(windows: Sequence[AgeWindow], path: Path) -> None:
+    """Write the complete Age window manifest as a comparison artifact."""
+
+    _write_rows(build_manifest_rows(windows), path, _WINDOW_CSV_FIELDS)
+
+
+def write_prediction_rows(rows: Sequence[Mapping[str, Any]], path: Path) -> None:
+    """Write per-window predictions in a stable, comparison-friendly format."""
+
+    _write_rows(rows, path, _PREDICTION_CSV_FIELDS)
+
+
+def read_prediction_rows(path: Path) -> list[dict[str, Any]]:
+    """Read a prediction artifact written by ``write_prediction_rows``."""
+
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    required = set(_PREDICTION_CSV_FIELDS)
+    if rows and not required.issubset(rows[0]):
+        missing = sorted(required.difference(rows[0]))
+        raise ValueError(f"prediction file is missing columns: {missing}")
+    numeric_fields = {
+        "age",
+        "start_s",
+        "duration_s",
+        "recording_duration_s",
+        "prediction",
+    }
+    for row in rows:
+        for field in numeric_fields:
+            row[field] = float(row[field])
+    return rows
+
+
+def regression_metrics(
+    targets: Sequence[float], predictions: Sequence[float]
+) -> dict[str, float]:
+    """Compute NeuralBench's regression metrics on one complete evaluation set."""
+
+    y_true = np.asarray(targets, dtype=float).reshape(-1)
+    y_pred = np.asarray(predictions, dtype=float).reshape(-1)
+    if y_true.shape != y_pred.shape or y_true.size == 0:
+        raise ValueError("targets and predictions must be non-empty and equally sized")
+    if not np.all(np.isfinite(y_true)) or not np.all(np.isfinite(y_pred)):
+        raise ValueError("targets and predictions must be finite")
+
+    error = y_true - y_pred
+    mse = float(np.mean(error**2))
+    rmse = float(np.sqrt(mse))
+    try:
+        correlation = float(pearsonr(y_true, y_pred))
+    except ValueError:
+        correlation = float("nan")
+    target_mean = float(np.mean(y_true))
+    total_sum_of_squares = float(np.sum((y_true - target_mean) ** 2))
+    r2 = (
+        float(1.0 - np.sum(error**2) / total_sum_of_squares)
+        if total_sum_of_squares > 0
+        else float("nan")
+    )
+    target_std = float(np.std(y_true))
+    normalized_rmse = rmse / target_std if target_std > 0 else float("nan")
+    return {
+        "mse": mse,
+        "rmse": rmse,
+        "mae": float(np.mean(np.abs(error))),
+        "pearsonr": correlation,
+        "r2_score": r2,
+        "normalized_rmse": float(normalized_rmse),
+    }
 
 
 def filter_age_recordings(
@@ -498,9 +690,15 @@ else:
 class AgeWindowDataset:  # Defined without a torch base to keep imports lazy.
     """Lazy PyTorch dataset over the manifest and preprocessed-recording cache."""
 
-    def __init__(self, windows: Sequence[AgeWindow], store: PreprocessedRecordingStore):
+    def __init__(
+        self,
+        windows: Sequence[AgeWindow],
+        store: PreprocessedRecordingStore,
+        channel_order: Sequence[str],
+    ):
         self.windows = tuple(windows)
         self.store = store
+        self.channel_order = tuple(channel_order)
         self._recordings = {
             str(window.path): HbnRecording(
                 path=window.path,
@@ -520,6 +718,7 @@ class AgeWindowDataset:  # Defined without a torch base to keep imports lazy.
         torch, _ = _require_torch()
         window = self.windows[index]
         prepared = self.store.load(self._recordings[str(window.path)])
+        prepared = align_prepared_recording(prepared, self.channel_order)
         start = int(round(window.start_s * REVE_MODEL.frequency_hz))
         stop = start + int(round(window.duration_s * REVE_MODEL.frequency_hz))
         values = np.asarray(prepared.data[:, start:stop], dtype=np.float32)
@@ -624,9 +823,8 @@ def _evaluate(model: Any, loader: Any, device: str) -> tuple[float, float, np.nd
             targets.append(age.detach().cpu().numpy().reshape(-1))
     y_true = np.concatenate(targets)
     y_pred = np.concatenate(predictions)
-    score = _score_or_nan(y_true, y_pred)
-    mse = float(np.mean((y_true - y_pred) ** 2))
-    return score, mse, y_true, y_pred
+    metrics = regression_metrics(y_true, y_pred)
+    return metrics["pearsonr"], metrics["mse"], y_true, y_pred
 
 
 def fit_independent_model(
@@ -696,11 +894,13 @@ def fit_independent_model(
         raise IndependentPipelineError("training never produced a valid validation score")
     model.load_state_dict(best_state)
     test_score, test_mse, targets, predictions = _evaluate(model, test_loader, device)
+    test_metrics = regression_metrics(targets, predictions)
     return TrainingResult(
         best_epoch=best_epoch,
         val_pearsonr=float(best_score),
         test_pearsonr=float(test_score),
         test_mse=test_mse,
+        test_metrics=test_metrics,
         targets=targets,
         predictions=predictions,
     )
@@ -729,6 +929,59 @@ def compare_predictions(
         pearsonr_delta=delta,
         matches=bool(np.isclose(own_score, official_score, atol=atol, rtol=0.0)),
         n_observations=int(y_true.size),
+    )
+
+
+def compare_prediction_rows(
+    own_rows: Sequence[Mapping[str, Any]],
+    official_rows: Sequence[Mapping[str, Any]],
+    *,
+    atol: float = 1e-6,
+) -> PredictionComparison:
+    """Align two per-window artifacts before comparing their predictions."""
+
+    def key(row: Mapping[str, Any]) -> tuple[str, str, str, float, float]:
+        return (
+            str(row["path"]),
+            str(row["release"]),
+            str(row["subject"]),
+            float(row["start_s"]),
+            float(row["duration_s"]),
+        )
+
+    own_by_key = {key(row): row for row in own_rows}
+    official_by_key = {key(row): row for row in official_rows}
+    if len(own_by_key) != len(own_rows) or len(official_by_key) != len(official_rows):
+        raise ValueError("prediction artifacts contain duplicate window identities")
+    if set(own_by_key) != set(official_by_key):
+        raise ValueError("prediction artifacts do not contain the same windows")
+
+    ordered_keys = sorted(own_by_key)
+    targets: list[float] = []
+    own_predictions: list[float] = []
+    official_predictions: list[float] = []
+    for window_key in ordered_keys:
+        own_row = own_by_key[window_key]
+        official_row = official_by_key[window_key]
+        own_age = float(own_row["age"])
+        official_age = float(official_row["age"])
+        if not np.isclose(own_age, official_age, atol=0.0, rtol=0.0):
+            raise ValueError(f"target age differs for window {window_key}")
+        targets.append(own_age)
+        own_predictions.append(float(own_row["prediction"]))
+        official_predictions.append(float(official_row["prediction"]))
+    return compare_predictions(
+        targets, own_predictions, official_predictions, atol=atol
+    )
+
+
+def compare_prediction_files(
+    own_path: Path, official_path: Path, *, atol: float = 1e-6
+) -> PredictionComparison:
+    """Compare two CSV prediction artifacts after deterministic row alignment."""
+
+    return compare_prediction_rows(
+        read_prediction_rows(own_path), read_prediction_rows(official_path), atol=atol
     )
 
 
@@ -771,18 +1024,25 @@ def run_independent_reve(
     cache_dir: Path | None = None,
     mapping_path: Path | None = None,
     train_config: IndependentTrainConfig = IndependentTrainConfig(),
+    manifest_output: Path | None = None,
+    predictions_output: Path | None = None,
+    official_predictions_path: Path | None = None,
+    score_atol: float = 1e-6,
 ) -> tuple[TrainingResult, dict[str, Any]]:
     """Run the complete independent HBN→REVE→Age experiment."""
 
     _set_seed(train_config.seed)
     recordings = discover_hbn_recordings(data_root)
+    eligible_recordings = filter_age_recordings(recordings)
     manifest = build_age_window_manifest(recordings)
     store = PreprocessedRecordingStore(cache_dir)
-    first_recording = filter_age_recordings(recordings)[0]
-    first_prepared = store.load(first_recording)
+    prepared_recordings = [
+        store.load(recording) for recording in eligible_recordings
+    ]
+    channel_order = build_global_channel_order(prepared_recordings)
 
     backbone = load_reve_backbone(
-        first_prepared.channel_names,
+        channel_order,
         mapping_path=mapping_path,
         n_times=AGE_TASK.window_sample_count,
     )
@@ -791,9 +1051,19 @@ def run_independent_reve(
     )
 
     torch, _ = _require_torch()
+    train_state, _, val_state, test_state = np.random.SeedSequence(
+        train_config.data_seed
+    ).generate_state(4)
+    loader_generators = {
+        "train": torch.Generator().manual_seed(int(train_state)),
+        "val": torch.Generator().manual_seed(int(val_state)),
+        "test": torch.Generator().manual_seed(int(test_state)),
+    }
     datasets = {
         split: AgeWindowDataset(
-            [window for window in manifest if window.split == split], store
+            [window for window in manifest if window.split == split],
+            store,
+            channel_order,
         )
         for split in ("train", "val", "test")
     }
@@ -803,18 +1073,27 @@ def run_independent_reve(
             batch_size=train_config.batch_size,
             shuffle=True,
             num_workers=train_config.num_workers,
+            drop_last=False,
+            pin_memory=True,
+            generator=loader_generators["train"],
         ),
         "val": torch.utils.data.DataLoader(
             datasets["val"],
             batch_size=train_config.batch_size,
             shuffle=False,
             num_workers=train_config.num_workers,
+            drop_last=False,
+            pin_memory=True,
+            generator=loader_generators["val"],
         ),
         "test": torch.utils.data.DataLoader(
             datasets["test"],
             batch_size=train_config.batch_size,
             shuffle=False,
             num_workers=train_config.num_workers,
+            drop_last=False,
+            pin_memory=True,
+            generator=loader_generators["test"],
         ),
     }
     result = fit_independent_model(
@@ -824,23 +1103,37 @@ def run_independent_reve(
         loaders["test"],
         train_config,
     )
+    test_windows = [window for window in manifest if window.split == "test"]
+    prediction_rows = build_prediction_rows(test_windows, result.predictions)
+    if manifest_output is not None:
+        write_manifest_rows(manifest, manifest_output)
+    if predictions_output is not None:
+        write_prediction_rows(prediction_rows, predictions_output)
     report = {
         "pipeline": "independent",
         "model": asdict(REVE_MODEL),
         "training": asdict(train_config),
-        "recording_count": len(filter_age_recordings(recordings)),
+        "recording_count": len(eligible_recordings),
         "window_count": len(manifest),
         "windows_by_split": {
             split: sum(window.split == split for window in manifest)
             for split in ("train", "val", "test")
         },
-        "channel_count": len(first_prepared.channel_names),
-        "channel_names": list(first_prepared.channel_names),
+        "channel_count": len(channel_order),
+        "channel_names": list(channel_order),
         "best_epoch": result.best_epoch,
         "val_pearsonr": result.val_pearsonr,
         "test_pearsonr": result.test_pearsonr,
         "test_mse": result.test_mse,
+        "test_metrics": result.test_metrics,
     }
+    if official_predictions_path is not None:
+        comparison = compare_prediction_rows(
+            prediction_rows,
+            read_prediction_rows(official_predictions_path),
+            atol=score_atol,
+        )
+        report["prediction_comparison"] = asdict(comparison)
     return result, report
 
 
@@ -851,14 +1144,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--mapping", type=Path)
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--data-seed", type=int, default=33)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--official-score", type=float)
+    parser.add_argument("--manifest-output", type=Path)
+    parser.add_argument("--predictions-output", type=Path)
+    parser.add_argument("--official-predictions", type=Path)
     parser.add_argument("--score-atol", type=float, default=1e-6)
     args = parser.parse_args(argv)
 
     config = IndependentTrainConfig(
         epochs=args.epochs,
         batch_size=args.batch_size,
+        seed=args.seed,
+        data_seed=args.data_seed,
         device=args.device,
     )
     result, report = run_independent_reve(
@@ -866,6 +1166,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         cache_dir=args.cache_dir,
         mapping_path=args.mapping,
         train_config=config,
+        manifest_output=args.manifest_output,
+        predictions_output=args.predictions_output,
+        official_predictions_path=args.official_predictions,
+        score_atol=args.score_atol,
     )
     if args.official_score is not None:
         comparison = compare_scores(

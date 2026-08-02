@@ -7,7 +7,7 @@ that data and training can be added after the local pipeline is verified.
 
 Run from the repository root:
 
-    python -m projects.neurobench_age.reve_baseline --dry-run
+    python -m neurobench_age.reve_baseline --dry-run
 
 The production training commands are exposed by :func:`build_official_commands`
 but are not executed by this module.
@@ -42,7 +42,9 @@ class AgeTaskConfig:
     window_stride_s: float = 2.0
     raw_channel_count: int = 129
     test_release: str = "R5"
-    validation_release_ratio: float = 1 / 11
+    # NeuralBench's released config uses the decimal ratio, rather than the
+    # mathematically similar-looking 1/11 approximation.
+    validation_release_ratio: float = 0.091
     validation_random_state: int = 33
     target_field: str = "age"
     target_aggregation: str = "single"
@@ -270,9 +272,9 @@ def build_official_commands() -> dict[str, str]:
         "download": "neuralbench eeg age --download",
         "prepare": "neuralbench eeg age --prepare",
         "train": "neuralbench eeg age -m reve",
-        "dry_run": "python -m projects.neurobench_age.reve_baseline --dry-run",
-        "official_run": "python -m projects.neurobench_age.reve_baseline --official-run",
-        "debug_run": "python -m projects.neurobench_age.reve_baseline --official-run --debug",
+        "dry_run": "python -m neurobench_age.reve_baseline --dry-run",
+        "official_run": "python -m neurobench_age.reve_baseline --official-run",
+        "debug_run": "python -m neurobench_age.reve_baseline --official-run --debug",
     }
 
 

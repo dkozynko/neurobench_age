@@ -7,8 +7,8 @@ runner. The local dry run does not download HBN data or pretrained weights.
 Run the local contract check from the repository root:
 
 ```bash
-python -m projects.neurobench_age.reve_baseline --dry-run
-rtk python3 -m pytest -q tests/test_neurobench_age_reve_baseline.py
+python -m neurobench_age.reve_baseline --dry-run
+rtk python3 -m pytest -q tests/test_neurobench_age_parity.py
 ```
 
 The dry run verifies:
@@ -36,7 +36,7 @@ does not download HBN or model weights during installation.
 The programmatic entry point is:
 
 ```python
-from projects.neurobench_age.reve_baseline import run_official_reve
+from neurobench_age.reve_baseline import run_official_reve
 
 # debug=True keeps the official runner in its reduced local mode.
 # This call still requires prepared/downloaded task data.
@@ -46,7 +46,7 @@ results = run_official_reve(debug=True)
 The equivalent command-line entry point is:
 
 ```bash
-python -m projects.neurobench_age.reve_baseline --official-run
+python -m neurobench_age.reve_baseline --official-run
 ```
 
 Add `--download` and `--prepare` explicitly when you are ready to materialize
@@ -73,7 +73,7 @@ After HBN is available under `DATA_ROOT/R1/download` through
 `DATA_ROOT/R11/download`, run:
 
 ```bash
-python -m projects.neurobench_age.independent_pipeline \
+python -m neurobench_age.independent_pipeline \
   --data-root DATA_ROOT \
   --cache-dir DATA_ROOT/reve-preprocessed \
   --mapping PATH_TO/neuralbench/models/channel_mappings/reve.json
@@ -83,16 +83,23 @@ The command prints the independent test Pearson score. To compare it with the
 official run's reported test score, pass that value explicitly:
 
 ```bash
-python -m projects.neurobench_age.independent_pipeline \
+python -m neurobench_age.independent_pipeline \
   --data-root DATA_ROOT \
   --cache-dir DATA_ROOT/reve-preprocessed \
   --mapping PATH_TO/neuralbench/models/channel_mappings/reve.json \
-  --official-score OFFICIAL_TEST_PEARSON
+  --official-score OFFICIAL_TEST_PEARSON \
+  --manifest-output DATA_ROOT/age-manifest.csv \
+  --predictions-output DATA_ROOT/independent-test-predictions.csv \
+  --official-predictions PATH_TO/official-test-predictions.csv
 ```
 
 The comparison is only valid when both commands use the same prepared HBN
 root, checkpoint, seed, 40-epoch configuration, and R5 test split. The cache
 contains preprocessed continuous recordings and can be reused on later runs.
+The manifest and prediction CSVs preserve release, subject, path, window start,
+target age, and split so an official per-window export can be aligned and
+checked with `--official-predictions`; the report then includes the prediction
+comparison in addition to the aggregate score comparison.
 
 The official reference commands remain:
 
