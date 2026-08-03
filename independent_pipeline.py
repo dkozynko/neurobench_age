@@ -715,6 +715,7 @@ class AgeWindowDataset:  # Defined without a torch base to keep imports lazy.
             )
             for window in windows
         }
+        self._aligned_recordings: dict[str, PreparedRecording] = {}
 
     def __len__(self) -> int:
         return len(self.windows)
@@ -722,8 +723,14 @@ class AgeWindowDataset:  # Defined without a torch base to keep imports lazy.
     def __getitem__(self, index: int) -> tuple[Any, Any]:
         torch, _ = _require_torch()
         window = self.windows[index]
-        prepared = self.store.load(self._recordings[str(window.path)])
-        prepared = align_prepared_recording(prepared, self.channel_order)
+        recording_key = str(window.path)
+        prepared = self._aligned_recordings.get(recording_key)
+        if prepared is None:
+            prepared = align_prepared_recording(
+                self.store.load(self._recordings[recording_key]),
+                self.channel_order,
+            )
+            self._aligned_recordings[recording_key] = prepared
         start = int(round(window.start_s * REVE_MODEL.frequency_hz))
         stop = start + int(round(window.duration_s * REVE_MODEL.frequency_hz))
         values = np.asarray(prepared.data[:, start:stop], dtype=np.float32)
