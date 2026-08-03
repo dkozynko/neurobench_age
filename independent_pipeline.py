@@ -34,6 +34,11 @@ from .reve_baseline import (
     build_window_starts,
     pearsonr,
 )
+from .medium_subset import (
+    filter_recordings_by_manifest,
+    manifest_sha256,
+    read_manifest,
+)
 
 
 HBN_RELEASES = tuple(f"R{i}" for i in range(1, 12))
@@ -1023,6 +1028,7 @@ def run_independent_reve(
     *,
     cache_dir: Path | None = None,
     mapping_path: Path | None = None,
+    subjects_file: Path | None = None,
     train_config: IndependentTrainConfig = IndependentTrainConfig(),
     manifest_output: Path | None = None,
     predictions_output: Path | None = None,
@@ -1033,8 +1039,24 @@ def run_independent_reve(
 
     _set_seed(train_config.seed)
     recordings = discover_hbn_recordings(data_root)
+    selected_manifest = read_manifest(subjects_file) if subjects_file is not None else None
+    if selected_manifest is not None:
+        recordings = filter_recordings_by_manifest(
+            recordings, selected_manifest, data_root=data_root
+        )
     eligible_recordings = filter_age_recordings(recordings)
     manifest = build_age_window_manifest(recordings)
+    if selected_manifest is not None:
+        expected_splits = {
+            row.recording_relpath: row.split for row in selected_manifest
+        }
+        for window in manifest:
+            relative = window.path.resolve().relative_to(data_root.resolve()).as_posix()
+            if expected_splits.get(relative) != window.split:
+                raise IndependentPipelineError(
+                    f"manifest split mismatch for {relative}: "
+                    f"{window.split!r} != {expected_splits.get(relative)!r}"
+                )
     store = PreprocessedRecordingStore(cache_dir)
     prepared_recordings = [
         store.load(recording) for recording in eligible_recordings
@@ -1127,6 +1149,10 @@ def run_independent_reve(
         "test_mse": result.test_mse,
         "test_metrics": result.test_metrics,
     }
+    if subjects_file is not None:
+        report["manifest_path"] = str(subjects_file)
+        report["manifest_sha256"] = manifest_sha256(subjects_file)
+        report["manifest_rows"] = len(selected_manifest or [])
     if official_predictions_path is not None:
         comparison = compare_prediction_rows(
             prediction_rows,
@@ -1142,6 +1168,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--data-root", type=Path, required=True)
     parser.add_argument("--cache-dir", type=Path, required=True)
     parser.add_argument("--mapping", type=Path)
+    parser.add_argument("--subjects-file", type=Path)
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--seed", type=int, default=0)
@@ -1165,6 +1192,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.data_root,
         cache_dir=args.cache_dir,
         mapping_path=args.mapping,
+        subjects_file=args.subjects_file,
         train_config=config,
         manifest_output=args.manifest_output,
         predictions_output=args.predictions_output,
