@@ -93,6 +93,13 @@ python -m neurobench_age.independent_pipeline \
   --official-predictions PATH_TO/official-test-predictions.csv
 ```
 
+The runner defaults to NeuralBench-style local loading: 10 DataLoader workers,
+prefetch factor 2, persistent workers, pinned memory, and parent-process
+preloading of aligned recordings. For a low-memory or single-process probe,
+use `--num-workers 0 --no-preload`; worker-only options are then omitted from
+PyTorch's DataLoader. The performance settings can be overridden with
+`--num-workers`, `--prefetch-factor`, and `--no-persistent-workers`.
+
 The comparison is only valid when both commands use the same prepared HBN
 root, checkpoint, seed, 40-epoch configuration, and R5 test split. The cache
 contains preprocessed continuous recordings and can be reused on later runs.

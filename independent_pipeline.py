@@ -19,6 +19,7 @@ import hashlib
 import importlib.util
 import json
 import random
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Literal, Mapping, Sequence
@@ -172,8 +173,17 @@ class IndependentTrainConfig:
     seed: int = 0
     data_seed: int = 33
     device: str = "auto"
-    num_workers: int = 0
+    num_workers: int = 10
+    prefetch_factor: int | None = 2
+    persistent_workers: bool = True
+    preload_recordings: bool = True
     freeze_backbone: bool = False
+
+    def __post_init__(self) -> None:
+        if self.num_workers < 0:
+            raise ValueError("num_workers must be non-negative")
+        if self.prefetch_factor is not None and self.prefetch_factor <= 0:
+            raise ValueError("prefetch_factor must be positive or None")
 
 
 @dataclass(frozen=True)
@@ -185,6 +195,7 @@ class TrainingResult:
     test_pearsonr: float
     test_mse: float
     test_metrics: dict[str, float]
+    timings: dict[str, float]
     targets: np.ndarray
     predictions: np.ndarray
 
@@ -568,10 +579,16 @@ class PreprocessedRecordingStore:
 
         data_path, metadata_path = self._cache_paths(recording)
         if data_path.is_file() and metadata_path.is_file():
-            metadata = json.loads(metadata_path.read_text())
-            return PreparedRecording(
-                np.load(data_path, mmap_mode="r"), tuple(metadata["channel_names"])
-            )
+            try:
+                metadata = json.loads(metadata_path.read_text())
+                return PreparedRecording(
+                    np.load(data_path, mmap_mode="r"),
+                    tuple(metadata["channel_names"]),
+                )
+            except (OSError, TypeError, ValueError, KeyError):
+                # A worker can be interrupted between the data and metadata
+                # writes. Treat that pair as a cache miss and rebuild it.
+                pass
 
         prepared = preprocess_hbn_recording(recording)
         temporary_data = data_path.with_suffix(".tmp.npy")
@@ -700,6 +717,7 @@ class AgeWindowDataset:  # Defined without a torch base to keep imports lazy.
         windows: Sequence[AgeWindow],
         store: PreprocessedRecordingStore,
         channel_order: Sequence[str],
+        aligned_recordings: Mapping[str, PreparedRecording] | None = None,
     ):
         self.windows = tuple(windows)
         self.store = store
@@ -715,10 +733,27 @@ class AgeWindowDataset:  # Defined without a torch base to keep imports lazy.
             )
             for window in windows
         }
-        self._aligned_recordings: dict[str, PreparedRecording] = {}
+        self._aligned_recordings: dict[str, PreparedRecording] = dict(
+            aligned_recordings or {}
+        )
 
     def __len__(self) -> int:
         return len(self.windows)
+
+    def preload(self) -> None:
+        """Load and align every recording used by this split exactly once.
+
+        This method is intentionally called before DataLoader workers are
+        created. On Linux, worker processes fork the dataset and can read the
+        resulting arrays without re-reading the disk cache or repeating the
+        channel alignment work.
+        """
+
+        for recording_key, recording in self._recordings.items():
+            if recording_key not in self._aligned_recordings:
+                self._aligned_recordings[recording_key] = align_prepared_recording(
+                    self.store.load(recording), self.channel_order
+                )
 
     def __getitem__(self, index: int) -> tuple[Any, Any]:
         torch, _ = _require_torch()
@@ -742,6 +777,41 @@ class AgeWindowDataset:  # Defined without a torch base to keep imports lazy.
             )
         values = np.clip(values, -REVE_MODEL.clamp, REVE_MODEL.clamp)
         return torch.from_numpy(values), torch.tensor([window.age], dtype=torch.float32)
+
+
+def build_data_loaders(
+    datasets: Mapping[str, Any],
+    generators: Mapping[str, Any],
+    config: IndependentTrainConfig,
+) -> dict[str, Any]:
+    """Build train/validation/test loaders with NeuralBench-style settings."""
+
+    torch, _ = _require_torch()
+    expected_splits = ("train", "val", "test")
+    if any(split not in datasets for split in expected_splits):
+        raise ValueError(f"datasets must contain {expected_splits}")
+    if any(split not in generators for split in expected_splits):
+        raise ValueError(f"generators must contain {expected_splits}")
+
+    loaders: dict[str, Any] = {}
+    for split in expected_splits:
+        loader_kwargs: dict[str, Any] = {
+            "batch_size": config.batch_size,
+            "shuffle": split == "train",
+            "num_workers": config.num_workers,
+            "drop_last": False,
+            "pin_memory": True,
+            "generator": generators[split],
+        }
+        if config.num_workers > 0:
+            loader_kwargs["persistent_workers"] = config.persistent_workers
+            if config.prefetch_factor is not None:
+                loader_kwargs["prefetch_factor"] = config.prefetch_factor
+        loaders[split] = torch.utils.data.DataLoader(
+            datasets[split],
+            **loader_kwargs,
+        )
+    return loaders
 
 
 def load_reve_backbone(
@@ -823,6 +893,14 @@ def _score_or_nan(targets: np.ndarray, predictions: np.ndarray) -> float:
         return float("nan")
 
 
+def _synchronize_device(device: str) -> None:
+    """Synchronize CUDA only when timing or transferring GPU work."""
+
+    torch, _ = _require_torch()
+    if device.startswith("cuda") and torch.cuda.is_available():
+        torch.cuda.synchronize()
+
+
 def _evaluate(model: Any, loader: Any, device: str) -> tuple[float, float, np.ndarray, np.ndarray]:
     torch, _ = _require_torch()
     model.eval()
@@ -830,7 +908,7 @@ def _evaluate(model: Any, loader: Any, device: str) -> tuple[float, float, np.nd
     predictions: list[np.ndarray] = []
     with torch.no_grad():
         for values, age in loader:
-            prediction = model(values.to(device))
+            prediction = model(values.to(device, non_blocking=True))
             predictions.append(prediction.detach().cpu().numpy().reshape(-1))
             targets.append(age.detach().cpu().numpy().reshape(-1))
     y_true = np.concatenate(targets)
@@ -855,9 +933,12 @@ def fit_independent_model(
     model.to(device)
 
     # Initialize LazyLinear before constructing AdamW.
+    first_batch_started = time.perf_counter()
     sample_values, _ = next(iter(train_loader))
+    _synchronize_device(device)
+    first_batch_s = time.perf_counter() - first_batch_started
     with torch.no_grad():
-        model(sample_values[:1].to(device))
+        model(sample_values[:1].to(device, non_blocking=True))
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
@@ -875,19 +956,33 @@ def fit_independent_model(
     best_epoch = 0
     best_state: dict[str, Any] | None = None
     epochs_without_improvement = 0
+    training_s = 0.0
+    validation_s = 0.0
+    train_batches = 0
+    completed_epochs = 0
 
     for epoch in range(config.epochs):
         model.train()
+        _synchronize_device(device)
+        training_started = time.perf_counter()
         for values, age in train_loader:
             optimizer.zero_grad(set_to_none=True)
-            prediction = model(values.to(device))
-            loss = loss_fn(prediction, age.to(device))
+            prediction = model(values.to(device, non_blocking=True))
+            loss = loss_fn(prediction, age.to(device, non_blocking=True))
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clip_norm)
             optimizer.step()
             scheduler.step()
+            train_batches += 1
+        _synchronize_device(device)
+        training_s += time.perf_counter() - training_started
 
+        _synchronize_device(device)
+        validation_started = time.perf_counter()
         validation_score, _, _, _ = _evaluate(model, validation_loader, device)
+        _synchronize_device(device)
+        validation_s += time.perf_counter() - validation_started
+        completed_epochs = epoch + 1
         comparable_score = validation_score if np.isfinite(validation_score) else -float("inf")
         if comparable_score > best_score:
             best_score = comparable_score
@@ -905,14 +1000,29 @@ def fit_independent_model(
     if best_state is None:
         raise IndependentPipelineError("training never produced a valid validation score")
     model.load_state_dict(best_state)
+    _synchronize_device(device)
+    test_started = time.perf_counter()
     test_score, test_mse, targets, predictions = _evaluate(model, test_loader, device)
+    _synchronize_device(device)
+    test_s = time.perf_counter() - test_started
     test_metrics = regression_metrics(targets, predictions)
+    timings = {
+        "first_batch_s": float(first_batch_s),
+        "train_s": float(training_s),
+        "validation_s": float(validation_s),
+        "test_s": float(test_s),
+        "train_batches_per_s": float(train_batches / training_s)
+        if training_s > 0
+        else float("nan"),
+        "completed_epochs": float(completed_epochs),
+    }
     return TrainingResult(
         best_epoch=best_epoch,
         val_pearsonr=float(best_score),
         test_pearsonr=float(test_score),
         test_mse=test_mse,
         test_metrics=test_metrics,
+        timings=timings,
         targets=targets,
         predictions=predictions,
     )
@@ -1044,6 +1154,7 @@ def run_independent_reve(
 ) -> tuple[TrainingResult, dict[str, Any]]:
     """Run the complete independent HBN→REVE→Age experiment."""
 
+    total_started = time.perf_counter()
     _set_seed(train_config.seed)
     recordings = discover_hbn_recordings(data_root)
     selected_manifest = read_manifest(subjects_file) if subjects_file is not None else None
@@ -1065,10 +1176,21 @@ def run_independent_reve(
                     f"{window.split!r} != {expected_splits.get(relative)!r}"
                 )
     store = PreprocessedRecordingStore(cache_dir)
-    prepared_recordings = [
-        store.load(recording) for recording in eligible_recordings
-    ]
-    channel_order = build_global_channel_order(prepared_recordings)
+    preload_started = time.perf_counter()
+    prepared_by_path = {
+        str(recording.path): store.load(recording)
+        for recording in eligible_recordings
+    }
+    channel_order = build_global_channel_order(prepared_by_path.values())
+    aligned_by_path = (
+        {
+            path: align_prepared_recording(prepared, channel_order)
+            for path, prepared in prepared_by_path.items()
+        }
+        if train_config.preload_recordings
+        else {}
+    )
+    preload_s = time.perf_counter() - preload_started
 
     backbone = load_reve_backbone(
         channel_order,
@@ -1088,43 +1210,21 @@ def run_independent_reve(
         "val": torch.Generator().manual_seed(int(val_state)),
         "test": torch.Generator().manual_seed(int(test_state)),
     }
-    datasets = {
-        split: AgeWindowDataset(
-            [window for window in manifest if window.split == split],
+    datasets = {}
+    for split in ("train", "val", "test"):
+        split_windows = [window for window in manifest if window.split == split]
+        split_paths = {str(window.path) for window in split_windows}
+        datasets[split] = AgeWindowDataset(
+            split_windows,
             store,
             channel_order,
+            aligned_recordings={
+                path: aligned_by_path[path]
+                for path in split_paths
+                if path in aligned_by_path
+            },
         )
-        for split in ("train", "val", "test")
-    }
-    loaders = {
-        "train": torch.utils.data.DataLoader(
-            datasets["train"],
-            batch_size=train_config.batch_size,
-            shuffle=True,
-            num_workers=train_config.num_workers,
-            drop_last=False,
-            pin_memory=True,
-            generator=loader_generators["train"],
-        ),
-        "val": torch.utils.data.DataLoader(
-            datasets["val"],
-            batch_size=train_config.batch_size,
-            shuffle=False,
-            num_workers=train_config.num_workers,
-            drop_last=False,
-            pin_memory=True,
-            generator=loader_generators["val"],
-        ),
-        "test": torch.utils.data.DataLoader(
-            datasets["test"],
-            batch_size=train_config.batch_size,
-            shuffle=False,
-            num_workers=train_config.num_workers,
-            drop_last=False,
-            pin_memory=True,
-            generator=loader_generators["test"],
-        ),
-    }
+    loaders = build_data_loaders(datasets, loader_generators, train_config)
     result = fit_independent_model(
         model,
         loaders["train"],
@@ -1167,6 +1267,11 @@ def run_independent_reve(
             atol=score_atol,
         )
         report["prediction_comparison"] = asdict(comparison)
+    report["timings"] = {
+        "preload_s": float(preload_s),
+        **result.timings,
+        "total_s": float(time.perf_counter() - total_started),
+    }
     return result, report
 
 
@@ -1178,6 +1283,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--subjects-file", type=Path)
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--num-workers", type=int, default=10)
+    parser.add_argument("--prefetch-factor", type=int, default=2)
+    parser.add_argument(
+        "--no-preload",
+        dest="preload_recordings",
+        action="store_false",
+        help="load and align recordings lazily in each DataLoader process",
+    )
+    parser.add_argument(
+        "--no-persistent-workers",
+        dest="persistent_workers",
+        action="store_false",
+        help="recreate worker processes for each DataLoader iterator",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--data-seed", type=int, default=33)
     parser.add_argument("--device", default="auto")
@@ -1191,6 +1310,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     config = IndependentTrainConfig(
         epochs=args.epochs,
         batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        prefetch_factor=args.prefetch_factor,
+        persistent_workers=args.persistent_workers,
+        preload_recordings=args.preload_recordings,
         seed=args.seed,
         data_seed=args.data_seed,
         device=args.device,
