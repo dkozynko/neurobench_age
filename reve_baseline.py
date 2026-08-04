@@ -65,6 +65,8 @@ class ReveModelConfig:
 
     pretrained_name: str = "brain-bzh/reve-base"
     frequency_hz: float = REVE_FREQUENCY_HZ
+    # NeuralSet's official EegExtractor defaults to all available CPUs.
+    mne_n_jobs: int = -1
     bandpass_hz: tuple[float, float] = (0.5, 99.5)
     notch_hz: tuple[float, ...] | None = None
     scaler: str = "StandardScaler"

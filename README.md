@@ -93,8 +93,8 @@ python -m neurobench_age.independent_pipeline \
   --official-predictions PATH_TO/official-test-predictions.csv
 ```
 
-The runner defaults to NeuralBench-style local loading: 10 DataLoader workers,
-prefetch factor 2, persistent workers, pinned memory, and parent-process
+The runner defaults to the official Age configuration: 2 DataLoader workers,
+the PyTorch default prefetch factor, persistent workers, pinned memory, and parent-process
 preloading of aligned recordings. For a low-memory or single-process probe,
 use `--num-workers 0 --no-preload`; worker-only options are then omitted from
 PyTorch's DataLoader. The performance settings can be overridden with

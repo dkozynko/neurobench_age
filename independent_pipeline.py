@@ -550,14 +550,14 @@ def preprocess_hbn_recording(
     raw.pick(eeg_picks)
 
     low, high = config.bandpass_hz
-    raw.filter(low, high, n_jobs=1, verbose="ERROR")
-    raw.resample(config.frequency_hz, n_jobs=1, verbose="ERROR")
+    raw.filter(low, high, n_jobs=config.mne_n_jobs, verbose="ERROR")
+    raw.resample(config.frequency_hz, n_jobs=config.mne_n_jobs, verbose="ERROR")
 
     processed = preprocess_array(
         raw.get_data(),
         source_frequency_hz=config.frequency_hz,
         target_frequency_hz=config.frequency_hz,
-        clamp=None,
+        clamp=config.clamp,
     )
     return PreparedRecording(processed, tuple(raw.ch_names))
 
