@@ -1190,6 +1190,10 @@ def fit_independent_model(
         first_batch_s = time.perf_counter() - first_batch_started
         _materialize_model(model, sample_values, device)
 
+    if config.validate_before_training:
+        _synchronize_device(device)
+        _evaluate(model, validation_loader, device)
+
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
@@ -1202,10 +1206,6 @@ def fit_independent_model(
         anneal_strategy="cos",
     )
     loss_fn = torch.nn.MSELoss()
-
-    if config.validate_before_training:
-        _synchronize_device(device)
-        _evaluate(model, validation_loader, device)
 
     best_score = -float("inf")
     best_epoch = 0
