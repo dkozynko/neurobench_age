@@ -92,9 +92,12 @@ def build_window_starts(
 ) -> np.ndarray:
     """Return non-overlapping window starts for one eligible recording.
 
-    Starts are expressed in recording-relative seconds.  The official task
-    discards the first 60 seconds and caps the usable crop at 120 seconds,
-    yielding 60 windows for a recording that has at least 180 seconds.
+    NeuralBench's ``CropTimelines`` transform moves the EEG event's timeline
+    start to 60 seconds, but leaves its file offset at zero.  ``MneRaw.read``
+    therefore caches the first 120 seconds of the file, and the segmenter
+    addresses that cached array from zero.  This reproduces the observed
+    official cache semantics rather than applying the transform's start as a
+    second file offset.
     """
 
     if not np.isfinite(recording_duration_s):
@@ -108,10 +111,7 @@ def build_window_starts(
     if config.max_crop_duration_s < config.window_duration_s:
         raise ValueError("crop duration must contain at least one full window")
 
-    usable_duration_s = min(
-        config.max_crop_duration_s,
-        recording_duration_s - config.crop_start_s,
-    )
+    usable_duration_s = min(config.max_crop_duration_s, recording_duration_s)
     window_count = int(
         np.floor(
             (usable_duration_s - config.window_duration_s)
@@ -121,7 +121,7 @@ def build_window_starts(
     if window_count <= 0:
         raise ValueError("recording does not contain a complete usable window")
 
-    return config.crop_start_s + np.arange(window_count) * config.window_stride_s
+    return np.arange(window_count) * config.window_stride_s
 
 
 def validate_split_assignments(

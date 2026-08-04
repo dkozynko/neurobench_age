@@ -45,6 +45,11 @@ from .medium_subset import (
 
 HBN_RELEASES = tuple(f"R{i}" for i in range(1, 12))
 
+# This version is part of the cache key.  It prevents a cache made from the
+# intended full-recording preprocessing from being reused after matching the
+# official NeuralSet chunking semantics.
+PREPROCESSING_CACHE_VERSION = "neuralset-mneraw-chunk-v1"
+
 # These exclusions are part of the official Shirazi2024Hbn study reader.  They
 # are not an optional quality filter: omitting them changes the benchmark set.
 BAD_HBN_SUBJECTS = frozenset(
@@ -544,6 +549,16 @@ def preprocess_hbn_recording(
         ) from exc
 
     raw = _read_hbn_raw(recording)
+
+    # NeuralSet's Eeg event has a 60-second timeline start but a zero file
+    # offset.  Its MneRaw reader consequently loads the first 120 seconds;
+    # the extractor then filters, resamples, and scales that chunk.
+    source_frequency_hz = float(raw.info["sfreq"])
+    crop_duration_s = AGE_TASK.max_crop_duration_s
+    raw.crop(
+        tmin=0.0,
+        tmax=crop_duration_s - 1.0 / source_frequency_hz,
+    )
     eeg_picks = mne.pick_types(raw.info, eeg=True, exclude=[])
     if len(eeg_picks) == 0:
         raise IndependentPipelineError(f"no EEG channels found in {recording.path}")
@@ -574,7 +589,7 @@ class PreprocessedRecordingStore:
         if self.cache_dir is None:
             raise RuntimeError("cache paths requested without cache_dir")
         fingerprint = hashlib.sha256(
-            f"{recording.path.resolve()}|{REVE_MODEL}".encode()
+            f"{PREPROCESSING_CACHE_VERSION}|{recording.path.resolve()}|{REVE_MODEL}".encode()
         ).hexdigest()[:24]
         return (
             self.cache_dir / f"{fingerprint}.npy",
@@ -602,7 +617,15 @@ class PreprocessedRecordingStore:
         temporary_data = data_path.with_suffix(".tmp.npy")
         np.save(temporary_data, prepared.data)
         temporary_data.replace(data_path)
-        metadata_path.write_text(json.dumps({"channel_names": prepared.channel_names}))
+        metadata_path.write_text(
+            json.dumps(
+                {
+                    "cache_version": PREPROCESSING_CACHE_VERSION,
+                    "channel_names": prepared.channel_names,
+                    "recording_duration_s": float(recording.duration_s),
+                }
+            )
+        )
         return prepared
 
 
@@ -651,6 +674,13 @@ def _cached_duration_seconds(
     data_path, metadata_path = store._cache_paths(recording)
     if not data_path.is_file() or not metadata_path.is_file():
         return None
+    try:
+        metadata = json.loads(metadata_path.read_text())
+        duration = float(metadata["recording_duration_s"])
+    except (OSError, TypeError, ValueError, KeyError):
+        duration = None
+    if duration is not None and np.isfinite(duration) and duration > 0:
+        return duration
     try:
         data = np.load(data_path, mmap_mode="r")
     except (OSError, ValueError):
@@ -1460,7 +1490,7 @@ def run_independent_reve(
     if subjects_file is not None:
         report["manifest_path"] = str(subjects_file)
         report["manifest_sha256"] = manifest_sha256(subjects_file)
-        report["manifest_rows"] = len(selected_manifest or [])
+        report["manifest_rows"] = len(selected_manifest or recordings)
     if official_predictions_path is not None:
         comparison = compare_prediction_rows(
             prediction_rows,
