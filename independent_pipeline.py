@@ -36,6 +36,7 @@ from .reve_baseline import (
     pearsonr,
 )
 from .medium_subset import (
+    MANIFEST_FIELDS,
     filter_recordings_by_manifest,
     manifest_sha256,
     read_manifest,
@@ -136,16 +137,23 @@ def align_prepared_recording(
 ) -> PreparedRecording:
     """Align one recording to a global channel order with zero-padding."""
 
-    data = np.asarray(prepared.data, dtype=np.float32)
+    source_data = np.asarray(prepared.data)
     order = tuple(channel_order)
-    if data.ndim != 2:
+    if source_data.ndim != 2:
         raise ValueError("prepared recording data must have shape (channels, time)")
-    if len(prepared.channel_names) != data.shape[0]:
+    if len(prepared.channel_names) != source_data.shape[0]:
         raise ValueError("channel_names must match the data channel dimension")
     if len(set(prepared.channel_names)) != len(prepared.channel_names):
         raise ValueError("each prepared recording must have unique channel names")
     if len(set(order)) != len(order) or not order:
         raise ValueError("channel_order must contain unique channel names")
+
+    # HBN recordings normally already share the global order.  Reusing that
+    # float32 array avoids copying the complete recording during preload.
+    if tuple(prepared.channel_names) == order and source_data.dtype == np.float32:
+        return PreparedRecording(source_data, order)
+
+    data = np.asarray(source_data, dtype=np.float32)
 
     target_indices = {name: index for index, name in enumerate(order)}
     unknown = set(prepared.channel_names).difference(target_indices)
@@ -173,8 +181,8 @@ class IndependentTrainConfig:
     seed: int = 0
     data_seed: int = 33
     device: str = "auto"
-    num_workers: int = 10
-    prefetch_factor: int | None = 2
+    num_workers: int = 2
+    prefetch_factor: int | None = None
     persistent_workers: bool = True
     preload_recordings: bool = True
     freeze_backbone: bool = False
@@ -598,6 +606,172 @@ class PreprocessedRecordingStore:
         return prepared
 
 
+def _manifest_fieldnames(path: Path) -> tuple[str, ...]:
+    """Read only the header of a subject-selection CSV."""
+
+    with path.open(newline="", encoding="utf-8") as handle:
+        return tuple(csv.DictReader(handle).fieldnames or ())
+
+
+def _resolve_manifest_recording(
+    relative_path: str, *, data_root: Path
+) -> Path:
+    """Resolve and validate a recording path supplied by a manifest."""
+
+    root = data_root.resolve()
+    path = (root / relative_path).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"manifest recording is outside data root: {relative_path}") from exc
+    if not path.is_file():
+        raise FileNotFoundError(f"manifest recording does not exist: {path}")
+    if path.suffix != ".set":
+        raise ValueError(f"manifest recording is not an EEGLAB .set file: {path}")
+    return path
+
+
+def _task_from_set_path(path: Path) -> str:
+    """Extract the BIDS task label from an EEGLAB filename."""
+
+    for part in path.stem.split("_"):
+        if part.startswith("task-"):
+            return part
+    raise ValueError(f"cannot find a task label in recording filename: {path.name}")
+
+
+def _cached_duration_seconds(
+    recording: HbnRecording, cache_dir: Path | None
+) -> float | None:
+    """Infer duration from a preprocessed cache without opening the raw file."""
+
+    if cache_dir is None:
+        return None
+    store = PreprocessedRecordingStore(cache_dir)
+    data_path, metadata_path = store._cache_paths(recording)
+    if not data_path.is_file() or not metadata_path.is_file():
+        return None
+    try:
+        data = np.load(data_path, mmap_mode="r")
+    except (OSError, ValueError):
+        return None
+    if data.ndim != 2:
+        return None
+    return float(data.shape[1] / REVE_MODEL.frequency_hz)
+
+
+def _raw_duration_seconds(path: Path) -> float:
+    """Read raw duration only when a preprocessed cache is unavailable."""
+
+    try:
+        import mne
+    except Exception as exc:  # pragma: no cover - optional dependency path
+        raise IndependentPipelineError(
+            "MNE is required to inspect HBN recordings; install the pipeline extra"
+        ) from exc
+    raw = mne.io.read_raw_eeglab(path, preload=False, verbose="ERROR")
+    return float(raw.n_times / raw.info["sfreq"])
+
+
+def load_recordings_from_subject_manifest(
+    subjects_file: Path,
+    *,
+    data_root: Path,
+    cache_dir: Path | None = None,
+) -> list[HbnRecording]:
+    """Build recordings from either supported subject-manifest format.
+
+    The canonical Age manifest stores ``recording_relpath`` and duration.  The
+    download-selection manifest used for the 500-subject run stores release,
+    subject, age, and ``set_file`` instead.  The latter is intentionally
+    resolved directly so a selected run does not scan every HBN recording.
+    """
+
+    fields = _manifest_fieldnames(subjects_file)
+    if fields == MANIFEST_FIELDS:
+        canonical_rows = read_manifest(subjects_file)
+        specifications = [
+            (
+                row.release,
+                row.subject,
+                float(row.age),
+                row.recording_relpath,
+                float(row.duration_s),
+            )
+            for row in canonical_rows
+        ]
+    else:
+        required = {"release", "subject", "age", "set_file"}
+        if not required.issubset(fields):
+            raise ValueError(
+                "unsupported subject manifest fields; expected either "
+                f"{MANIFEST_FIELDS} or fields containing {sorted(required)}"
+            )
+        with subjects_file.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        specifications = []
+        for row in rows:
+            release = row["release"]
+            subject = row["subject"]
+            set_file = Path(row["set_file"])
+            if set_file.parts and set_file.parts[0] == subject:
+                relative_path = Path(release) / "download" / set_file
+            else:
+                relative_path = (
+                    Path(release) / "download" / subject / "eeg" / set_file
+                )
+            specifications.append(
+                (
+                    release,
+                    subject,
+                    float(row["age"]),
+                    relative_path.as_posix(),
+                    None,
+                )
+            )
+
+    recordings: list[HbnRecording] = []
+    seen_paths: set[Path] = set()
+    for release, subject, age, relative_path, duration in specifications:
+        if release not in HBN_RELEASES:
+            raise ValueError(f"unsupported HBN release in subject manifest: {release}")
+        path = _resolve_manifest_recording(relative_path, data_root=data_root)
+        if path in seen_paths:
+            raise ValueError(f"subject manifest contains duplicate recording: {path}")
+        seen_paths.add(path)
+        if not np.isfinite(age):
+            raise ValueError(f"subject manifest age is not finite for {subject}")
+
+        task = _task_from_set_path(path)
+        recording = HbnRecording(
+            path=path,
+            release=release,
+            subject=subject,
+            task=task,
+            age=age,
+            duration_s=0.0,
+        )
+        if duration is None:
+            duration = _cached_duration_seconds(recording, cache_dir)
+        if duration is None:
+            duration = _raw_duration_seconds(path)
+        if not np.isfinite(duration) or duration <= 0:
+            raise ValueError(f"recording duration is invalid for {path}: {duration}")
+        recordings.append(
+            HbnRecording(
+                path=path,
+                release=release,
+                subject=subject,
+                task=task,
+                age=age,
+                duration_s=float(duration),
+            )
+        )
+    if not recordings:
+        raise ValueError(f"subject manifest contains no recordings: {subjects_file}")
+    return recordings
+
+
 def discover_hbn_recordings(data_root: Path) -> list[HbnRecording]:
     """Discover HBN EEGLAB recordings and participant ages from local files."""
 
@@ -661,6 +835,19 @@ def _require_torch() -> tuple[Any, Any]:
             "PyTorch is required for REVE training; install the pipeline extra"
         ) from exc
     return torch, nn
+
+
+def _seed_data_loader_worker(worker_id: int) -> None:
+    """Match NeuralBench's NumPy/Python worker seeding contract."""
+
+    del worker_id
+    torch, _ = _require_torch()
+    worker_info = torch.utils.data.get_worker_info()
+    if worker_info is None:
+        return
+    seed = int(worker_info.seed)
+    np.random.seed(seed % (2**32))
+    random.seed(seed)
 
 
 try:  # Keep manifest-only imports usable without PyTorch installed.
@@ -805,6 +992,7 @@ def build_data_loaders(
         }
         if config.num_workers > 0:
             loader_kwargs["persistent_workers"] = config.persistent_workers
+            loader_kwargs["worker_init_fn"] = _seed_data_loader_worker
             if config.prefetch_factor is not None:
                 loader_kwargs["prefetch_factor"] = config.prefetch_factor
         loaders[split] = torch.utils.data.DataLoader(
@@ -937,8 +1125,12 @@ def fit_independent_model(
     sample_values, _ = next(iter(train_loader))
     _synchronize_device(device)
     first_batch_s = time.perf_counter() - first_batch_started
+    # Match NeuralBench's lazy-layer initialization: the dummy forward must
+    # not apply dropout or update running statistics in train-mode layers.
+    model.eval()
     with torch.no_grad():
         model(sample_values[:1].to(device, non_blocking=True))
+    model.train()
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
@@ -1156,8 +1348,17 @@ def run_independent_reve(
 
     total_started = time.perf_counter()
     _set_seed(train_config.seed)
-    recordings = discover_hbn_recordings(data_root)
-    selected_manifest = read_manifest(subjects_file) if subjects_file is not None else None
+    selected_manifest = None
+    if subjects_file is None:
+        recordings = discover_hbn_recordings(data_root)
+    else:
+        if _manifest_fieldnames(subjects_file) == MANIFEST_FIELDS:
+            selected_manifest = read_manifest(subjects_file)
+        recordings = load_recordings_from_subject_manifest(
+            subjects_file,
+            data_root=data_root,
+            cache_dir=cache_dir,
+        )
     if selected_manifest is not None:
         recordings = filter_recordings_by_manifest(
             recordings, selected_manifest, data_root=data_root
@@ -1283,8 +1484,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--subjects-file", type=Path)
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--num-workers", type=int, default=10)
-    parser.add_argument("--prefetch-factor", type=int, default=2)
+    parser.add_argument("--num-workers", type=int, default=2)
+    parser.add_argument("--prefetch-factor", type=int, default=None)
     parser.add_argument(
         "--no-preload",
         dest="preload_recordings",
