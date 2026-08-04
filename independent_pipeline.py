@@ -191,6 +191,7 @@ class IndependentTrainConfig:
     persistent_workers: bool = True
     preload_recordings: bool = True
     freeze_backbone: bool = False
+    validate_before_training: bool = True
 
     def __post_init__(self) -> None:
         if self.num_workers < 0:
@@ -438,7 +439,14 @@ def build_age_window_manifest(
 ) -> list[AgeWindow]:
     """Create the official 60-window-per-recording Age manifest."""
 
-    eligible = filter_age_recordings(recordings, config)
+    eligible = sorted(
+        filter_age_recordings(recordings, config),
+        key=lambda recording: (
+            int(recording.release[1:]),
+            recording.subject,
+            str(recording.path),
+        ),
+    )
     if not eligible:
         raise ValueError("the Age query returned no eligible recordings")
 
@@ -875,8 +883,8 @@ def _seed_data_loader_worker(worker_id: int) -> None:
     worker_info = torch.utils.data.get_worker_info()
     if worker_info is None:
         return
-    seed = int(worker_info.seed)
-    np.random.seed(seed % (2**32))
+    seed = int(worker_info.seed) % (2**32)
+    np.random.seed(seed)
     random.seed(seed)
 
 
@@ -1104,6 +1112,12 @@ def _set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def _reset_training_rng(seed: int) -> None:
+    """Reset RNGs at NeuralBench's model-to-training boundary."""
+
+    _set_seed(seed)
+
+
 def _score_or_nan(targets: np.ndarray, predictions: np.ndarray) -> float:
     try:
         return pearsonr(targets, predictions)
@@ -1135,12 +1149,25 @@ def _evaluate(model: Any, loader: Any, device: str) -> tuple[float, float, np.nd
     return metrics["pearsonr"], metrics["mse"], y_true, y_pred
 
 
+def _materialize_model(model: Any, sample_values: Any, device: str) -> None:
+    """Initialize lazy layers with the same eval-mode dummy forward as NeuralBench."""
+
+    torch, _ = _require_torch()
+    model.eval()
+    with torch.no_grad():
+        model(sample_values[:1].to(device, non_blocking=True))
+    model.train()
+
+
 def fit_independent_model(
     model: Any,
     train_loader: Any,
     validation_loader: Any,
     test_loader: Any,
     config: IndependentTrainConfig = IndependentTrainConfig(),
+    *,
+    model_initialized: bool = False,
+    initialization_time_s: float = 0.0,
 ) -> TrainingResult:
     """Train with the official AdamW/OneCycle/early-stopping defaults."""
 
@@ -1150,17 +1177,18 @@ def fit_independent_model(
     device = _select_device(config.device)
     model.to(device)
 
-    # Initialize LazyLinear before constructing AdamW.
-    first_batch_started = time.perf_counter()
-    sample_values, _ = next(iter(train_loader))
-    _synchronize_device(device)
-    first_batch_s = time.perf_counter() - first_batch_started
-    # Match NeuralBench's lazy-layer initialization: the dummy forward must
-    # not apply dropout or update running statistics in train-mode layers.
-    model.eval()
-    with torch.no_grad():
-        model(sample_values[:1].to(device, non_blocking=True))
-    model.train()
+    if model_initialized:
+        # The official model factory materializes the probe before its final
+        # seed reset.  The caller has already done that work in this mode.
+        first_batch_s = initialization_time_s
+    else:
+        # Keep the standalone trainer useful for tests and small experiments.
+        # This path initializes lazy layers immediately before the optimizer.
+        first_batch_started = time.perf_counter()
+        sample_values, _ = next(iter(train_loader))
+        _synchronize_device(device)
+        first_batch_s = time.perf_counter() - first_batch_started
+        _materialize_model(model, sample_values, device)
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
@@ -1174,6 +1202,11 @@ def fit_independent_model(
         anneal_strategy="cos",
     )
     loss_fn = torch.nn.MSELoss()
+
+    if config.validate_before_training:
+        _synchronize_device(device)
+        _evaluate(model, validation_loader, device)
+
     best_score = -float("inf")
     best_epoch = 0
     best_state: dict[str, Any] | None = None
@@ -1423,15 +1456,6 @@ def run_independent_reve(
     )
     preload_s = time.perf_counter() - preload_started
 
-    backbone = load_reve_backbone(
-        channel_order,
-        mapping_path=mapping_path,
-        n_times=AGE_TASK.window_sample_count,
-    )
-    model = IndependentReveRegressor(
-        backbone, freeze_backbone=train_config.freeze_backbone
-    )
-
     torch, _ = _require_torch()
     train_state, _, val_state, test_state = np.random.SeedSequence(
         train_config.data_seed
@@ -1456,12 +1480,36 @@ def run_independent_reve(
             },
         )
     loaders = build_data_loaders(datasets, loader_generators, train_config)
+
+    # NeuralBench consumes one train batch while building the model.  The
+    # probe is materialized on CPU, then the final seed reset happens after
+    # every model-construction forward has completed.
+    first_batch_started = time.perf_counter()
+    sample_values, _ = next(iter(loaders["train"]))
+    first_batch_s = time.perf_counter() - first_batch_started
+    backbone = load_reve_backbone(
+        channel_order,
+        mapping_path=mapping_path,
+        n_times=AGE_TASK.window_sample_count,
+    )
+    model = IndependentReveRegressor(
+        backbone, freeze_backbone=train_config.freeze_backbone
+    )
+    _materialize_model(model, sample_values, "cpu")
+
+    # NeuralBench reseeds after constructing the model and before validation or
+    # training.  Keeping this boundary means the training RNG stream is not
+    # shifted by lazy-head initialization or model-construction forwards.
+    _reset_training_rng(train_config.seed)
+
     result = fit_independent_model(
         model,
         loaders["train"],
         loaders["val"],
         loaders["test"],
         train_config,
+        model_initialized=True,
+        initialization_time_s=first_batch_s,
     )
     test_windows = [window for window in manifest if window.split == "test"]
     prediction_rows = build_prediction_rows(test_windows, result.predictions)
