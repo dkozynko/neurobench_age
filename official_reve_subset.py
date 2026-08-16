@@ -16,8 +16,11 @@ import hashlib
 import json
 import logging
 import os
+import shlex
+import sys
+import traceback
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 LOGGER = logging.getLogger(__name__)
 
@@ -117,9 +120,15 @@ def manifest_sha256(path: Path) -> str:
 class EpochTestPearson(LightningCallback):
     """Lightning callback that reports test Pearson after each train epoch."""
 
-    def __init__(self, test_loader: Any, output_path: Path | None = None):
+    def __init__(
+        self,
+        test_loader: Any,
+        output_path: Path | None = None,
+        seed: int | None = None,
+    ):
         self.test_loader = test_loader
         self.output_path = output_path
+        self.seed = seed
         self.training_started = False
 
     def on_train_start(self, trainer: Any, pl_module: Any) -> None:
@@ -134,7 +143,12 @@ class EpochTestPearson(LightningCallback):
 
         was_training = pl_module.training
         pl_module.eval()
-        metric = PearsonCorrCoef().to(pl_module.device)
+        # Keep the diagnostic metric on CPU. Lightning's strategy may expose
+        # ``pl_module.device`` before the callback's first batch transfer is
+        # finalized; updating CPU metric state with CUDA predictions then
+        # raises a device-mismatch error. The test set is small enough that
+        # this diagnostic-only CPU transfer is negligible.
+        metric = PearsonCorrCoef()
         with torch.inference_mode():
             for batch_index, batch in enumerate(self.test_loader):
                 batch = trainer.strategy.batch_to_device(
@@ -148,10 +162,11 @@ class EpochTestPearson(LightningCallback):
                     y_true = pl_module.target_scaler.transform(y_true)
                 if y_true.ndim == 3 and y_true.shape[1] == 1:
                     y_true = y_true.squeeze(1)
-                metric.update(y_pred, y_true)
+                metric.update(y_pred.detach().cpu(), y_true.detach().cpu())
 
         score = float(metric.compute().detach().cpu())
         record = {
+            "seed": self.seed,
             "epoch": int(trainer.current_epoch + 1),
             "test_pearsonr": score,
         }
@@ -170,12 +185,59 @@ class EpochTestPearson(LightningCallback):
             pl_module.train()
 
 
+def _set_frozen_experiment_field(experiment: Any, name: str, value: Any) -> None:
+    """Set a declared NeuralBench field after ``exca`` freezes the model.
+
+    ``exca`` installs a guarded ``__setattr__`` on the Pydantic Experiment
+    before calling ``Experiment.run``. The official lifecycle still allows
+    these fields to be customized during ``setup_run``; bypass only that
+    guard while preserving the normal declared-field storage.
+    """
+
+    object.__setattr__(experiment, name, value)
+
+
 def _patch_official_components(
     manifest_path: Path,
     data_root: Path,
     epoch_metrics_path: Path,
-) -> tuple[Any, Any, Any, Any]:
-    """Patch only discovery and callback attachment; return originals."""
+    *,
+    head_variant: str = "mean_linear",
+    head_dropout: float = 0.0,
+    seeds: Sequence[int] = (33,),
+    run_metadata: Mapping[str, Any] | None = None,
+    final_results: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Install the fixed-manifest and optional upstream-head patches.
+
+    The patch is deliberately scoped to one ``run_benchmark`` call.  The
+    official package remains untouched after :func:`_restore_official_components`
+    runs, which is important when several variants are evaluated in one Python
+    process.
+    """
+
+    try:
+        from reve_upstream_heads import (
+            PROTOCOL_CONTRACT,
+            make_upstream_reve_wrapper,
+            validate_head_variant,
+            validate_official_protocol,
+        )
+    except ImportError:  # Package-style invocation: ``python -m ...``.
+        from .reve_upstream_heads import (
+            PROTOCOL_CONTRACT,
+            make_upstream_reve_wrapper,
+            validate_head_variant,
+            validate_official_protocol,
+        )
+
+    validate_head_variant(head_variant)
+    if head_dropout != 0.0:
+        raise ValueError(
+            "the upstream REVE comparison fixes head dropout at 0.0; "
+            f"got {head_dropout}"
+        )
+    resolved_seeds = validate_seeds(seeds)
 
     from neuralbench.data import Data
     from neuralbench.main import Experiment
@@ -186,8 +248,10 @@ def _patch_official_components(
     original_iter_timelines = shirazi2024hbn.Shirazi2024Hbn.iter_timelines
     original_info = shirazi2024hbn.Shirazi2024Hbn._info
     original_prepare = Data.prepare
+    original_test = Experiment._test
+    original_setup_run = Experiment.setup_run
+    original_prepare_pl_module = Experiment.prepare_pl_module
     original_setup_trainer = Experiment.setup_trainer
-    original_load_yaml_config = None
 
     def iter_manifest_timelines(_study: Any) -> Iterable[dict[str, Any]]:
         return iter(timelines)
@@ -207,6 +271,18 @@ def _patch_official_components(
 
     Data.prepare = prepare_and_capture
 
+    def test_and_capture(
+        self: Any,
+        loaders: dict[str, Any],
+        best_model_path: str | None,
+    ) -> dict[str, Any]:
+        result = original_test(self, loaders, best_model_path)
+        if final_results is not None:
+            final_results.append(dict(result))
+        return result
+
+    Experiment._test = test_and_capture
+
     def setup_with_epoch_test(self: Any, is_test: bool = False) -> Any:
         trainer = original_setup_trainer(self, is_test=is_test)
         if not is_test:
@@ -214,45 +290,300 @@ def _patch_official_components(
             if loaders is None or "test" not in loaders:
                 raise RuntimeError("official test loader was not captured")
             trainer.callbacks.append(
-                EpochTestPearson(loaders["test"], epoch_metrics_path)
+                EpochTestPearson(
+                    loaders["test"],
+                    epoch_metrics_path,
+                    seed=getattr(self, "seed", None),
+                )
             )
         return trainer
 
     Experiment.setup_trainer = setup_with_epoch_test
 
-    # A full NeuralBench run expands the default seed grid (33, 34, 35).
-    # The parity run is intentionally one seed, matching the independent run.
+    def setup_with_metadata(self: Any) -> Any:
+        # The standard REVE YAML wrapper is mean-pooling plus a linear probe.
+        # For upstream variants, replace only that downstream config; the
+        # already-built official NtReve encoder still comes from NeuralBench.
+        if head_variant != "mean_linear":
+            _set_frozen_experiment_field(
+                self,
+                "downstream_model_wrapper",
+                make_upstream_reve_wrapper(
+                    variant=head_variant,
+                    dropout=head_dropout,
+                ),
+            )
+        _set_frozen_experiment_field(self, "save_test_predictions", True)
+        # Keep the selected checkpoint and raw prediction cache available for
+        # post-run hashing/export. This does not affect training or selection.
+        _set_frozen_experiment_field(self, "delete_checkpoints_on_exit", False)
+        result = original_setup_run(self)
+        uid_folder = self.infra.uid_folder()
+        if uid_folder is not None:
+            payload = dict(run_metadata or {})
+            payload.update(
+                {
+                    "head_variant": head_variant,
+                    "head_dropout": float(head_dropout),
+                    "seed": int(self.seed),
+                    "data_seed": _get_attr_or_key(self.data, "seed"),
+                    "protocol": PROTOCOL_CONTRACT,
+                }
+            )
+            (uid_folder / "run_metadata.json").write_text(
+                json.dumps(payload, indent=2, default=str) + "\n",
+                encoding="utf-8",
+            )
+        return result
+
+    Experiment.setup_run = setup_with_metadata
+
+    def prepare_with_protocol(
+        self: Any,
+        train_loader: Any,
+        val_loader: Any = None,
+    ) -> Any:
+        result = original_prepare_pl_module(self, train_loader, val_loader)
+        loaders = captured_loaders.get(id(self.data))
+        validate_official_protocol(
+            self,
+            loaders=loaders,
+            n_total_params=self._n_total_params,
+            n_trainable_params=self._n_trainable_params,
+        )
+        return result
+
+    Experiment.prepare_pl_module = prepare_with_protocol
+
+    # NeuralBench's CLI and experiment_config modules each keep a local alias
+    # to the YAML loader. Patch both so a task-specific grid cannot silently
+    # reintroduce the default (33, 34, 35) seed expansion.
     import neuralbench.cli as cli
+    import neuralbench.experiment_config as experiment_config
 
-    original_load_yaml_config = cli.load_yaml_config
+    original_cli_load_yaml_config = cli.load_yaml_config
+    original_experiment_load_yaml_config = experiment_config.load_yaml_config
 
-    def load_single_seed_grid(path: Path, safe: bool = False) -> Any:
-        if path.name == "grid.yaml":
-            return {"seed": [33]}
-        return original_load_yaml_config(path, safe=safe)
+    def load_seed_grid(path: Path, *args: Any, **kwargs: Any) -> Any:
+        if Path(path).name == "grid.yaml":
+            return {"seed": list(resolved_seeds)}
+        return original_cli_load_yaml_config(path, *args, **kwargs)
 
-    cli.load_yaml_config = load_single_seed_grid
-    return (
-        original_iter_timelines,
-        original_info,
-        original_prepare,
-        original_setup_trainer,
-        (cli, original_load_yaml_config),
-    )
+    def load_seed_grid_for_experiment_config(
+        path: Path, *args: Any, **kwargs: Any
+    ) -> Any:
+        if Path(path).name == "grid.yaml":
+            return {"seed": list(resolved_seeds)}
+        return original_experiment_load_yaml_config(path, *args, **kwargs)
+
+    cli.load_yaml_config = load_seed_grid
+    experiment_config.load_yaml_config = load_seed_grid_for_experiment_config
+    return {
+        "iter_timelines": original_iter_timelines,
+        "info": original_info,
+        "prepare": original_prepare,
+        "test": original_test,
+        "setup_run": original_setup_run,
+        "prepare_pl_module": original_prepare_pl_module,
+        "setup_trainer": original_setup_trainer,
+        "cli_loader": (cli, original_cli_load_yaml_config),
+        "experiment_loader": (
+            experiment_config,
+            original_experiment_load_yaml_config,
+        ),
+    }
 
 
-def _restore_official_components(originals: tuple[Any, Any, Any, Any]) -> None:
+def _restore_official_components(originals: Mapping[str, Any]) -> None:
     from neuralbench.data import Data
     from neuralbench.main import Experiment
     from neuralfetch.studies import shirazi2024hbn
 
-    original_iter, original_info, original_prepare, original_setup, cli_state = originals
-    cli, original_load_yaml_config = cli_state
-    shirazi2024hbn.Shirazi2024Hbn.iter_timelines = original_iter
-    shirazi2024hbn.Shirazi2024Hbn._info = original_info
-    Data.prepare = original_prepare
-    Experiment.setup_trainer = original_setup
-    cli.load_yaml_config = original_load_yaml_config
+    cli, original_cli_loader = originals["cli_loader"]
+    experiment_config, original_experiment_loader = originals["experiment_loader"]
+    shirazi2024hbn.Shirazi2024Hbn.iter_timelines = originals["iter_timelines"]
+    shirazi2024hbn.Shirazi2024Hbn._info = originals["info"]
+    Data.prepare = originals["prepare"]
+    Experiment.setup_run = originals["setup_run"]
+    Experiment._test = originals["test"]
+    Experiment.prepare_pl_module = originals["prepare_pl_module"]
+    Experiment.setup_trainer = originals["setup_trainer"]
+    cli.load_yaml_config = original_cli_loader
+    experiment_config.load_yaml_config = original_experiment_loader
+
+
+def validate_seeds(seeds: Sequence[int]) -> tuple[int, ...]:
+    """Validate model seeds while preserving their explicit order."""
+
+    resolved = tuple(int(seed) for seed in seeds)
+    if not resolved:
+        raise ValueError("at least one seed is required")
+    if len(set(resolved)) != len(resolved):
+        raise ValueError(f"seeds must be unique, got {resolved}")
+    return resolved
+
+
+def _get_attr_or_key(value: Any, key: str, default: Any = None) -> Any:
+    if isinstance(value, Mapping):
+        return value.get(key, default)
+    return getattr(value, key, default)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def collect_run_artifacts(output_dir: Path) -> list[dict[str, Any]]:
+    """Describe resolved configs, checkpoints, and raw test predictions."""
+
+    records: list[dict[str, Any]] = []
+    for config_path in sorted(output_dir.rglob("config.yaml")):
+        run_dir = config_path.parent
+        checkpoints = sorted(run_dir.glob("*.ckpt"))
+        checkpoint = next(
+            (path for path in checkpoints if path.name == "best.ckpt"),
+            checkpoints[0] if checkpoints else None,
+        )
+        prediction_dir = run_dir / "test_predictions"
+        prediction_files = []
+        if prediction_dir.is_dir():
+            for path in sorted(prediction_dir.rglob("*")):
+                if path.is_file():
+                    prediction_files.append(
+                        {
+                            "path": str(path),
+                            "size_bytes": path.stat().st_size,
+                            "sha256": _sha256_file(path),
+                        }
+                    )
+        records.append(
+            {
+                "run_dir": str(run_dir),
+                "resolved_config": {
+                    "path": str(config_path),
+                    "sha256": _sha256_file(config_path),
+                },
+                "selected_checkpoint": (
+                    {
+                        "path": str(checkpoint),
+                        "sha256": _sha256_file(checkpoint),
+                    }
+                    if checkpoint is not None
+                    else None
+                ),
+                "raw_test_predictions": prediction_files,
+                "run_metadata": str(run_dir / "run_metadata.json")
+                if (run_dir / "run_metadata.json").is_file()
+                else None,
+            }
+        )
+    return records
+
+
+def write_failure_diagnostics(
+    output_dir: Path,
+    error: BaseException,
+    *,
+    launch_command: str,
+    metadata: Mapping[str, Any],
+) -> Path:
+    """Persist a structured failure record without masking the original error."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "failure.json"
+    payload = {
+        "error_type": type(error).__name__,
+        "error": str(error),
+        "traceback": traceback.format_exc(),
+        "launch_command": launch_command,
+        "metadata": dict(metadata),
+    }
+    path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
+    return path
+
+
+def run_official_stack_smoke(
+    *,
+    head_variant: str,
+    device: str = "cpu",
+) -> dict[str, Any]:
+    """Exercise the real REVE/NeuralTrain interfaces without HBN data.
+
+    This intentionally constructs a small, randomly initialized braindecode
+    REVE model. It verifies the output contract used by the production
+    wrapper, including the initial positional sequence and every transformer
+    layer required by ``all``. Pretrained weights and HBN recordings are not
+    touched.
+    """
+
+    try:
+        from reve_upstream_heads import UpstreamReveHeadModel, validate_upstream_head_variant
+    except ImportError:
+        from .reve_upstream_heads import (
+            UpstreamReveHeadModel,
+            validate_upstream_head_variant,
+        )
+
+    validate_upstream_head_variant(head_variant)
+    import torch
+    from braindecode.models import REVE
+    from neuraltrain.models.reve import _ReveWrapper
+
+    embed_dim = 32
+    depth = 2
+    n_chans = 3
+    n_times = 400
+    model = REVE(
+        n_outputs=1,
+        n_chans=n_chans,
+        n_times=n_times,
+        sfreq=200.0,
+        embed_dim=embed_dim,
+        depth=depth,
+        heads=2,
+        head_dim=16,
+        mlp_dim_ratio=1.0,
+        attention_pooling=True,
+    )
+    encoder = _ReveWrapper(model, encoder_only=True).to(device)
+    adapter = UpstreamReveHeadModel(
+        encoder,
+        variant=head_variant,
+        n_outputs=1,
+        dropout=0.0,
+    ).to(device)
+    eeg = torch.randn(2, n_chans, n_times, device=device)
+    positions = torch.randn(2, n_chans, 3, device=device)
+
+    with torch.inference_mode():
+        raw_layers = model(eeg, pos=positions, return_output=True)
+        final = encoder(eeg, pos=positions)
+        prediction = adapter(eeg, channel_positions=positions)
+
+    if not isinstance(raw_layers, (list, tuple)):
+        raise RuntimeError("official REVE return_output=True did not return layers")
+    if len(raw_layers) != depth + 1:
+        raise RuntimeError(
+            "official REVE layer contract changed: expected positional input "
+            f"plus {depth} layers, got {len(raw_layers)}"
+        )
+    if tuple(prediction.shape) != (2, 1):
+        raise RuntimeError(f"unexpected adapter output shape: {tuple(prediction.shape)}")
+
+    return {
+        "head_variant": head_variant,
+        "device": device,
+        "token_shapes": [list(layer.shape) for layer in raw_layers],
+        "final_shape": list(final.shape),
+        "prediction_shape": list(prediction.shape),
+        "embed_dim": embed_dim,
+        "layer_count_including_initial": len(raw_layers),
+        "query_initialization": adapter.head.query_initialization,
+    }
 
 
 def run_official_subset(
@@ -261,14 +592,24 @@ def run_official_subset(
     data_root: Path,
     epoch_metrics_path: Path,
     config_path: Path,
+    head_variant: str = "mean_linear",
+    head_dropout: float = 0.0,
+    seeds: Sequence[int] = (33,),
+    run_metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Run official REVE once on the manifest and collect cached results."""
+    """Run official REVE on the manifest and collect cached results."""
 
     os.environ["NEURALBENCH_CONFIG"] = str(config_path)
+    final_results: list[dict[str, Any]] = []
     originals = _patch_official_components(
         manifest_path,
         data_root,
         epoch_metrics_path,
+        head_variant=head_variant,
+        head_dropout=head_dropout,
+        seeds=seeds,
+        run_metadata=run_metadata,
+        final_results=final_results,
     )
     try:
         from neuralbench import run_benchmark
@@ -279,26 +620,11 @@ def run_official_subset(
             model="reve",
             force=True,
         )
-        # The public runner launches/finishes the experiment but intentionally
-        # returns no result for local non-debug execution.  A cached-only
-        # collection uses the same official config and performs no training.
-        # ``--plot-cached`` normally builds a multi-model comparison.  A
-        # single exact-manifest baseline has no rank-comparison peers, so
-        # disable only that optional plotting side effect while collecting the
-        # official cached result.
-        import neuralbench.aggregator as aggregator
-
-        original_plot_all_results = aggregator.plot_all_results
-        aggregator.plot_all_results = lambda *args, **kwargs: None
-        try:
-            return run_benchmark(
-                device="eeg",
-                task="age",
-                model="reve",
-                plot_cached=True,
-            )
-        finally:
-            aggregator.plot_all_results = original_plot_all_results
+        # The public runner returns no result for a non-debug local run. The
+        # official Experiment._test result is captured above instead. Avoid a
+        # second ``plot_cached`` call: it reconstructs the canonical mean head
+        # and collides with this run's custom upstream head UID.
+        return final_results
     finally:
         _restore_official_components(originals)
 
@@ -323,35 +649,164 @@ def _write_config(path: Path, *, data_root: Path, output_dir: Path) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--data-root", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--data-root", type=Path)
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--config", type=Path)
+    parser.add_argument(
+        "--smoke-head",
+        choices=("last_avg", "last", "all"),
+        help="run a data-free smoke test using the installed official stack",
+    )
+    parser.add_argument(
+        "--head-variant",
+        choices=("mean_linear", "last_avg", "last", "all"),
+        default="mean_linear",
+    )
+    parser.add_argument("--seeds", type=int, nargs="+", default=[33])
     args = parser.parse_args(argv)
 
-    digest = manifest_sha256(args.manifest)
-    _write_config(args.config, data_root=args.data_root, output_dir=args.output_dir)
-    epoch_metrics_path = args.output_dir / "epoch_test_metrics.jsonl"
-    results = run_official_subset(
-        manifest_path=args.manifest,
-        data_root=args.data_root,
-        epoch_metrics_path=epoch_metrics_path,
-        config_path=args.config,
-    )
-    report = {
-        "manifest": str(args.manifest),
-        "manifest_sha256": digest,
-        "rows": len(load_manifest_timelines(args.manifest, args.data_root)),
-        "official_results": results,
-        "epoch_metrics": str(epoch_metrics_path),
+    if args.smoke_head is not None:
+        print(json.dumps(run_official_stack_smoke(head_variant=args.smoke_head), indent=2))
+        return 0
+    required = {
+        "--manifest": args.manifest,
+        "--data-root": args.data_root,
+        "--output-dir": args.output_dir,
+        "--config": args.config,
     }
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    (args.output_dir / "report.json").write_text(
-        json.dumps(report, indent=2, default=str) + "\n",
-        encoding="utf-8",
-    )
-    print(json.dumps(report, indent=2, default=str))
-    return 0
+    missing = [name for name, value in required.items() if value is None]
+    if missing:
+        parser.error("missing required arguments: " + ", ".join(missing))
+
+    resolved_seeds = validate_seeds(args.seeds)
+    digest = manifest_sha256(args.manifest)
+    launch_command = shlex.join([sys.executable, *sys.argv])
+    rows = len(load_manifest_timelines(args.manifest, args.data_root))
+
+    try:
+        try:
+            from reve_upstream_heads import (
+                PROTOCOL_CONTRACT,
+                runtime_metadata,
+                source_lock_metadata,
+            )
+        except ImportError:
+            from .reve_upstream_heads import (
+                PROTOCOL_CONTRACT,
+                runtime_metadata,
+                source_lock_metadata,
+            )
+
+        if args.head_variant == "mean_linear":
+            query_initialization = "neuralbench_default"
+        elif args.head_variant == "last_avg":
+            query_initialization = "upstream_random_unused"
+        else:
+            query_initialization = "upstream_random"
+
+        metadata = {
+            "head_variant": args.head_variant,
+            "head_source": (
+                "neuralbench_default"
+                if args.head_variant == "mean_linear"
+                else "upstream_reve"
+            ),
+            "head_dropout": 0.0,
+            "head_query_initialization": query_initialization,
+            "head_linear_initialization": (
+                "neuralbench_default"
+                if args.head_variant == "mean_linear"
+                else {
+                    "distribution": "truncated_normal",
+                    "std": 512**-0.5,
+                    "cutoff": 3.0,
+                    "bias": 0.0,
+                }
+            ),
+            "manifest": str(args.manifest),
+            "manifest_sha256": digest,
+            "rows": rows,
+            "device": "eeg",
+            "seeds": list(resolved_seeds),
+            "launch_command": launch_command,
+            "protocol": PROTOCOL_CONTRACT,
+            "runtime": runtime_metadata(),
+        }
+        if args.head_variant != "mean_linear":
+            metadata["head_source_lock"] = source_lock_metadata()
+
+        reports: list[dict[str, Any]] = []
+        for seed in resolved_seeds:
+            run_dir = args.output_dir / args.head_variant / f"seed{seed}"
+            config_path = run_dir / "neuralbench_config.json"
+            epoch_metrics_path = run_dir / "epoch_test_metrics.jsonl"
+            _write_config(
+                config_path,
+                data_root=args.data_root,
+                output_dir=run_dir,
+            )
+            seed_metadata = {**metadata, "seed": seed, "data_seed": 33}
+            try:
+                results = run_official_subset(
+                    manifest_path=args.manifest,
+                    data_root=args.data_root,
+                    epoch_metrics_path=epoch_metrics_path,
+                    config_path=config_path,
+                    head_variant=args.head_variant,
+                    seeds=(seed,),
+                    run_metadata=seed_metadata,
+                )
+                report = {
+                    "status": "completed",
+                    **seed_metadata,
+                    "official_results": results,
+                    "epoch_metrics": str(epoch_metrics_path),
+                    "artifacts": collect_run_artifacts(run_dir),
+                }
+            except Exception as error:
+                failure_path = write_failure_diagnostics(
+                    run_dir,
+                    error,
+                    launch_command=launch_command,
+                    metadata=seed_metadata,
+                )
+                report = {
+                    "status": "failed",
+                    **seed_metadata,
+                    "failure": str(failure_path),
+                    "artifacts": collect_run_artifacts(run_dir),
+                }
+                reports.append(report)
+                (run_dir / "report.json").write_text(
+                    json.dumps(report, indent=2, default=str) + "\n",
+                    encoding="utf-8",
+                )
+                raise
+
+            reports.append(report)
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "report.json").write_text(
+                json.dumps(report, indent=2, default=str) + "\n",
+                encoding="utf-8",
+            )
+
+        summary = {
+            "status": "completed",
+            "head_variant": args.head_variant,
+            "seeds": list(resolved_seeds),
+            "runs": reports,
+        }
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        (args.output_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2, default=str) + "\n",
+            encoding="utf-8",
+        )
+        print(json.dumps(summary, indent=2, default=str))
+        return 0
+    except Exception as error:
+        LOGGER.error("official REVE run failed: %s", error)
+        return 1
 
 
 if __name__ == "__main__":
