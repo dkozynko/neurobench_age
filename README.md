@@ -115,3 +115,50 @@ neuralbench eeg age --download
 neuralbench eeg age --prepare
 neuralbench eeg age -m reve
 ```
+
+## Upstream REVE head experiments
+
+`official_reve_subset.py` runs the official NeuralBench Age stack on the fixed
+manifest and changes only the downstream head. The existing `mean_linear`
+path remains the NeuralBench reference. The new `last_avg`, `last`, and `all`
+paths use the pinned upstream REVE classifier semantics; the backbone, data
+split, optimizer, early stopping, and preprocessing remain shared.
+
+Before an HBN run, exercise the installed official REVE/NeuralTrain interface
+without downloading HBN recordings:
+
+```bash
+python official_reve_subset.py --smoke-head last_avg
+python official_reve_subset.py --smoke-head last
+python official_reve_subset.py --smoke-head all
+```
+
+Run one seed for a head comparison:
+
+```bash
+python official_reve_subset.py \
+  --manifest artifacts/age_medium_500_seed33/manifest/age_medium_500_resting_manifest.csv \
+  --data-root /workspace/hbn_subset \
+  --output-dir artifacts/age_medium_500_seed33/reve_head_experiments \
+  --config artifacts/age_medium_500_seed33/reve_head_experiments/config.json \
+  --head-variant last_avg \
+  --seeds 33
+```
+
+Use the same command with `last` or `all`. Confirmation runs use
+`--seeds 33 34 35`; the report keeps model seed and fixed data seed separate.
+Each run writes `report.json`, `epoch_test_metrics.jsonl`, a resolved
+NeuralBench config, a source/runtime metadata sidecar, the selected checkpoint
+hash, and NeuralBench's raw test prediction artifacts under
+`<output>/<variant>/seed<seed>/`.
+
+The upstream query token is initialized exactly as in the pinned
+`ReveClassifier`: it is a new seeded downstream `torch.randn` parameter, not a
+parameter expected in the pretrained encoder checkpoint (for `last_avg` it is
+kept as an unused parameter, exactly as upstream). The regression linear
+follows the upstream `cls_wrapper` truncated-normal initialization
+(`std=512**-0.5`, cutoff `3`, zero bias). Test Pearson printed after each epoch
+is diagnostic only; checkpoint and head selection use validation Pearson.
+
+The independent reproduction remains a separate lane. This work does not
+import or modify `independent_pipeline.py`.
