@@ -1,0 +1,54 @@
+{
+  "experiment": "age_medium_500_seed33",
+  "dataset": {
+    "subjects": 500,
+    "split_counts": {
+      "train": 400,
+      "val": 50,
+      "test": 50
+    },
+    "window_counts": {
+      "train": 24000,
+      "val": 3000,
+      "test": 3000
+    },
+    "manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a"
+  },
+  "model": {
+    "name": "NtReve",
+    "pretrained_name": "brain-bzh/reve-base"
+  },
+  "official_reve_baseline": {
+    "best_epoch": 6,
+    "selection_metric": "val/pearsonr",
+    "selection_mode": "max",
+    "val_pearsonr": 0.612088211936863,
+    "test_pearsonr": 0.46350404620170593,
+    "test_rmse": 3.3231191635131836,
+    "test_mae": 2.5717103481292725,
+    "test_r2": 0.045587360858917236,
+    "completed_epochs": 13,
+    "training_time_s": 2391.0242499150336
+  },
+  "independent_pipeline": {
+    "best_epoch": 6,
+    "selection_metric": "val_pearsonr",
+    "selection_mode": "max",
+    "val_pearsonr": 0.612088211936863,
+    "test_pearsonr": 0.46350413906547594,
+    "test_rmse": 3.323119200484392,
+    "test_mae": 2.5717103408177695,
+    "test_r2": 0.04558846220690127,
+    "completed_epochs": 13,
+    "training_time_s": 2275.237113000825
+  },
+  "comparison": {
+    "official_minus_independent_test_pearson": -9.28637700070567e-08,
+    "absolute_test_pearson_delta": 9.28637700070567e-08,
+    "parity_verdict": "matched_to_numerical_precision",
+    "same_manifest": true,
+    "same_seed": true,
+    "same_best_epoch": true,
+    "test_metric_used_for_checkpoint_selection": false
+  }
+}

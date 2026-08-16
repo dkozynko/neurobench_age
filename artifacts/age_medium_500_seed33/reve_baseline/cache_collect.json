@@ -1,0 +1,31 @@
+INFO:neuralbench.cli:--- PREPARING GLOBAL PLOTS AND TABLES ---
+Collecting cached results:   0%|          | 0/3 [00:00<?, ?it/s]Collecting cached results: 100%|██████████| 3/3 [00:00<00:00, 12.19it/s]Collecting cached results: 100%|██████████| 3/3 [00:00<00:00, 12.18it/s]
+
+Experiments with cached results (1/3 included):
+      NtReve  ALL
+age      1/3  1/3
+TOTAL    1/3  1/3
+INFO:neuralbench.aggregator:Saved computational stats to /workspace/hbn_subset/results/reve_official_500_seed33/outputs/other/computational_stats.json
+[
+  {
+    "test/loss": 11.043121337890625,
+    "test/rmse": 3.3231191635131836,
+    "test/mae": 2.5717103481292725,
+    "test/pearsonr": 0.46350404620170593,
+    "test/r2_score": 0.045587360858917236,
+    "test/normalized_rmse": 0.9769410490989685,
+    "n_total_params": 69718019,
+    "n_trainable_params": 69718019,
+    "training_time_s": 2391.0242499150336,
+    "peak_gpu_memory_mb": 16016.31005859375,
+    "peak_cpu_memory_mb": 2622.8203125,
+    "task_name": "age",
+    "dataset_name": "Shirazi2024Hbn",
+    "brain_model_name": "NtReve",
+    "model_variant": "cfg=kwargs={},name=NtReve,from_pretrained_name=brain-bzh-reve-base,channel_mapping={3=C2,5=Pz,7=C1,8=Fz,1=CPz,11=C4,17=C3,21=F4,25=P...88-2366c67b;aggregation=mean",
+    "loss": {
+      "name": "MSELoss"
+    },
+    "seed": 33
+  }
+]

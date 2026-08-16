@@ -1,0 +1,100 @@
+{
+  "status": "completed",
+  "manifest": "/workspace/hbn_subset/age_medium_500_resting_manifest.csv",
+  "manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+  "subjects": 500,
+  "split_counts": {
+    "train": 400,
+    "val": 50,
+    "test": 50
+  },
+  "official_model": "NtReve / brain-bzh/reve-base",
+  "seed": 33,
+  "completed_epochs": 13,
+  "best_epoch": 6,
+  "early_stopping_monitor": "val/pearsonr",
+  "early_stopping_patience": 7,
+  "epoch_test_pearson": [
+    {
+      "epoch": 1,
+      "test_pearsonr": 0.5972986817359924
+    },
+    {
+      "epoch": 2,
+      "test_pearsonr": 0.5044884085655212
+    },
+    {
+      "epoch": 3,
+      "test_pearsonr": 0.20122182369232178
+    },
+    {
+      "epoch": 4,
+      "test_pearsonr": -0.11545052379369736
+    },
+    {
+      "epoch": 5,
+      "test_pearsonr": 0.31131958961486816
+    },
+    {
+      "epoch": 6,
+      "test_pearsonr": 0.46350404620170593
+    },
+    {
+      "epoch": 7,
+      "test_pearsonr": 0.4980050325393677
+    },
+    {
+      "epoch": 8,
+      "test_pearsonr": 0.456299751996994
+    },
+    {
+      "epoch": 9,
+      "test_pearsonr": 0.42928168177604675
+    },
+    {
+      "epoch": 10,
+      "test_pearsonr": 0.4263353645801544
+    },
+    {
+      "epoch": 11,
+      "test_pearsonr": 0.43426206707954407
+    },
+    {
+      "epoch": 12,
+      "test_pearsonr": 0.4719432294368744
+    },
+    {
+      "epoch": 13,
+      "test_pearsonr": 0.39263057708740234
+    }
+  ],
+  "official_result": {
+    "test/loss": 11.043121337890625,
+    "test/rmse": 3.3231191635131836,
+    "test/mae": 2.5717103481292725,
+    "test/pearsonr": 0.46350404620170593,
+    "test/r2_score": 0.045587360858917236,
+    "test/normalized_rmse": 0.9769410490989685,
+    "n_total_params": 69718019,
+    "n_trainable_params": 69718019,
+    "training_time_s": 2391.0242499150336,
+    "peak_gpu_memory_mb": 16016.31005859375,
+    "peak_cpu_memory_mb": 2622.8203125,
+    "task_name": "age",
+    "dataset_name": "Shirazi2024Hbn",
+    "brain_model_name": "NtReve",
+    "model_variant": "cfg=kwargs={},name=NtReve,from_pretrained_name=brain-bzh-reve-base,channel_mapping={3=C2,5=Pz,7=C1,8=Fz,1=CPz,11=C4,17=C3,21=F4,25=P...88-2366c67b;aggregation=mean",
+    "loss": {
+      "name": "MSELoss"
+    },
+    "seed": 33
+  },
+  "independent_reference_test_pearson": 0.46350413906547594,
+  "official_minus_independent_test_pearson": -9.28637700070567e-08,
+  "artifacts": {
+    "epoch_metrics": "/workspace/hbn_subset/results/reve_official_500_seed33/epoch_test_metrics.jsonl",
+    "cache_collection": "/workspace/hbn_subset/results/reve_official_500_seed33/cache_collect.json",
+    "run_log": "/workspace/hbn_subset/results/reve_official_500_seed33/run.log",
+    "failed_attempts": "/workspace/hbn_subset/results/reve_official_500_seed33/failed_attempts.log"
+  }
+}

@@ -1,0 +1,237 @@
+INFO:neuralbench.experiment_config:=== PREDICTING age FROM eeg ===
+INFO:neuralbench.experiment_config:--- USING MODEL reve ---
+INFO:neuralbench.experiment_config:--- USING INFRA.MODE=FORCE ---
+INFO:neuralbench.experiment_config:--- GRID CONFIGURATION ---
+INFO:neuralbench.experiment_config:Grid:
+seed: [33]
+2026-08-16 16:47:36 - WARNING - exca.task:79 - Computation failed for neuralbench.main.Experiment.run with traceback:
+Traceback (most recent call last):
+  File "/venv/main/lib/python3.12/site-packages/torchmetrics/metric.py", line 549, in wrapped_func
+    update(*args, **kwargs)
+  File "/venv/main/lib/python3.12/site-packages/torchmetrics/regression/pearson.py", line 187, in update
+    ) = _pearson_corrcoef_update(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/torchmetrics/functional/regression/pearson.py", line 62, in _pearson_corrcoef_update
+    delta_x = batch_mean_x - mean_x
+              ~~~~~~~~~~~~~^~~~~~~~
+RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/venv/main/lib/python3.12/site-packages/exca/task.py", line 49, in __init__
+    out = func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/exca/slurm.py", line 249, in _run_method
+    return method(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/neuralbench/main.py", line 436, in run
+    self.fit(trainer, loaders["train"], loaders["val"])
+  File "/venv/main/lib/python3.12/site-packages/neuralbench/main.py", line 219, in fit
+    trainer.fit(
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/trainer/trainer.py", line 584, in fit
+    call._call_and_handle_interrupt(
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/trainer/call.py", line 49, in _call_and_handle_interrupt
+    return trainer_fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/trainer/trainer.py", line 630, in _fit_impl
+    self._run(model, ckpt_path=ckpt_path, weights_only=weights_only)
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/trainer/trainer.py", line 1079, in _run
+    results = self._run_stage()
+              ^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/trainer/trainer.py", line 1123, in _run_stage
+    self.fit_loop.run()
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py", line 217, in run
+    self.advance()
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/loops/fit_loop.py", line 469, in advance
+    self.epoch_loop.run(self._data_fetcher)
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/loops/training_epoch_loop.py", line 154, in run
+    self.on_advance_end(data_fetcher)
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/loops/training_epoch_loop.py", line 406, in on_advance_end
+    self.val_loop.run()
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/loops/utilities.py", line 179, in _decorator
+    return loop_run(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/loops/evaluation_loop.py", line 153, in run
+    return self.on_run_end()
+           ^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/loops/evaluation_loop.py", line 296, in on_run_end
+    self._on_evaluation_epoch_end()
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/loops/evaluation_loop.py", line 378, in _on_evaluation_epoch_end
+    call._call_callback_hooks(trainer, hook_name)
+  File "/venv/main/lib/python3.12/site-packages/lightning/pytorch/trainer/call.py", line 228, in _call_callback_hooks
+    fn(trainer, trainer.lightning_module, *args, **kwargs)
+  File "/workspace/neurobench_age/official_reve_subset.py", line 151, in on_validation_epoch_end
+    metric.update(y_pred, y_true)
+  File "/venv/main/lib/python3.12/site-packages/torchmetrics/metric.py", line 552, in wrapped_func
+    raise RuntimeError(
+RuntimeError: Encountered different devices in metric calculation (see stacktrace for details). This could be due to the metric class not being on the same device as input. Instead of `metric=PearsonCorrCoef(...)` try to do `metric=PearsonCorrCoef(...).to(device)` where device corresponds to the device of the input.
+
+Seed set to 33
+INFO:neuralbench.main:UID folder: /workspace/hbn_subset/results/reve_official_500_seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554
+INFO:neuralbench.data:Dataset summary:
+                           index  subject  release  age  timeline
+study          split type                                        
+Shirazi2024Hbn test  Eeg      50       50        1   50        50
+               train Eeg     400      400        8  394       400
+               val   Eeg      50       50        1   50        50
+INFO:neuralbench.data:Found 129 different channels: ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9', 'E10', 'E11', 'E12', 'E13', 'E14', 'E15', 'E16', 'E17', 'E18', 'E19', 'E20', 'E21', 'E22', 'E23', 'E24', 'E25', 'E26', 'E27', 'E28', 'E29', 'E30', 'E31', 'E32', 'E33', 'E34', 'E35', 'E36', 'E37', 'E38', 'E39', 'E40', 'E41', 'E42', 'E43', 'E44', 'E45', 'E46', 'E47', 'E48', 'E49', 'E50', 'E51', 'E52', 'E53', 'E54', 'E55', 'E56', 'E57', 'E58', 'E59', 'E60', 'E61', 'E62', 'E63', 'E64', 'E65', 'E66', 'E67', 'E68', 'E69', 'E70', 'E71', 'E72', 'E73', 'E74', 'E75', 'E76', 'E77', 'E78', 'E79', 'E80', 'E81', 'E82', 'E83', 'E84', 'E85', 'E86', 'E87', 'E88', 'E89', 'E90', 'E91', 'E92', 'E93', 'E94', 'E95', 'E96', 'E97', 'E98', 'E99', 'E100', 'E101', 'E102', 'E103', 'E104', 'E105', 'E106', 'E107', 'E108', 'E109', 'E110', 'E111', 'E112', 'E113', 'E114', 'E115', 'E116', 'E117', 'E118', 'E119', 'E120', 'E121', 'E122', 'E123', 'E124', 'E125', 'E126', 'E127', 'E128', 'Cz']
+2026-08-16 16:47:37 - INFO - neuralset.dataloader:222 - Preparing extractor: EegExtractor
+2026-08-16 16:47:37 - INFO - neuralset.dataloader:222 - Preparing extractor: EventField
+2026-08-16 16:47:37 - INFO - neuralset.dataloader:222 - Preparing extractor: LabelEncoder
+2026-08-16 16:47:37 - INFO - neuralset.dataloader:222 - Preparing extractor: ChannelPositions
+  0%|          | 0/500 [00:00<?, ?it/s]  6%|▌         | 28/500 [00:00<00:01, 270.73it/s] 11%|█▏        | 57/500 [00:00<00:01, 279.87it/s] 17%|█▋        | 86/500 [00:00<00:01, 283.14it/s] 23%|██▎       | 115/500 [00:00<00:01, 283.25it/s] 29%|██▉       | 144/500 [00:00<00:01, 283.26it/s] 35%|███▍      | 173/500 [00:00<00:01, 282.98it/s] 40%|████      | 202/500 [00:00<00:01, 283.11it/s] 46%|████▌     | 231/500 [00:00<00:00, 282.71it/s] 52%|█████▏    | 260/500 [00:00<00:00, 281.90it/s] 58%|█████▊    | 289/500 [00:01<00:00, 281.51it/s] 64%|██████▎   | 318/500 [00:01<00:00, 281.75it/s] 69%|██████▉   | 347/500 [00:01<00:00, 282.18it/s] 75%|███████▌  | 376/500 [00:01<00:00, 282.73it/s] 81%|████████  | 405/500 [00:01<00:00, 282.18it/s] 87%|████████▋ | 434/500 [00:01<00:00, 281.88it/s] 93%|█████████▎| 463/500 [00:01<00:00, 282.46it/s] 98%|█████████▊| 492/500 [00:01<00:00, 282.52it/s]100%|██████████| 500/500 [00:01<00:00, 282.09it/s]
+Preparing segments:   0%|          | 0/3 [00:00<?, ?it/s]INFO:neuralbench.data:# train segments: 24000 
+
+Preparing segments:  33%|███▎      | 1/3 [00:00<00:00,  4.02it/s]INFO:neuralbench.data:# val segments: 3000 
+
+Preparing segments:  67%|██████▋   | 2/3 [00:00<00:00,  4.66it/s]INFO:neuralbench.data:# test segments: 3000 
+
+Preparing segments: 100%|██████████| 3/3 [00:00<00:00,  4.92it/s]Preparing segments: 100%|██████████| 3/3 [00:00<00:00,  4.77it/s]
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+💡 Tip: For seamless cloud logging and experiment tracking, try installing [litlogger](https://pypi.org/project/litlogger/) to enable LitLogger, which logs metrics and artifacts automatically to the Lightning Experiments platform.
+Seed set to 33
+INFO:neuralbench.model_factory:Neuro shape: torch.Size([64, 129, 400])
+INFO:neuralbench.model_factory:Target shape: torch.Size([64, 1])
+Using default location ~/mne_data for REVE positions...
+INFO:neuraltrain.models.reve:[REVE_CHANNELS] n_dataset=129 n_resolved=129 (n_derived=0)
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/brain-bzh/reve-base/resolve/main/config.json "HTTP/1.1 401 Unauthorized"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/brain-bzh/reve-base/resolve/main/config.json "HTTP/1.1 401 Unauthorized"
+Using default location ~/mne_data for REVE positions...
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/brain-bzh/reve-base/resolve/main/model.safetensors "HTTP/1.1 401 Unauthorized"
+INFO:neuralbench.model_factory:Wrapping brain model for downstream task...
+INFO:neuralbench.model_factory:Model summary:
+=========================================================================================================
+Layer (type)                                            Output Shape              Param #
+=========================================================================================================
+DownstreamWrapperModel                                  [1, 1]                    --
+├─_ReveWrapper                                          [1, 258, 512]             --
+│    └─REVE                                             [1, 258, 512]             528,386
+│    │    └─FourierEmb4D                                [1, 258, 512]             --
+│    │    └─Sequential                                  [1, 258, 512]             3,072
+│    │    └─LayerNorm                                   [1, 258, 512]             1,024
+│    │    └─Sequential                                  [1, 129, 2, 512]          102,912
+│    │    └─TransformerBackbone                         [1, 258, 512]             69,082,112
+├─Mean                                                  [1, 512]                  --
+├─Linear                                                [1, 1]                    513
+=========================================================================================================
+Total params: 69,718,019
+Trainable params: 69,718,019
+Non-trainable params: 0
+Total mult-adds (Units.MEGABYTES): 69.19
+=========================================================================================================
+Input size (MB): 13.21
+Forward/backward pass size (MB): 290.57
+Params size (MB): 276.76
+Estimated Total Size (MB): 580.54
+=========================================================================================================
+Seed set to 33
+INFO:neuralbench.main:Validating once before starting training...
+You are using a CUDA device ('NVIDIA GeForce RTX 4080 SUPER') that has Tensor Cores. To properly utilize them, you should set `torch.set_float32_matmul_precision('medium' | 'high')` which will trade-off precision for performance. For more details, read https://pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html#torch.set_float32_matmul_precision
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃      Validate metric      ┃       DataLoader 0        ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│         val/loss          │    110.25003051757812     │
+│          val/mae          │     9.929831504821777     │
+│    val/normalized_rmse    │     3.154968023300171     │
+│       val/pearsonr        │    -0.0745292454957962    │
+│       val/r2_score        │    -8.953825950622559     │
+│         val/rmse          │    10.500001907348633     │
+└───────────────────────────┴───────────────────────────┘
+Validation ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 47/47 0:00:06 • 0:00:00 7.68it/s 
+/venv/main/lib/python3.12/site-packages/lightning/pytorch/callbacks/model_checkpoint.py:881: Checkpoint directory /workspace/hbn_subset/results/reve_official_500_seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554 exists and is not empty.
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+Loading `train_dataloader` to estimate number of stepping batches.
+INFO:__main__:EPOCH_TEST epoch=1 test/pearsonr=0.597298681736
+EPOCH_TEST epoch=1 test/pearsonr=0.597298681736
+Metric val/pearsonr improved. New best score: 0.592
+INFO:__main__:EPOCH_TEST epoch=2 test/pearsonr=0.504488408566
+EPOCH_TEST epoch=2 test/pearsonr=0.504488408566
+INFO:__main__:EPOCH_TEST epoch=3 test/pearsonr=0.201221823692
+EPOCH_TEST epoch=3 test/pearsonr=0.201221823692
+INFO:__main__:EPOCH_TEST epoch=4 test/pearsonr=-0.115450523794
+EPOCH_TEST epoch=4 test/pearsonr=-0.115450523794
+INFO:__main__:EPOCH_TEST epoch=5 test/pearsonr=0.311319589615
+EPOCH_TEST epoch=5 test/pearsonr=0.311319589615
+INFO:__main__:EPOCH_TEST epoch=6 test/pearsonr=0.463504046202
+EPOCH_TEST epoch=6 test/pearsonr=0.463504046202
+Metric val/pearsonr improved by 0.020 >= min_delta = 0.0. New best score: 0.612
+INFO:__main__:EPOCH_TEST epoch=7 test/pearsonr=0.498005032539
+EPOCH_TEST epoch=7 test/pearsonr=0.498005032539
+INFO:__main__:EPOCH_TEST epoch=8 test/pearsonr=0.456299751997
+EPOCH_TEST epoch=8 test/pearsonr=0.456299751997
+INFO:__main__:EPOCH_TEST epoch=9 test/pearsonr=0.429281681776
+EPOCH_TEST epoch=9 test/pearsonr=0.429281681776
+INFO:__main__:EPOCH_TEST epoch=10 test/pearsonr=0.426335364580
+EPOCH_TEST epoch=10 test/pearsonr=0.426335364580
+INFO:__main__:EPOCH_TEST epoch=11 test/pearsonr=0.434262067080
+EPOCH_TEST epoch=11 test/pearsonr=0.434262067080
+INFO:__main__:EPOCH_TEST epoch=12 test/pearsonr=0.471943229437
+EPOCH_TEST epoch=12 test/pearsonr=0.471943229437
+INFO:__main__:EPOCH_TEST epoch=13 test/pearsonr=0.392630577087
+EPOCH_TEST epoch=13 test/pearsonr=0.392630577087
+Monitored metric val/pearsonr did not improve in the last 7 records. Best score: 0.612. Signaling Trainer to stop.
+Epoch 12/39 ━━━━━━━━━━━━━━━━ 375/375 0:02:50 •        2.20it/s train/loss_step: 
+                                     0:00:00                   0.438 val/loss:  
+                                                               9.733 val/rmse:  
+                                                               3.120 val/mae:   
+                                                               2.361            
+                                                               val/pearsonr:    
+                                                               0.398            
+                                                               val/r2_score:    
+                                                               0.121            
+                                                               val/normalized_r…
+                                                               0.937            
+                                                               train/loss_epoch:
+                                                               0.191            
+INFO:neuralbench.main:Best epoch: 5
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+💡 Tip: For seamless cloud logging and experiment tracking, try installing [litlogger](https://pypi.org/project/litlogger/) to enable LitLogger, which logs metrics and artifacts automatically to the Lightning Experiments platform.
+💡 Tip: For seamless cloud uploads and versioning, try installing [litmodels](https://pypi.org/project/litmodels/) to enable LitModelCheckpoint, which syncs automatically with the Lightning model registry.
+Restoring states from the checkpoint path at /workspace/hbn_subset/results/reve_official_500_seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/best.ckpt
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+Loaded model weights from the checkpoint at /workspace/hbn_subset/results/reve_official_500_seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/best.ckpt
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃        Test metric        ┃       DataLoader 0        ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│         test/loss         │    11.043121337890625     │
+│         test/mae          │    2.5717103481292725     │
+│   test/normalized_rmse    │    0.9769410490989685     │
+│       test/pearsonr       │    0.46350404620170593    │
+│       test/r2_score       │   0.045587360858917236    │
+│         test/rmse         │    3.3231191635131836     │
+└───────────────────────────┴───────────────────────────┘
+Testing ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 47/47 0:00:06 • 0:00:00 7.19it/s 
+INFO:neuralbench.main:Deleted checkpoint: /workspace/hbn_subset/results/reve_official_500_seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/best.ckpt
+INFO:neuralbench.cli:--- PREPARING GLOBAL PLOTS AND TABLES ---
+Collecting cached results:   0%|          | 0/1 [00:00<?, ?it/s]Collecting cached results: 100%|██████████| 1/1 [00:00<00:00,  4.65it/s]Collecting cached results: 100%|██████████| 1/1 [00:00<00:00,  4.65it/s]
+INFO:neuralbench.aggregator:Saved computational stats to /workspace/hbn_subset/results/reve_official_500_seed33/outputs/other/computational_stats.json
+Generating plots:   0%|          | 0/10 [00:00<?, ?it/s]Generating plots:  10%|█         | 1/10 [00:00<00:08,  1.09it/s]Generating plots:  20%|██        | 2/10 [00:00<00:03,  2.13it/s]
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/neurobench_age/official_reve_subset.py", line 347, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/workspace/neurobench_age/official_reve_subset.py", line 324, in main
+    results = run_official_subset(
+              ^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/neurobench_age/official_reve_subset.py", line 285, in run_official_subset
+    return run_benchmark(
+           ^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/neuralbench/cli.py", line 215, in run_benchmark
+    results = agg.run(cached_only=True)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/neuralbench/aggregator.py", line 275, in run
+    plot_all_results(results, self.loss_to_metric_mapping, self.output_dir)
+  File "/venv/main/lib/python3.12/site-packages/neuralbench/plots/benchmark.py", line 209, in plot_all_results
+    step.fn()
+  File "/venv/main/lib/python3.12/site-packages/neuralbench/plots/benchmark.py", line 99, in <lambda>
+    lambda: plot_core_rank_boxplot(core_df, core_dir),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/venv/main/lib/python3.12/site-packages/neuralbench/plots/rank_chart.py", line 137, in plot_core_rank_boxplot
+    raise ValueError(
+ValueError: Normalized-rank boxplot requires at least 2 models; got 1.

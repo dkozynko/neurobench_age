@@ -1,0 +1,32 @@
+{
+  "status": "completed",
+  "pipeline": "independent",
+  "model": "NtReve / brain-bzh/reve-base",
+  "seed": 33,
+  "subjects": 500,
+  "manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+  "window_counts": {
+    "train": 24000,
+    "val": 3000,
+    "test": 3000
+  },
+  "best_epoch": 6,
+  "val_pearsonr": 0.612088211936863,
+  "test_metrics": {
+    "mse": 11.043121220628025,
+    "rmse": 3.323119200484392,
+    "mae": 2.5717103408177695,
+    "pearsonr": 0.46350413906547594,
+    "r2_score": 0.04558846220690127,
+    "normalized_rmse": 0.9769398844315338
+  },
+  "timings_s": {
+    "preload": 0.252512939972803,
+    "first_batch": 0.38588219694793224,
+    "train": 2166.3117031226866,
+    "validation": 81.56054056994617,
+    "test": 6.375580305000767,
+    "total": 2275.237113000825
+  },
+  "source_log": "run.log"
+}
