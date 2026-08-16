@@ -282,12 +282,23 @@ def run_official_subset(
         # The public runner launches/finishes the experiment but intentionally
         # returns no result for local non-debug execution.  A cached-only
         # collection uses the same official config and performs no training.
-        return run_benchmark(
-            device="eeg",
-            task="age",
-            model="reve",
-            plot_cached=True,
-        )
+        # ``--plot-cached`` normally builds a multi-model comparison.  A
+        # single exact-manifest baseline has no rank-comparison peers, so
+        # disable only that optional plotting side effect while collecting the
+        # official cached result.
+        import neuralbench.aggregator as aggregator
+
+        original_plot_all_results = aggregator.plot_all_results
+        aggregator.plot_all_results = lambda *args, **kwargs: None
+        try:
+            return run_benchmark(
+                device="eeg",
+                task="age",
+                model="reve",
+                plot_cached=True,
+            )
+        finally:
+            aggregator.plot_all_results = original_plot_all_results
     finally:
         _restore_official_components(originals)
 
