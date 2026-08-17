@@ -27,6 +27,8 @@ NeuralBench model stack:
 ```bash
 uv venv
 uv pip install -e '.[reve,test]'
+# Braindecode's pretrained REVE loader requires this optional dependency.
+uv pip install 'safetensors==0.5.3'
 ```
 
 The `reve` extra pins NeuralBench to version `0.2.3`. It installs the official

@@ -611,6 +611,10 @@ def run_official_subset(
         run_metadata=run_metadata,
         final_results=final_results,
     )
+    from neuralbench.main import BenchmarkAggregator
+
+    original_aggregator_prepare = BenchmarkAggregator.prepare
+    BenchmarkAggregator.prepare = _run_experiments_synchronously
     try:
         from neuralbench import run_benchmark
 
@@ -626,7 +630,22 @@ def run_official_subset(
         # and collides with this run's custom upstream head UID.
         return final_results
     finally:
+        BenchmarkAggregator.prepare = original_aggregator_prepare
         _restore_official_components(originals)
+
+
+def _run_experiments_synchronously(aggregator: Any) -> None:
+    """Run prepared NeuralBench experiments in the current process.
+
+    NeuralBench's public non-debug runner submits experiments to an ``exca``
+    job array and returns before those workers finish when no scheduler is
+    available. The fixed-manifest harness needs the worker-local monkeypatches
+    above to survive into the actual experiment, so execute each prepared
+    experiment directly while retaining the canonical (non-debug) config.
+    """
+
+    for experiment in aggregator.experiments:
+        experiment.run()
 
 
 def _write_config(path: Path, *, data_root: Path, output_dir: Path) -> None:
