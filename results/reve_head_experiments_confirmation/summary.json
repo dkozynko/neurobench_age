@@ -1,0 +1,59 @@
+{
+  "status": "completed",
+  "completed_at": "2026-08-18T18:05:09Z",
+  "runs": 12,
+  "seeds": [
+    33,
+    34,
+    35
+  ],
+  "head_variants": [
+    "mean_linear",
+    "last_avg",
+    "last",
+    "all"
+  ],
+  "aggregation": "Arithmetic mean across the three seeds; overall mean across all 12 runs.",
+  "overall_mean": {
+    "test/loss": 11.514072299003601,
+    "test/rmse": 3.37711892525355,
+    "test/mae": 2.654833118120829,
+    "test/pearsonr": 0.3720649282137553,
+    "test/r2_score": 0.004884923497835795,
+    "test/normalized_rmse": 0.9928160458803177
+  },
+  "mean_by_head": {
+    "mean_linear": {
+      "test/loss": 8.344568093617758,
+      "test/rmse": 2.8820058504740396,
+      "test/mae": 2.2379275957743325,
+      "test/pearsonr": 0.5973818302154541,
+      "test/r2_score": 0.2788124680519104,
+      "test/normalized_rmse": 0.8472611506779989
+    },
+    "last_avg": {
+      "test/loss": 12.235133488972982,
+      "test/rmse": 3.494877258936564,
+      "test/mae": 2.7344775994618735,
+      "test/pearsonr": 0.33816735943158466,
+      "test/r2_score": -0.057433485984802246,
+      "test/normalized_rmse": 1.027435044447581
+    },
+    "last": {
+      "test/loss": 12.379268328348795,
+      "test/rmse": 3.517476956049601,
+      "test/mae": 2.796154181162516,
+      "test/pearsonr": 0.2625396450360616,
+      "test/r2_score": -0.06989049911499023,
+      "test/normalized_rmse": 1.0340789159138997
+    },
+    "all": {
+      "test/loss": 13.09731928507487,
+      "test/rmse": 3.6141156355539956,
+      "test/mae": 2.8507730960845947,
+      "test/pearsonr": 0.2901708781719208,
+      "test/r2_score": -0.13194878896077475,
+      "test/normalized_rmse": 1.0624890724817913
+    }
+  }
+}
