@@ -1,0 +1,11 @@
+{"seed": 33, "epoch": 1, "test_pearsonr": 0.01829337142407894}
+{"seed": 33, "epoch": 2, "test_pearsonr": 0.28444671630859375}
+{"seed": 33, "epoch": 3, "test_pearsonr": 0.26220566034317017}
+{"seed": 33, "epoch": 4, "test_pearsonr": 0.26682689785957336}
+{"seed": 33, "epoch": 5, "test_pearsonr": 0.28223100304603577}
+{"seed": 33, "epoch": 6, "test_pearsonr": 0.276973694562912}
+{"seed": 33, "epoch": 7, "test_pearsonr": 0.22383050620555878}
+{"seed": 33, "epoch": 8, "test_pearsonr": 0.1835588961839676}
+{"seed": 33, "epoch": 9, "test_pearsonr": 0.2646813690662384}
+{"seed": 33, "epoch": 10, "test_pearsonr": 0.20985928177833557}
+{"seed": 33, "epoch": 11, "test_pearsonr": 0.2769990861415863}

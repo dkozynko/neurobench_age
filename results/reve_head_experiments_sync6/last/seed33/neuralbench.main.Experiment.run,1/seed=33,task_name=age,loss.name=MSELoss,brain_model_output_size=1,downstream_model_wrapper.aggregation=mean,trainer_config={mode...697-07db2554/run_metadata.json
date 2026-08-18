@@ -1,0 +1,77 @@
+{
+  "head_variant": "last",
+  "head_source": "upstream_reve",
+  "head_dropout": 0.0,
+  "head_query_initialization": "upstream_random",
+  "head_linear_initialization": {
+    "distribution": "truncated_normal",
+    "std": 0.04419417382415922,
+    "cutoff": 3.0,
+    "bias": 0.0
+  },
+  "manifest": "/workspace/hbn_subset/age_medium_500_resting_manifest.csv",
+  "manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+  "rows": 500,
+  "device": "eeg",
+  "seeds": [
+    33
+  ],
+  "launch_command": "/venv/main/bin/python /workspace/neurobench_age/official_reve_subset.py --manifest /workspace/hbn_subset/age_medium_500_resting_manifest.csv --data-root /workspace/neurobench_data_hl2 --output-dir /workspace/hbn_subset/results/reve_head_experiments_sync6 --config /workspace/hbn_subset/results/reve_head_experiments_sync6/config.json --head-variant last --seeds 33",
+  "protocol": {
+    "max_epochs": 40,
+    "batch_size": 64,
+    "optimizer": "AdamW",
+    "learning_rate": 0.0001,
+    "weight_decay": 0.05,
+    "scheduler": "OneCycleLR",
+    "scheduler_max_lr": 0.0001,
+    "scheduler_pct_start": 0.1,
+    "scheduler_anneal_strategy": "cos",
+    "gradient_clip_val": 1.0,
+    "precision": "32-true",
+    "loss": "MSELoss",
+    "monitor": "val/pearsonr",
+    "mode": "max",
+    "patience": 7,
+    "batch_num_workers": 2,
+    "persistent_workers": true,
+    "target_scaler": null,
+    "frequency": 200.0,
+    "filter": [
+      0.5,
+      99.5
+    ],
+    "notch_filter": null,
+    "scaler": "StandardScaler",
+    "clamp": 15,
+    "window_duration_s": 2.0,
+    "window_stride_s": 2.0
+  },
+  "runtime": {
+    "python": "3.12.13 | packaged by conda-forge | (main, Mar  5 2026, 16:50:00) [GCC 14.3.0]",
+    "platform": "Linux-6.5.0-18-generic-x86_64-with-glibc2.39",
+    "package_versions": {
+      "neuralbench": "0.2.3",
+      "neuraltrain": "0.2.3",
+      "braindecode": "1.7.0",
+      "lightning": "2.6.5",
+      "torch": "2.6.0+cu124",
+      "neuralfetch": "0.2.3"
+    },
+    "source_locations": {
+      "neuralbench": "/venv/main/lib/python3.12/site-packages/neuralbench/__init__.py",
+      "neuraltrain": "/venv/main/lib/python3.12/site-packages/neuraltrain/__init__.py"
+    }
+  },
+  "head_source_lock": {
+    "repository": "https://github.com/elouayas/reve_eeg",
+    "commit": "06a7059a07c3dabd80aee60c3dbc1eca4bdbe1c7",
+    "file_sha256": {
+      "src/models/classifier.py": "cf71d0f455df0e9a263363213d75fbf493ffc5d587cd3c1f80cdc90ab961f90f",
+      "src/models/encoder.py": "933684a3306e16c16926cead0fc8c8c0a9ae99ad9dfaf54dee860c5b335d1b6c",
+      "src/models/backbone.py": "632ecd10ddb5efcc6f50a7207b0aa3934e7304438eb3f1db1edfefc3fab3371f"
+    }
+  },
+  "seed": 33,
+  "data_seed": 33
+}

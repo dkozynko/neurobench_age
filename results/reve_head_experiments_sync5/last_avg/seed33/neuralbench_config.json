@@ -1,0 +1,13 @@
+{
+  "USER": "root",
+  "ENTITY_NAME": "root",
+  "PROJECT_NAME": "neurobench_reve_age_official",
+  "CACHE_DIR": "/workspace/neurobench_data_hl2/neuralbench_official_cache_500",
+  "SAVE_DIR": "/workspace/hbn_subset/results/reve_head_experiments_sync5/last_avg/seed33",
+  "DATA_DIR": "/workspace/neurobench_data_hl2",
+  "WANDB_HOST": "",
+  "SLURM_PARTITION": "",
+  "SLURM_CONSTRAINT": "",
+  "N_CPUS": 2,
+  "CLUSTER": null
+}

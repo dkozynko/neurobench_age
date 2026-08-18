@@ -1,0 +1,115 @@
+{
+  "status": "completed",
+  "head_variant": "mean_linear",
+  "seeds": [
+    33
+  ],
+  "runs": [
+    {
+      "status": "completed",
+      "head_variant": "mean_linear",
+      "head_source": "neuralbench_default",
+      "head_dropout": 0.0,
+      "head_query_initialization": "neuralbench_default",
+      "head_linear_initialization": "neuralbench_default",
+      "manifest": "/workspace/hbn_subset/age_medium_500_resting_manifest.csv",
+      "manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+      "rows": 500,
+      "device": "eeg",
+      "seeds": [
+        33
+      ],
+      "launch_command": "/venv/main/bin/python /workspace/neurobench_age/official_reve_subset.py --manifest /workspace/hbn_subset/age_medium_500_resting_manifest.csv --data-root /workspace/neurobench_data_hl2 --output-dir /workspace/hbn_subset/results/reve_head_experiments_sync8 --config /workspace/hbn_subset/results/reve_head_experiments_sync8/config.json --head-variant mean_linear --seeds 33",
+      "protocol": {
+        "max_epochs": 40,
+        "batch_size": 64,
+        "optimizer": "AdamW",
+        "learning_rate": 0.0001,
+        "weight_decay": 0.05,
+        "scheduler": "OneCycleLR",
+        "scheduler_max_lr": 0.0001,
+        "scheduler_pct_start": 0.1,
+        "scheduler_anneal_strategy": "cos",
+        "gradient_clip_val": 1.0,
+        "precision": "32-true",
+        "loss": "MSELoss",
+        "monitor": "val/pearsonr",
+        "mode": "max",
+        "patience": 7,
+        "batch_num_workers": 2,
+        "persistent_workers": true,
+        "target_scaler": null,
+        "frequency": 200.0,
+        "filter": [
+          0.5,
+          99.5
+        ],
+        "notch_filter": null,
+        "scaler": "StandardScaler",
+        "clamp": 15,
+        "window_duration_s": 2.0,
+        "window_stride_s": 2.0
+      },
+      "runtime": {
+        "python": "3.12.13 | packaged by conda-forge | (main, Mar  5 2026, 16:50:00) [GCC 14.3.0]",
+        "platform": "Linux-6.5.0-18-generic-x86_64-with-glibc2.39",
+        "package_versions": {
+          "neuralbench": "0.2.3",
+          "neuraltrain": "0.2.3",
+          "braindecode": "1.7.0",
+          "lightning": "2.6.5",
+          "torch": "2.6.0+cu124",
+          "neuralfetch": "0.2.3"
+        },
+        "source_locations": {
+          "neuralbench": "/venv/main/lib/python3.12/site-packages/neuralbench/__init__.py",
+          "neuraltrain": "/venv/main/lib/python3.12/site-packages/neuraltrain/__init__.py"
+        }
+      },
+      "seed": 33,
+      "data_seed": 33,
+      "official_results": [
+        {
+          "test/loss": 8.690106391906738,
+          "test/rmse": 2.9478986263275146,
+          "test/mae": 2.335343837738037,
+          "test/pearsonr": 0.5941864252090454,
+          "test/r2_score": 0.24894899129867554,
+          "test/normalized_rmse": 0.8666325211524963
+        }
+      ],
+      "epoch_metrics": "/workspace/hbn_subset/results/reve_head_experiments_sync8/mean_linear/seed33/epoch_test_metrics.jsonl",
+      "artifacts": [
+        {
+          "run_dir": "/workspace/hbn_subset/results/reve_head_experiments_sync8/mean_linear/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554",
+          "resolved_config": {
+            "path": "/workspace/hbn_subset/results/reve_head_experiments_sync8/mean_linear/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/config.yaml",
+            "sha256": "b3afbbe95f640ec45df4afdcefeffcd78f9b6e783320fb518304595967d89a9b"
+          },
+          "selected_checkpoint": {
+            "path": "/workspace/hbn_subset/results/reve_head_experiments_sync8/mean_linear/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/best.ckpt",
+            "sha256": "13ca1f3b729a41ae7d29a96a673ae07a22ba30e844c4dc95c580bc5e77ef9171"
+          },
+          "raw_test_predictions": [
+            {
+              "path": "/workspace/hbn_subset/results/reve_head_experiments_sync8/mean_linear/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/test_predictions/a229144edc37-35338-info.jsonl",
+              "size_bytes": 13106,
+              "sha256": "988492bfeb59cc6be7534e4fc2db5c72fddf296fe6a9084415028708cd3d801b"
+            },
+            {
+              "path": "/workspace/hbn_subset/results/reve_head_experiments_sync8/mean_linear/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/test_predictions/data/a229144edc37-35338.data",
+              "size_bytes": 24000,
+              "sha256": "4056aee82d56f6ab6261b703c00dc7612a0fc1760d14738283a8f6f21cae9bce"
+            },
+            {
+              "path": "/workspace/hbn_subset/results/reve_head_experiments_sync8/mean_linear/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/test_predictions/data/metadata-9f81f3c0.csv",
+              "size_bytes": 795582,
+              "sha256": "cc7249527f4e14b8a42c15185f2e1c150d26253af3d41a12ae7a7b271060f20c"
+            }
+          ],
+          "run_metadata": "/workspace/hbn_subset/results/reve_head_experiments_sync8/mean_linear/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/run_metadata.json"
+        }
+      ]
+    }
+  ]
+}

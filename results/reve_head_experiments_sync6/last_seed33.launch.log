@@ -1,0 +1,287 @@
+INFO:neuralbench.experiment_config:=== PREDICTING age FROM eeg ===
+INFO:neuralbench.experiment_config:--- USING MODEL reve ---
+INFO:neuralbench.experiment_config:--- USING INFRA.MODE=FORCE ---
+INFO:neuralbench.experiment_config:--- GRID CONFIGURATION ---
+INFO:neuralbench.experiment_config:Grid:
+seed: [33]
+Seed set to 33
+INFO:neuralbench.main:UID folder: /workspace/hbn_subset/results/reve_head_experiments_sync6/last/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554
+INFO:neuralbench.data:Dataset summary:
+                           index  subject  release  age  timeline
+study          split type                                        
+Shirazi2024Hbn test  Eeg      50       50        1   50        50
+               train Eeg     400      400        8  394       400
+               val   Eeg      50       50        1   50        50
+INFO:neuralbench.data:Found 129 different channels: ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9', 'E10', 'E11', 'E12', 'E13', 'E14', 'E15', 'E16', 'E17', 'E18', 'E19', 'E20', 'E21', 'E22', 'E23', 'E24', 'E25', 'E26', 'E27', 'E28', 'E29', 'E30', 'E31', 'E32', 'E33', 'E34', 'E35', 'E36', 'E37', 'E38', 'E39', 'E40', 'E41', 'E42', 'E43', 'E44', 'E45', 'E46', 'E47', 'E48', 'E49', 'E50', 'E51', 'E52', 'E53', 'E54', 'E55', 'E56', 'E57', 'E58', 'E59', 'E60', 'E61', 'E62', 'E63', 'E64', 'E65', 'E66', 'E67', 'E68', 'E69', 'E70', 'E71', 'E72', 'E73', 'E74', 'E75', 'E76', 'E77', 'E78', 'E79', 'E80', 'E81', 'E82', 'E83', 'E84', 'E85', 'E86', 'E87', 'E88', 'E89', 'E90', 'E91', 'E92', 'E93', 'E94', 'E95', 'E96', 'E97', 'E98', 'E99', 'E100', 'E101', 'E102', 'E103', 'E104', 'E105', 'E106', 'E107', 'E108', 'E109', 'E110', 'E111', 'E112', 'E113', 'E114', 'E115', 'E116', 'E117', 'E118', 'E119', 'E120', 'E121', 'E122', 'E123', 'E124', 'E125', 'E126', 'E127', 'E128', 'Cz']
+2026-08-17 19:11:16 - INFO - neuralset.dataloader:222 - Preparing extractor: EegExtractor
+2026-08-17 19:11:16 - INFO - neuralset.dataloader:222 - Preparing extractor: EventField
+2026-08-17 19:11:16 - INFO - neuralset.dataloader:222 - Preparing extractor: LabelEncoder
+2026-08-17 19:11:16 - INFO - neuralset.dataloader:222 - Preparing extractor: ChannelPositions
+  0%|          | 0/500 [00:00<?, ?it/s]  6%|▌         | 29/500 [00:00<00:01, 288.05it/s] 12%|█▏        | 59/500 [00:00<00:01, 294.22it/s] 18%|█▊        | 89/500 [00:00<00:01, 295.45it/s] 24%|██▍       | 119/500 [00:00<00:01, 295.42it/s] 30%|██▉       | 149/500 [00:00<00:01, 295.79it/s] 36%|███▌      | 179/500 [00:00<00:01, 295.64it/s] 42%|████▏     | 209/500 [00:00<00:00, 295.57it/s] 48%|████▊     | 239/500 [00:00<00:00, 295.31it/s] 54%|█████▍    | 269/500 [00:00<00:00, 294.96it/s] 60%|█████▉    | 299/500 [00:01<00:00, 295.30it/s] 66%|██████▌   | 329/500 [00:01<00:00, 296.00it/s] 72%|███████▏  | 359/500 [00:01<00:00, 296.51it/s] 78%|███████▊  | 389/500 [00:01<00:00, 296.41it/s] 84%|████████▍ | 419/500 [00:01<00:00, 296.23it/s] 90%|████████▉ | 449/500 [00:01<00:00, 296.40it/s] 96%|█████████▌| 479/500 [00:01<00:00, 296.46it/s]100%|██████████| 500/500 [00:01<00:00, 295.48it/s]
+Preparing segments:   0%|          | 0/3 [00:00<?, ?it/s]INFO:neuralbench.data:# train segments: 24000 
+
+Preparing segments:  33%|███▎      | 1/3 [00:00<00:00,  4.45it/s]INFO:neuralbench.data:# val segments: 3000 
+
+Preparing segments:  67%|██████▋   | 2/3 [00:00<00:00,  5.11it/s]INFO:neuralbench.data:# test segments: 3000 
+
+Preparing segments: 100%|██████████| 3/3 [00:00<00:00,  5.40it/s]Preparing segments: 100%|██████████| 3/3 [00:00<00:00,  5.24it/s]
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+💡 Tip: For seamless cloud logging and experiment tracking, try installing [litlogger](https://pypi.org/project/litlogger/) to enable LitLogger, which logs metrics and artifacts automatically to the Lightning Experiments platform.
+Seed set to 33
+INFO:neuralbench.model_factory:Neuro shape: torch.Size([64, 129, 400])
+INFO:neuralbench.model_factory:Target shape: torch.Size([64, 1])
+Using default location ~/mne_data for REVE positions...
+INFO:neuraltrain.models.reve:[REVE_CHANNELS] n_dataset=129 n_resolved=129 (n_derived=0)
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/brain-bzh/reve-base/resolve/main/config.json "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/brain-bzh/reve-base/resolve/main/config.json "HTTP/1.1 200 OK"
+Using default location ~/mne_data for REVE positions...
+INFO:httpx:HTTP Request: HEAD https://huggingface.co/brain-bzh/reve-base/resolve/main/model.safetensors "HTTP/1.1 302 Found"
+INFO:neuralbench.model_factory:Wrapping brain model for downstream task...
+INFO:neuralbench.model_factory:Model summary:
+=========================================================================================================
+Layer (type)                                            Output Shape              Param #
+=========================================================================================================
+UpstreamReveHeadModel                                   [1, 1]                    --
+├─_ReveWrapper                                          [1, 258, 512]             --
+│    └─REVE                                             [1, 258, 512]             528,386
+│    │    └─FourierEmb4D                                [1, 258, 512]             --
+│    │    └─Sequential                                  [1, 258, 512]             3,072
+│    │    └─LayerNorm                                   [1, 258, 512]             1,024
+│    │    └─Sequential                                  [1, 129, 2, 512]          102,912
+│    │    └─TransformerBackbone                         [1, 258, 512]             69,082,112
+├─UpstreamReveHead                                      [1, 1]                    512
+│    └─RMSNorm                                          [1, 512]                  512
+│    └─Dropout                                          [1, 512]                  --
+│    └─Linear                                           [1, 1]                    513
+=========================================================================================================
+Total params: 69,719,043
+Trainable params: 69,719,043
+Non-trainable params: 0
+Total mult-adds (Units.MEGABYTES): 69.19
+=========================================================================================================
+Input size (MB): 13.21
+Forward/backward pass size (MB): 290.57
+Params size (MB): 276.76
+Estimated Total Size (MB): 580.54
+=========================================================================================================
+Seed set to 33
+INFO:neuralbench.main:Validating once before starting training...
+You are using a CUDA device ('NVIDIA GeForce RTX 4080 SUPER') that has Tensor Cores. To properly utilize them, you should set `torch.set_float32_matmul_precision('medium' | 'high')` which will trade-off precision for performance. For more details, read https://pytorch.org/docs/stable/generated/torch.set_float32_matmul_precision.html#torch.set_float32_matmul_precision
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃      Validate metric      ┃       DataLoader 0        ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│         val/loss          │     98.5448989868164      │
+│          val/mae          │     9.34107780456543      │
+│    val/normalized_rmse    │     2.982789993286133     │
+│       val/pearsonr        │    0.03847169131040573    │
+│       val/r2_score        │    -7.897038459777832     │
+│         val/rmse          │     9.92697811126709      │
+└───────────────────────────┴───────────────────────────┘
+Validation ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 47/47 0:00:06 • 0:00:00 7.78it/s 
+/venv/main/lib/python3.12/site-packages/lightning/pytorch/callbacks/model_checkpoint.py:881: Checkpoint directory /workspace/hbn_subset/results/reve_head_experiments_sync6/last/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554 exists and is not empty.
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+Loading `train_dataloader` to estimate number of stepping batches.
+INFO:__main__:EPOCH_TEST epoch=1 test/pearsonr=0.077626697719
+EPOCH_TEST epoch=1 test/pearsonr=0.077626697719
+Metric val/pearsonr improved. New best score: 0.015
+INFO:__main__:EPOCH_TEST epoch=2 test/pearsonr=0.155522927642
+EPOCH_TEST epoch=2 test/pearsonr=0.155522927642
+Metric val/pearsonr improved by 0.047 >= min_delta = 0.0. New best score: 0.062
+INFO:__main__:EPOCH_TEST epoch=3 test/pearsonr=0.210427358747
+EPOCH_TEST epoch=3 test/pearsonr=0.210427358747
+INFO:__main__:EPOCH_TEST epoch=4 test/pearsonr=0.141326919198
+EPOCH_TEST epoch=4 test/pearsonr=0.141326919198
+INFO:__main__:EPOCH_TEST epoch=5 test/pearsonr=0.190050482750
+EPOCH_TEST epoch=5 test/pearsonr=0.190050482750
+INFO:__main__:EPOCH_TEST epoch=6 test/pearsonr=0.197028905153
+EPOCH_TEST epoch=6 test/pearsonr=0.197028905153
+INFO:__main__:EPOCH_TEST epoch=7 test/pearsonr=0.367036491632
+EPOCH_TEST epoch=7 test/pearsonr=0.367036491632
+Metric val/pearsonr improved by 0.009 >= min_delta = 0.0. New best score: 0.071
+INFO:__main__:EPOCH_TEST epoch=8 test/pearsonr=0.234031826258
+EPOCH_TEST epoch=8 test/pearsonr=0.234031826258
+Metric val/pearsonr improved by 0.079 >= min_delta = 0.0. New best score: 0.150
+INFO:__main__:EPOCH_TEST epoch=9 test/pearsonr=0.292080789804
+EPOCH_TEST epoch=9 test/pearsonr=0.292080789804
+Metric val/pearsonr improved by 0.082 >= min_delta = 0.0. New best score: 0.232
+INFO:__main__:EPOCH_TEST epoch=10 test/pearsonr=0.209744021297
+EPOCH_TEST epoch=10 test/pearsonr=0.209744021297
+Metric val/pearsonr improved by 0.145 >= min_delta = 0.0. New best score: 0.376
+INFO:__main__:EPOCH_TEST epoch=11 test/pearsonr=0.297267466784
+EPOCH_TEST epoch=11 test/pearsonr=0.297267466784
+INFO:__main__:EPOCH_TEST epoch=12 test/pearsonr=0.287953346968
+EPOCH_TEST epoch=12 test/pearsonr=0.287953346968
+INFO:__main__:EPOCH_TEST epoch=13 test/pearsonr=0.317331850529
+EPOCH_TEST epoch=13 test/pearsonr=0.317331850529
+INFO:__main__:EPOCH_TEST epoch=14 test/pearsonr=0.204267948866
+EPOCH_TEST epoch=14 test/pearsonr=0.204267948866
+INFO:__main__:EPOCH_TEST epoch=15 test/pearsonr=0.298031002283
+EPOCH_TEST epoch=15 test/pearsonr=0.298031002283
+INFO:__main__:EPOCH_TEST epoch=16 test/pearsonr=0.263932704926
+EPOCH_TEST epoch=16 test/pearsonr=0.263932704926
+INFO:__main__:EPOCH_TEST epoch=17 test/pearsonr=0.238111704588
+EPOCH_TEST epoch=17 test/pearsonr=0.238111704588
+Monitored metric val/pearsonr did not improve in the last 7 records. Best score: 0.376. Signaling Trainer to stop.
+Epoch 16/39 ━━━━━━━━━━━━━━━━ 375/375 0:02:48 •        2.22it/s train/loss_step: 
+                                     0:00:00                   2.122 val/loss:  
+                                                               11.411 val/rmse: 
+                                                               3.378 val/mae:   
+                                                               2.594            
+                                                               val/pearsonr:    
+                                                               0.250            
+                                                               val/r2_score:    
+                                                               -0.030           
+                                                               val/normalized_r…
+                                                               1.015            
+                                                               train/loss_epoch:
+                                                               2.808            
+INFO:neuralbench.main:Best epoch: 9
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+💡 Tip: For seamless cloud logging and experiment tracking, try installing [litlogger](https://pypi.org/project/litlogger/) to enable LitLogger, which logs metrics and artifacts automatically to the Lightning Experiments platform.
+💡 Tip: For seamless cloud uploads and versioning, try installing [litmodels](https://pypi.org/project/litmodels/) to enable LitModelCheckpoint, which syncs automatically with the Lightning model registry.
+Restoring states from the checkpoint path at /workspace/hbn_subset/results/reve_head_experiments_sync6/last/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/best.ckpt
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+Loaded model weights from the checkpoint at /workspace/hbn_subset/results/reve_head_experiments_sync6/last/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/best.ckpt
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃        Test metric        ┃       DataLoader 0        ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│         test/loss         │    13.073765754699707     │
+│         test/mae          │    2.8448734283447266     │
+│   test/normalized_rmse    │    1.0629743337631226     │
+│       test/pearsonr       │    0.20974406599998474    │
+│       test/r2_score       │    -0.1299130916595459    │
+│         test/rmse         │    3.6157662868499756     │
+└───────────────────────────┴───────────────────────────┘
+Testing ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 47/47 0:00:06 • 0:00:00 7.20it/s 
+{
+  "status": "completed",
+  "head_variant": "last",
+  "seeds": [
+    33
+  ],
+  "runs": [
+    {
+      "status": "completed",
+      "head_variant": "last",
+      "head_source": "upstream_reve",
+      "head_dropout": 0.0,
+      "head_query_initialization": "upstream_random",
+      "head_linear_initialization": {
+        "distribution": "truncated_normal",
+        "std": 0.04419417382415922,
+        "cutoff": 3.0,
+        "bias": 0.0
+      },
+      "manifest": "/workspace/hbn_subset/age_medium_500_resting_manifest.csv",
+      "manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+      "rows": 500,
+      "device": "eeg",
+      "seeds": [
+        33
+      ],
+      "launch_command": "/venv/main/bin/python /workspace/neurobench_age/official_reve_subset.py --manifest /workspace/hbn_subset/age_medium_500_resting_manifest.csv --data-root /workspace/neurobench_data_hl2 --output-dir /workspace/hbn_subset/results/reve_head_experiments_sync6 --config /workspace/hbn_subset/results/reve_head_experiments_sync6/config.json --head-variant last --seeds 33",
+      "protocol": {
+        "max_epochs": 40,
+        "batch_size": 64,
+        "optimizer": "AdamW",
+        "learning_rate": 0.0001,
+        "weight_decay": 0.05,
+        "scheduler": "OneCycleLR",
+        "scheduler_max_lr": 0.0001,
+        "scheduler_pct_start": 0.1,
+        "scheduler_anneal_strategy": "cos",
+        "gradient_clip_val": 1.0,
+        "precision": "32-true",
+        "loss": "MSELoss",
+        "monitor": "val/pearsonr",
+        "mode": "max",
+        "patience": 7,
+        "batch_num_workers": 2,
+        "persistent_workers": true,
+        "target_scaler": null,
+        "frequency": 200.0,
+        "filter": [
+          0.5,
+          99.5
+        ],
+        "notch_filter": null,
+        "scaler": "StandardScaler",
+        "clamp": 15,
+        "window_duration_s": 2.0,
+        "window_stride_s": 2.0
+      },
+      "runtime": {
+        "python": "3.12.13 | packaged by conda-forge | (main, Mar  5 2026, 16:50:00) [GCC 14.3.0]",
+        "platform": "Linux-6.5.0-18-generic-x86_64-with-glibc2.39",
+        "package_versions": {
+          "neuralbench": "0.2.3",
+          "neuraltrain": "0.2.3",
+          "braindecode": "1.7.0",
+          "lightning": "2.6.5",
+          "torch": "2.6.0+cu124",
+          "neuralfetch": "0.2.3"
+        },
+        "source_locations": {
+          "neuralbench": "/venv/main/lib/python3.12/site-packages/neuralbench/__init__.py",
+          "neuraltrain": "/venv/main/lib/python3.12/site-packages/neuraltrain/__init__.py"
+        }
+      },
+      "head_source_lock": {
+        "repository": "https://github.com/elouayas/reve_eeg",
+        "commit": "06a7059a07c3dabd80aee60c3dbc1eca4bdbe1c7",
+        "file_sha256": {
+          "src/models/classifier.py": "cf71d0f455df0e9a263363213d75fbf493ffc5d587cd3c1f80cdc90ab961f90f",
+          "src/models/encoder.py": "933684a3306e16c16926cead0fc8c8c0a9ae99ad9dfaf54dee860c5b335d1b6c",
+          "src/models/backbone.py": "632ecd10ddb5efcc6f50a7207b0aa3934e7304438eb3f1db1edfefc3fab3371f"
+        }
+      },
+      "seed": 33,
+      "data_seed": 33,
+      "official_results": [
+        {
+          "test/loss": 13.073765754699707,
+          "test/rmse": 3.6157662868499756,
+          "test/mae": 2.8448734283447266,
+          "test/pearsonr": 0.20974406599998474,
+          "test/r2_score": -0.1299130916595459,
+          "test/normalized_rmse": 1.0629743337631226
+        }
+      ],
+      "epoch_metrics": "/workspace/hbn_subset/results/reve_head_experiments_sync6/last/seed33/epoch_test_metrics.jsonl",
+      "artifacts": [
+        {
+          "run_dir": "/workspace/hbn_subset/results/reve_head_experiments_sync6/last/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554",
+          "resolved_config": {
+            "path": "/workspace/hbn_subset/results/reve_head_experiments_sync6/last/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/config.yaml",
+            "sha256": "709a9f3dd135b08c1bceb2ad9bd2118c7f99c9c5381f4b5b85347691b1d65e0d"
+          },
+          "selected_checkpoint": {
+            "path": "/workspace/hbn_subset/results/reve_head_experiments_sync6/last/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/best.ckpt",
+            "sha256": "426886fe309a023e84e5e87a8c885a2d994df5d4a477df0cd6988f73f92b8b07"
+          },
+          "raw_test_predictions": [
+            {
+              "path": "/workspace/hbn_subset/results/reve_head_experiments_sync6/last/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/test_predictions/a229144edc37-33819-info.jsonl",
+              "size_bytes": 13106,
+              "sha256": "969672567c78f6df547dfafd7a028548d3cd851ba252bf6b8ab9685a743c934e"
+            },
+            {
+              "path": "/workspace/hbn_subset/results/reve_head_experiments_sync6/last/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/test_predictions/data/a229144edc37-33819.data",
+              "size_bytes": 24000,
+              "sha256": "825824abfb293c5a2bd08d61998879a5dc9a110de2074eda7717309dca8f3873"
+            },
+            {
+              "path": "/workspace/hbn_subset/results/reve_head_experiments_sync6/last/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/test_predictions/data/metadata-9f81f3c0.csv",
+              "size_bytes": 795582,
+              "sha256": "cc7249527f4e14b8a42c15185f2e1c150d26253af3d41a12ae7a7b271060f20c"
+            }
+          ],
+          "run_metadata": "/workspace/hbn_subset/results/reve_head_experiments_sync6/last/seed33/neuralbench.main.Experiment.run,1/seed=33,task_name=age,loss.name=MSELoss,brain_model_output_size=1,downstream_model_wrapper.aggregation=mean,trainer_config={mode...697-07db2554/run_metadata.json"
+        }
+      ]
+    }
+  ]
+}

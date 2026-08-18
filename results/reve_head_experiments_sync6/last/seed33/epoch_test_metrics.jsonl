@@ -1,0 +1,17 @@
+{"seed": 33, "epoch": 1, "test_pearsonr": 0.07762669771909714}
+{"seed": 33, "epoch": 2, "test_pearsonr": 0.1555229276418686}
+{"seed": 33, "epoch": 3, "test_pearsonr": 0.21042735874652863}
+{"seed": 33, "epoch": 4, "test_pearsonr": 0.1413269191980362}
+{"seed": 33, "epoch": 5, "test_pearsonr": 0.19005048274993896}
+{"seed": 33, "epoch": 6, "test_pearsonr": 0.19702890515327454}
+{"seed": 33, "epoch": 7, "test_pearsonr": 0.36703649163246155}
+{"seed": 33, "epoch": 8, "test_pearsonr": 0.2340318262577057}
+{"seed": 33, "epoch": 9, "test_pearsonr": 0.2920807898044586}
+{"seed": 33, "epoch": 10, "test_pearsonr": 0.20974402129650116}
+{"seed": 33, "epoch": 11, "test_pearsonr": 0.29726746678352356}
+{"seed": 33, "epoch": 12, "test_pearsonr": 0.28795334696769714}
+{"seed": 33, "epoch": 13, "test_pearsonr": 0.31733185052871704}
+{"seed": 33, "epoch": 14, "test_pearsonr": 0.2042679488658905}
+{"seed": 33, "epoch": 15, "test_pearsonr": 0.2980310022830963}
+{"seed": 33, "epoch": 16, "test_pearsonr": 0.2639327049255371}
+{"seed": 33, "epoch": 17, "test_pearsonr": 0.2381117045879364}
