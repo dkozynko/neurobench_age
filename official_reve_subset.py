@@ -15,10 +15,12 @@ import csv
 import hashlib
 import json
 import logging
+import math
 import os
 import shlex
 import sys
 import traceback
+import types
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -197,6 +199,153 @@ def _set_frozen_experiment_field(experiment: Any, name: str, value: Any) -> None
     object.__setattr__(experiment, name, value)
 
 
+_CONFIGURE_OPTIMIZERS_ABSENT = object()
+
+
+def _last_tuned_configure_optimizers(brain_module: Any) -> dict[str, Any]:
+    """Build the tuned optimizer from one prepared BrainModule instance."""
+
+    try:
+        from reve_upstream_heads import build_last_tuned_optimizer_config
+    except ImportError:  # Package-style invocation: ``python -m ...``.
+        from .reve_upstream_heads import build_last_tuned_optimizer_config
+
+    model = getattr(brain_module, "model", None)
+    trainer = getattr(brain_module, "trainer", None)
+    return build_last_tuned_optimizer_config(model, trainer=trainer)
+
+
+def _patch_last_tuned_configure_optimizers(
+    brain_module: Any,
+    patched_modules: list[dict[str, Any]],
+) -> None:
+    """Install one instance-only optimizer override and record restoration state."""
+
+    if brain_module is None:
+        raise RuntimeError("last_tuned prepare_pl_module created no _brain_module")
+    if not isinstance(patched_modules, list):
+        raise TypeError("patched_modules must be a per-run list")
+    if any(record["module"] is brain_module for record in patched_modules):
+        raise RuntimeError("last_tuned BrainModule was already patched in this run")
+
+    instance_attributes = getattr(brain_module, "__dict__", None)
+    if not isinstance(instance_attributes, dict):
+        raise TypeError("last_tuned BrainModule must expose instance attributes")
+    previous = instance_attributes.get(
+        "configure_optimizers", _CONFIGURE_OPTIMIZERS_ABSENT
+    )
+    record = {
+        "module": brain_module,
+        "previous": previous,
+    }
+    patched_modules.append(record)
+    try:
+        brain_module.configure_optimizers = types.MethodType(
+            _last_tuned_configure_optimizers,
+            brain_module,
+        )
+    except BaseException:
+        patched_modules.pop()
+        raise
+
+
+def _restore_last_tuned_configure_optimizers(
+    patched_modules: list[dict[str, Any]],
+) -> None:
+    """Restore every patched instance in reverse installation order."""
+
+    restoration_errors: list[BaseException] = []
+    while patched_modules:
+        record = patched_modules.pop()
+        brain_module = record["module"]
+        previous = record["previous"]
+        try:
+            if previous is _CONFIGURE_OPTIMIZERS_ABSENT:
+                instance_attributes = getattr(brain_module, "__dict__", {})
+                if "configure_optimizers" in instance_attributes:
+                    delattr(brain_module, "configure_optimizers")
+            else:
+                brain_module.configure_optimizers = previous
+        except BaseException as error:
+            restoration_errors.append(error)
+    if restoration_errors:
+        error = RuntimeError(
+            "failed to restore one or more last_tuned configure_optimizers patches"
+        )
+        for restoration_error in restoration_errors:
+            error.add_note(repr(restoration_error))
+        raise error
+
+
+def _last_tuned_report_metadata(
+    *,
+    query_metadata: Mapping[str, Any],
+    optimizer_config: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Flatten resolved tuning state into the stable report representation."""
+
+    scheduler = optimizer_config["scheduler"]
+    scheduler_kwargs = scheduler["kwargs"]
+    return {
+        **dict(query_metadata),
+        "optimizer": optimizer_config["optimizer"]["name"],
+        "base_learning_rate": optimizer_config["optimizer"]["lr"],
+        "query_learning_rate": optimizer_config["param_groups"][1]["learning_rate"],
+        "weight_decay": optimizer_config["optimizer"]["kwargs"]["weight_decay"],
+        "scheduler": scheduler["name"],
+        "scheduler_max_lr": list(scheduler_kwargs["max_lr"]),
+        "scheduler_pct_start": scheduler_kwargs["pct_start"],
+        "scheduler_anneal_strategy": scheduler_kwargs["anneal_strategy"],
+        "scheduler_div_factor": scheduler_kwargs["div_factor"],
+        "scheduler_final_div_factor": scheduler_kwargs["final_div_factor"],
+        "scheduler_interval": scheduler["interval"],
+        "scheduler_frequency": scheduler["frequency"],
+        "optimizer_param_groups": list(optimizer_config["param_groups"]),
+        "monitor": "val/pearsonr",
+        "checkpoint_selection_monitor": "val/pearsonr",
+        "test_pearsonr_role": "diagnostic_only",
+    }
+
+
+def _merge_last_tuned_result_metadata(
+    results: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Return the resolved tuning metadata captured from the official test pass."""
+
+    metadata: dict[str, Any] = {}
+    for result in results:
+        candidate = result.get("tuning_metadata")
+        if isinstance(candidate, Mapping):
+            metadata.update(candidate)
+    return metadata
+
+
+def _selected_validation_checkpoint_epoch(
+    results: Sequence[Mapping[str, Any]],
+) -> int | None:
+    """Select an epoch only from explicitly recorded validation Pearson values."""
+
+    candidates: list[tuple[float, int]] = []
+    for result in results:
+        records = result.get("epoch_metrics")
+        if not isinstance(records, (list, tuple)):
+            continue
+        for record in records:
+            if not isinstance(record, Mapping):
+                continue
+            metric = record.get("val/pearsonr", record.get("pearsonr"))
+            epoch = record.get("epoch")
+            if isinstance(metric, bool) or isinstance(epoch, bool):
+                continue
+            if not isinstance(metric, (int, float)) or not isinstance(epoch, int):
+                continue
+            if math.isfinite(float(metric)):
+                candidates.append((float(metric), epoch))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
+
+
 def _patch_official_components(
     manifest_path: Path,
     data_root: Path,
@@ -219,15 +368,21 @@ def _patch_official_components(
     try:
         from reve_upstream_heads import (
             PROTOCOL_CONTRACT,
+            last_tuned_optimizer_metadata,
             make_upstream_reve_wrapper,
+            _resolve_last_tuned_model,
             validate_head_variant,
+            validate_last_tuned_protocol,
             validate_official_protocol,
         )
     except ImportError:  # Package-style invocation: ``python -m ...``.
         from .reve_upstream_heads import (
             PROTOCOL_CONTRACT,
+            last_tuned_optimizer_metadata,
             make_upstream_reve_wrapper,
+            _resolve_last_tuned_model,
             validate_head_variant,
+            validate_last_tuned_protocol,
             validate_official_protocol,
         )
 
@@ -256,20 +411,14 @@ def _patch_official_components(
     def iter_manifest_timelines(_study: Any) -> Iterable[dict[str, Any]]:
         return iter(timelines)
 
-    shirazi2024hbn.Shirazi2024Hbn.iter_timelines = iter_manifest_timelines
-    if original_info is not None:
-        shirazi2024hbn.Shirazi2024Hbn._info = original_info.model_copy(
-            update={"num_timelines": len(timelines)}
-        )
-
     captured_loaders: dict[int, dict[str, Any]] = {}
+    patched_brain_modules: list[dict[str, Any]] = []
+    tuning_metadata_by_experiment: dict[int, dict[str, Any]] = {}
 
     def prepare_and_capture(data: Any) -> dict[str, Any]:
         loaders = original_prepare(data)
         captured_loaders[id(data)] = loaders
         return loaders
-
-    Data.prepare = prepare_and_capture
 
     def test_and_capture(
         self: Any,
@@ -278,10 +427,18 @@ def _patch_official_components(
     ) -> dict[str, Any]:
         result = original_test(self, loaders, best_model_path)
         if final_results is not None:
-            final_results.append(dict(result))
+            captured = dict(result)
+            if head_variant == "last_tuned":
+                captured_metadata = captured.get("tuning_metadata")
+                merged_metadata = (
+                    dict(captured_metadata)
+                    if isinstance(captured_metadata, Mapping)
+                    else {}
+                )
+                merged_metadata.update(tuning_metadata_by_experiment.get(id(self), {}))
+                captured["tuning_metadata"] = merged_metadata
+            final_results.append(captured)
         return result
-
-    Experiment._test = test_and_capture
 
     def setup_with_epoch_test(self: Any, is_test: bool = False) -> Any:
         trainer = original_setup_trainer(self, is_test=is_test)
@@ -298,8 +455,6 @@ def _patch_official_components(
             )
         return trainer
 
-    Experiment.setup_trainer = setup_with_epoch_test
-
     def setup_with_metadata(self: Any) -> Any:
         # The standard REVE YAML wrapper is mean-pooling plus a linear probe.
         # For upstream variants, replace only that downstream config; the
@@ -312,6 +467,20 @@ def _patch_official_components(
                     variant=head_variant,
                     dropout=head_dropout,
                 ),
+            )
+        if head_variant == "last_tuned":
+            # NeuralBench expresses the actual checkpoint criterion through
+            # ``trainer_config``.  Record its resolved tuning counterpart on
+            # this run instance so the separate tuning validator can reject a
+            # relabeling of the diagnostic test callback as a selector.
+            _set_frozen_experiment_field(
+                self,
+                "checkpoint_selection",
+                {
+                    "monitor": "val/pearsonr",
+                    "mode": "max",
+                    "test_pearsonr_role": "diagnostic_only",
+                },
             )
         _set_frozen_experiment_field(self, "save_test_predictions", True)
         # Keep the selected checkpoint and raw prediction cache available for
@@ -336,7 +505,24 @@ def _patch_official_components(
             )
         return result
 
-    Experiment.setup_run = setup_with_metadata
+    def persist_tuning_metadata(self: Any, metadata: Mapping[str, Any]) -> None:
+        """Merge late-bound query and optimizer details into run metadata."""
+
+        uid_folder = self.infra.uid_folder()
+        if uid_folder is None:
+            return
+        path = uid_folder / "run_metadata.json"
+        payload: dict[str, Any] = {}
+        if path.is_file():
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(loaded, Mapping):
+                raise ValueError("run_metadata.json must contain a JSON object")
+            payload.update(loaded)
+        payload.update(metadata)
+        path.write_text(
+            json.dumps(payload, indent=2, default=str) + "\n",
+            encoding="utf-8",
+        )
 
     def prepare_with_protocol(
         self: Any,
@@ -344,16 +530,40 @@ def _patch_official_components(
         val_loader: Any = None,
     ) -> Any:
         result = original_prepare_pl_module(self, train_loader, val_loader)
-        loaders = captured_loaders.get(id(self.data))
-        validate_official_protocol(
-            self,
-            loaders=loaders,
-            n_total_params=self._n_total_params,
-            n_trainable_params=self._n_trainable_params,
-        )
+        if head_variant == "last_tuned":
+            brain_module = getattr(self, "_brain_module", None)
+            model = getattr(brain_module, "model", None)
+            tuning_model = _resolve_last_tuned_model(model)
+            query_metadata = getattr(
+                getattr(tuning_model, "head", None), "tuning_metadata", None
+            )
+            if not isinstance(query_metadata, Mapping):
+                raise RuntimeError("last_tuned prepared model did not expose tuning metadata")
+            optimizer_metadata = last_tuned_optimizer_metadata(tuning_model)
+            _patch_last_tuned_configure_optimizers(
+                brain_module,
+                patched_brain_modules,
+            )
+            validate_last_tuned_protocol(
+                head_variant,
+                experiment=self,
+                optimizer_config=optimizer_metadata,
+            )
+            tuning_metadata = _last_tuned_report_metadata(
+                query_metadata=query_metadata,
+                optimizer_config=optimizer_metadata,
+            )
+            tuning_metadata_by_experiment[id(self)] = tuning_metadata
+            persist_tuning_metadata(self, tuning_metadata)
+        else:
+            loaders = captured_loaders.get(id(self.data))
+            validate_official_protocol(
+                self,
+                loaders=loaders,
+                n_total_params=self._n_total_params,
+                n_trainable_params=self._n_trainable_params,
+            )
         return result
-
-    Experiment.prepare_pl_module = prepare_with_protocol
 
     # NeuralBench's CLI and experiment_config modules each keep a local alias
     # to the YAML loader. Patch both so a task-specific grid cannot silently
@@ -363,6 +573,22 @@ def _patch_official_components(
 
     original_cli_load_yaml_config = cli.load_yaml_config
     original_experiment_load_yaml_config = experiment_config.load_yaml_config
+
+    originals = {
+        "iter_timelines": original_iter_timelines,
+        "info": original_info,
+        "prepare": original_prepare,
+        "test": original_test,
+        "setup_run": original_setup_run,
+        "prepare_pl_module": original_prepare_pl_module,
+        "patched_brain_modules": patched_brain_modules,
+        "setup_trainer": original_setup_trainer,
+        "cli_loader": (cli, original_cli_load_yaml_config),
+        "experiment_loader": (
+            experiment_config,
+            original_experiment_load_yaml_config,
+        ),
+    }
 
     def load_seed_grid(path: Path, *args: Any, **kwargs: Any) -> Any:
         if Path(path).name == "grid.yaml":
@@ -376,22 +602,26 @@ def _patch_official_components(
             return {"seed": list(resolved_seeds)}
         return original_experiment_load_yaml_config(path, *args, **kwargs)
 
-    cli.load_yaml_config = load_seed_grid
-    experiment_config.load_yaml_config = load_seed_grid_for_experiment_config
-    return {
-        "iter_timelines": original_iter_timelines,
-        "info": original_info,
-        "prepare": original_prepare,
-        "test": original_test,
-        "setup_run": original_setup_run,
-        "prepare_pl_module": original_prepare_pl_module,
-        "setup_trainer": original_setup_trainer,
-        "cli_loader": (cli, original_cli_load_yaml_config),
-        "experiment_loader": (
-            experiment_config,
-            original_experiment_load_yaml_config,
-        ),
-    }
+    try:
+        shirazi2024hbn.Shirazi2024Hbn.iter_timelines = iter_manifest_timelines
+        if original_info is not None:
+            shirazi2024hbn.Shirazi2024Hbn._info = original_info.model_copy(
+                update={"num_timelines": len(timelines)}
+            )
+        Data.prepare = prepare_and_capture
+        Experiment._test = test_and_capture
+        Experiment.setup_trainer = setup_with_epoch_test
+        Experiment.setup_run = setup_with_metadata
+        Experiment.prepare_pl_module = prepare_with_protocol
+        cli.load_yaml_config = load_seed_grid
+        experiment_config.load_yaml_config = load_seed_grid_for_experiment_config
+    except BaseException as active_error:
+        try:
+            _restore_official_components(originals)
+        except BaseException as cleanup_error:
+            active_error.add_note(f"patch setup cleanup failure: {cleanup_error!r}")
+        raise
+    return originals
 
 
 def _restore_official_components(originals: Mapping[str, Any]) -> None:
@@ -401,15 +631,79 @@ def _restore_official_components(originals: Mapping[str, Any]) -> None:
 
     cli, original_cli_loader = originals["cli_loader"]
     experiment_config, original_experiment_loader = originals["experiment_loader"]
-    shirazi2024hbn.Shirazi2024Hbn.iter_timelines = originals["iter_timelines"]
-    shirazi2024hbn.Shirazi2024Hbn._info = originals["info"]
-    Data.prepare = originals["prepare"]
-    Experiment.setup_run = originals["setup_run"]
-    Experiment._test = originals["test"]
-    Experiment.prepare_pl_module = originals["prepare_pl_module"]
-    Experiment.setup_trainer = originals["setup_trainer"]
-    cli.load_yaml_config = original_cli_loader
-    experiment_config.load_yaml_config = original_experiment_loader
+    restoration_errors: list[tuple[str, BaseException]] = []
+
+    def attempt(label: str, restore: Any) -> None:
+        try:
+            restore()
+        except BaseException as error:
+            restoration_errors.append((label, error))
+
+    attempt(
+        "Shirazi2024Hbn.iter_timelines",
+        lambda: setattr(
+            shirazi2024hbn.Shirazi2024Hbn,
+            "iter_timelines",
+            originals["iter_timelines"],
+        ),
+    )
+    attempt(
+        "Shirazi2024Hbn._info",
+        lambda: setattr(
+            shirazi2024hbn.Shirazi2024Hbn,
+            "_info",
+            originals["info"],
+        ),
+    )
+    attempt("Data.prepare", lambda: setattr(Data, "prepare", originals["prepare"]))
+    attempt(
+        "Experiment.setup_run",
+        lambda: setattr(Experiment, "setup_run", originals["setup_run"]),
+    )
+    attempt(
+        "Experiment._test",
+        lambda: setattr(Experiment, "_test", originals["test"]),
+    )
+    attempt(
+        "Experiment.prepare_pl_module",
+        lambda: setattr(
+            Experiment,
+            "prepare_pl_module",
+            originals["prepare_pl_module"],
+        ),
+    )
+    attempt(
+        "Experiment.setup_trainer",
+        lambda: setattr(
+            Experiment,
+            "setup_trainer",
+            originals["setup_trainer"],
+        ),
+    )
+    attempt(
+        "neuralbench.cli.load_yaml_config",
+        lambda: setattr(cli, "load_yaml_config", original_cli_loader),
+    )
+    attempt(
+        "neuralbench.experiment_config.load_yaml_config",
+        lambda: setattr(
+            experiment_config,
+            "load_yaml_config",
+            original_experiment_loader,
+        ),
+    )
+    attempt(
+        "last_tuned.configure_optimizers",
+        lambda: _restore_last_tuned_configure_optimizers(
+            originals.get("patched_brain_modules", [])
+        ),
+    )
+
+    if restoration_errors:
+        error = RuntimeError("official component restoration failed")
+        for label, restoration_error in restoration_errors:
+            error.add_note(f"{label}: {restoration_error!r}")
+        raise error
 
 
 def validate_seeds(seeds: Sequence[int]) -> tuple[int, ...]:
@@ -506,6 +800,20 @@ def write_failure_diagnostics(
     return path
 
 
+def _metadata_values_are_finite(value: Any) -> bool:
+    """Return whether every numeric value in JSON-style metadata is finite."""
+
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return True
+    if isinstance(value, (int, float)):
+        return math.isfinite(float(value))
+    if isinstance(value, Mapping):
+        return all(_metadata_values_are_finite(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return all(_metadata_values_are_finite(item) for item in value)
+    return False
+
+
 def run_official_stack_smoke(
     *,
     head_variant: str,
@@ -521,14 +829,22 @@ def run_official_stack_smoke(
     """
 
     try:
-        from reve_upstream_heads import UpstreamReveHeadModel, validate_upstream_head_variant
+        from reve_upstream_heads import (
+            UpstreamReveHeadModel,
+            validate_last_tuned_protocol,
+            validate_upstream_head_variant,
+        )
     except ImportError:
         from .reve_upstream_heads import (
             UpstreamReveHeadModel,
+            validate_last_tuned_protocol,
             validate_upstream_head_variant,
         )
 
-    validate_upstream_head_variant(head_variant)
+    if head_variant == "last_tuned":
+        validate_last_tuned_protocol(head_variant)
+    else:
+        validate_upstream_head_variant(head_variant)
     import torch
     from braindecode.models import REVE
     from neuraltrain.models.reve import _ReveWrapper
@@ -550,18 +866,41 @@ def run_official_stack_smoke(
         attention_pooling=True,
     )
     encoder = _ReveWrapper(model, encoder_only=True).to(device)
-    adapter = UpstreamReveHeadModel(
-        encoder,
-        variant=head_variant,
-        n_outputs=1,
-        dropout=0.0,
-    ).to(device)
+    if head_variant != "last_tuned":
+        # Keep the official smoke variants on their exact existing RNG and
+        # construction path.  Only the tuning branch needs encoder tokens
+        # before it can construct its explicit query.
+        adapter = UpstreamReveHeadModel(
+            encoder,
+            variant=head_variant,
+            n_outputs=1,
+            dropout=0.0,
+        ).to(device)
     eeg = torch.randn(2, n_chans, n_times, device=device)
     positions = torch.randn(2, n_chans, 3, device=device)
 
     with torch.inference_mode():
         raw_layers = model(eeg, pos=positions, return_output=True)
         final = encoder(eeg, pos=positions)
+    if head_variant == "last_tuned":
+        if not isinstance(final, torch.Tensor) or final.ndim != 3:
+            raise RuntimeError("last_tuned smoke encoder did not return final tokens")
+        with torch.inference_mode(False):
+            query_token = final[:1].mean(dim=1, keepdim=True).detach().clone()
+        if not torch.isfinite(query_token).all():
+            raise RuntimeError("last_tuned smoke mean-token query is not finite")
+        adapter = UpstreamReveHeadModel(
+            encoder,
+            variant=head_variant,
+            n_outputs=1,
+            dropout=0.0,
+            query_token=query_token,
+            query_initialization_metadata={
+                "query_initialization": "smoke_synthetic_mean_token",
+                "query_initialization_provenance": "smoke",
+            },
+        ).to(device)
+    with torch.inference_mode():
         prediction = adapter(eeg, channel_positions=positions)
 
     if not isinstance(raw_layers, (list, tuple)):
@@ -574,7 +913,7 @@ def run_official_stack_smoke(
     if tuple(prediction.shape) != (2, 1):
         raise RuntimeError(f"unexpected adapter output shape: {tuple(prediction.shape)}")
 
-    return {
+    output = {
         "head_variant": head_variant,
         "device": device,
         "token_shapes": [list(layer.shape) for layer in raw_layers],
@@ -584,6 +923,18 @@ def run_official_stack_smoke(
         "layer_count_including_initial": len(raw_layers),
         "query_initialization": adapter.head.query_initialization,
     }
+    if head_variant == "last_tuned":
+        tuning_metadata = adapter.head.tuning_metadata
+        output.update(
+            {
+                "query_initialization_provenance": tuning_metadata[
+                    "query_initialization_provenance"
+                ],
+                "prediction_finite": bool(torch.isfinite(prediction).all().item()),
+                "metadata_finite": _metadata_values_are_finite(tuning_metadata),
+            }
+        )
+    return output
 
 
 def run_official_subset(
@@ -601,21 +952,25 @@ def run_official_subset(
 
     os.environ["NEURALBENCH_CONFIG"] = str(config_path)
     final_results: list[dict[str, Any]] = []
-    originals = _patch_official_components(
-        manifest_path,
-        data_root,
-        epoch_metrics_path,
-        head_variant=head_variant,
-        head_dropout=head_dropout,
-        seeds=seeds,
-        run_metadata=run_metadata,
-        final_results=final_results,
-    )
-    from neuralbench.main import BenchmarkAggregator
-
-    original_aggregator_prepare = BenchmarkAggregator.prepare
-    BenchmarkAggregator.prepare = _run_experiments_synchronously
+    originals: Mapping[str, Any] | None = None
+    benchmark_aggregator: Any = None
+    original_aggregator_prepare: Any = None
     try:
+        originals = _patch_official_components(
+            manifest_path,
+            data_root,
+            epoch_metrics_path,
+            head_variant=head_variant,
+            head_dropout=head_dropout,
+            seeds=seeds,
+            run_metadata=run_metadata,
+            final_results=final_results,
+        )
+        from neuralbench.main import BenchmarkAggregator
+
+        benchmark_aggregator = BenchmarkAggregator
+        original_aggregator_prepare = BenchmarkAggregator.prepare
+        BenchmarkAggregator.prepare = _run_experiments_synchronously
         from neuralbench import run_benchmark
 
         run_benchmark(
@@ -630,8 +985,27 @@ def run_official_subset(
         # and collides with this run's custom upstream head UID.
         return final_results
     finally:
-        BenchmarkAggregator.prepare = original_aggregator_prepare
-        _restore_official_components(originals)
+        active_error = sys.exc_info()[1]
+        cleanup_errors: list[BaseException] = []
+        if benchmark_aggregator is not None and original_aggregator_prepare is not None:
+            try:
+                benchmark_aggregator.prepare = original_aggregator_prepare
+            except BaseException as error:
+                cleanup_errors.append(error)
+        if originals is not None:
+            try:
+                _restore_official_components(originals)
+            except BaseException as error:
+                cleanup_errors.append(error)
+        if cleanup_errors:
+            if active_error is not None:
+                for cleanup_error in cleanup_errors:
+                    active_error.add_note(f"cleanup failure: {cleanup_error!r}")
+            else:
+                cleanup_error = RuntimeError("official REVE cleanup failed")
+                for error in cleanup_errors:
+                    cleanup_error.add_note(repr(error))
+                raise cleanup_error
 
 
 def _run_experiments_synchronously(aggregator: Any) -> None:
@@ -674,12 +1048,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument(
         "--smoke-head",
-        choices=("last_avg", "last", "all"),
+        choices=("last_avg", "last", "all", "last_tuned"),
         help="run a data-free smoke test using the installed official stack",
     )
     parser.add_argument(
         "--head-variant",
-        choices=("mean_linear", "last_avg", "last", "all"),
+        choices=("mean_linear", "last_avg", "last", "all", "last_tuned"),
         default="mean_linear",
     )
     parser.add_argument("--seeds", type=int, nargs="+", default=[33])
@@ -706,12 +1080,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         try:
             from reve_upstream_heads import (
+                LAST_TUNED_BASE_LR,
+                LAST_TUNED_HEAD_ARCHITECTURE,
+                LAST_TUNED_HEAD_SOURCE,
+                LAST_TUNED_INITIAL_ALPHA,
+                LAST_TUNED_PROTOCOL_CLASS,
+                LAST_TUNED_QUERY_LR,
+                LAST_TUNED_SCHEDULER_DIV_FACTOR,
+                LAST_TUNED_SCHEDULER_FINAL_DIV_FACTOR,
+                LAST_TUNED_SCHEDULER_MAX_LR,
+                LAST_TUNED_SCHEDULER_PCT_START,
+                LAST_TUNED_WEIGHT_DECAY,
                 PROTOCOL_CONTRACT,
                 runtime_metadata,
                 source_lock_metadata,
             )
         except ImportError:
             from .reve_upstream_heads import (
+                LAST_TUNED_BASE_LR,
+                LAST_TUNED_HEAD_ARCHITECTURE,
+                LAST_TUNED_HEAD_SOURCE,
+                LAST_TUNED_INITIAL_ALPHA,
+                LAST_TUNED_PROTOCOL_CLASS,
+                LAST_TUNED_QUERY_LR,
+                LAST_TUNED_SCHEDULER_DIV_FACTOR,
+                LAST_TUNED_SCHEDULER_FINAL_DIV_FACTOR,
+                LAST_TUNED_SCHEDULER_MAX_LR,
+                LAST_TUNED_SCHEDULER_PCT_START,
+                LAST_TUNED_WEIGHT_DECAY,
                 PROTOCOL_CONTRACT,
                 runtime_metadata,
                 source_lock_metadata,
@@ -721,6 +1117,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             query_initialization = "neuralbench_default"
         elif args.head_variant == "last_avg":
             query_initialization = "upstream_random_unused"
+        elif args.head_variant == "last_tuned":
+            query_initialization = "train_dummy_final_token_mean"
         else:
             query_initialization = "upstream_random"
 
@@ -752,6 +1150,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             "protocol": PROTOCOL_CONTRACT,
             "runtime": runtime_metadata(),
         }
+        if args.head_variant == "last_tuned":
+            metadata.update(
+                {
+                    "head_source": LAST_TUNED_HEAD_SOURCE,
+                    "head_architecture": LAST_TUNED_HEAD_ARCHITECTURE,
+                    "protocol_class": LAST_TUNED_PROTOCOL_CLASS,
+                    "residual_initial_alpha": LAST_TUNED_INITIAL_ALPHA,
+                    "query_initialization": query_initialization,
+                    "base_learning_rate": LAST_TUNED_BASE_LR,
+                    "query_learning_rate": LAST_TUNED_QUERY_LR,
+                    "optimizer": "AdamW",
+                    "weight_decay": LAST_TUNED_WEIGHT_DECAY,
+                    "scheduler": "OneCycleLR",
+                    "scheduler_max_lr": list(LAST_TUNED_SCHEDULER_MAX_LR),
+                    "scheduler_pct_start": LAST_TUNED_SCHEDULER_PCT_START,
+                    "scheduler_anneal_strategy": "cos",
+                    "scheduler_div_factor": LAST_TUNED_SCHEDULER_DIV_FACTOR,
+                    "scheduler_final_div_factor": LAST_TUNED_SCHEDULER_FINAL_DIV_FACTOR,
+                    "scheduler_interval": "step",
+                    "scheduler_frequency": 1,
+                    "monitor": "val/pearsonr",
+                    "checkpoint_selection_monitor": "val/pearsonr",
+                    "test_pearsonr_role": "diagnostic_only",
+                }
+            )
         if args.head_variant != "mean_linear":
             metadata["head_source_lock"] = source_lock_metadata()
 
@@ -760,13 +1183,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_dir = args.output_dir / args.head_variant / f"seed{seed}"
             config_path = run_dir / "neuralbench_config.json"
             epoch_metrics_path = run_dir / "epoch_test_metrics.jsonl"
-            _write_config(
-                config_path,
-                data_root=args.data_root,
-                output_dir=run_dir,
-            )
             seed_metadata = {**metadata, "seed": seed, "data_seed": 33}
             try:
+                _write_config(
+                    config_path,
+                    data_root=args.data_root,
+                    output_dir=run_dir,
+                )
                 results = run_official_subset(
                     manifest_path=args.manifest,
                     data_root=args.data_root,
@@ -776,13 +1199,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                     seeds=(seed,),
                     run_metadata=seed_metadata,
                 )
+                tuning_metadata = (
+                    _merge_last_tuned_result_metadata(results)
+                    if args.head_variant == "last_tuned"
+                    else {}
+                )
                 report = {
                     "status": "completed",
                     **seed_metadata,
+                    **tuning_metadata,
                     "official_results": results,
                     "epoch_metrics": str(epoch_metrics_path),
                     "artifacts": collect_run_artifacts(run_dir),
                 }
+                if args.head_variant == "last_tuned":
+                    selected_checkpoint_epoch = _selected_validation_checkpoint_epoch(
+                        results
+                    )
+                    if selected_checkpoint_epoch is not None:
+                        report["selected_checkpoint_epoch"] = selected_checkpoint_epoch
+                run_dir.mkdir(parents=True, exist_ok=True)
+                (run_dir / "report.json").write_text(
+                    json.dumps(report, indent=2, default=str) + "\n",
+                    encoding="utf-8",
+                )
             except Exception as error:
                 failure_path = write_failure_diagnostics(
                     run_dir,
@@ -790,25 +1230,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                     launch_command=launch_command,
                     metadata=seed_metadata,
                 )
-                report = {
-                    "status": "failed",
-                    **seed_metadata,
-                    "failure": str(failure_path),
-                    "artifacts": collect_run_artifacts(run_dir),
-                }
-                reports.append(report)
-                (run_dir / "report.json").write_text(
-                    json.dumps(report, indent=2, default=str) + "\n",
-                    encoding="utf-8",
-                )
+                report_path = run_dir / "report.json"
+                try:
+                    report_path.unlink(missing_ok=True)
+                except OSError as cleanup_error:
+                    error.add_note(
+                        f"failed to remove stale report.json after failure: {cleanup_error!r}"
+                    )
                 raise
 
             reports.append(report)
-            run_dir.mkdir(parents=True, exist_ok=True)
-            (run_dir / "report.json").write_text(
-                json.dumps(report, indent=2, default=str) + "\n",
-                encoding="utf-8",
-            )
 
         summary = {
             "status": "completed",
