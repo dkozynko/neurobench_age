@@ -109,9 +109,7 @@ def _validate_query_shape(query_token: Any, *, embed_dim: int) -> torch.Tensor:
         embed_dim,
     ):
         shape = getattr(query_token, "shape", None)
-        raise AdapterContractError(
-            f"cls_query_token must have shape [1, 1, {embed_dim}], got {shape}"
-        )
+        raise AdapterContractError(f"cls_query_token must have shape [1, 1, {embed_dim}], got {shape}")
     return query_token
 
 
@@ -130,17 +128,13 @@ def concatenate_all_layers(
     """Concatenate REVE's positional input and transformer outputs by tokens."""
 
     if isinstance(layers, torch.Tensor) or not isinstance(layers, (list, tuple)):
-        raise AdapterContractError(
-            "all requires an ordered sequence of [batch, tokens, dim] tensors"
-        )
+        raise AdapterContractError("all requires an ordered sequence of [batch, tokens, dim] tensors")
     if not layers:
         raise AdapterContractError("all requires at least one encoder output sequence")
 
     first = layers[0]
     if not isinstance(first, torch.Tensor) or first.ndim != 3:
-        raise AdapterContractError(
-            "all requires every encoder output to have shape [batch, tokens, dim]"
-        )
+        raise AdapterContractError("all requires every encoder output to have shape [batch, tokens, dim]")
     expected_shape = (first.shape[0], first.shape[-1])
     if embed_dim is not None and first.shape[-1] != embed_dim:
         raise AdapterContractError(
@@ -211,9 +205,7 @@ class UpstreamReveHead(nn.Module):
         self.query_token = nn.Parameter(query_token.detach().clone())
         if variant == "last_tuned":
             self.gate_logit = nn.Parameter(
-                torch.tensor(
-                    math.log(LAST_TUNED_INITIAL_ALPHA / (1.0 - LAST_TUNED_INITIAL_ALPHA))
-                )
+                torch.tensor(math.log(LAST_TUNED_INITIAL_ALPHA / (1.0 - LAST_TUNED_INITIAL_ALPHA)))
             )
             tuning_metadata: dict[str, Any] = {
                 "head_variant": variant,
@@ -345,15 +337,11 @@ class UpstreamReveHead(nn.Module):
 
         assert self.query_token is not None
         if not torch.isfinite(tokens).all():
-            raise AdapterContractError(
-                "last_tuned final token tensor must contain only finite values"
-            )
+            raise AdapterContractError("last_tuned final token tensor must contain only finite values")
         self._validate_last_tuned_state()
 
         query = self.query_token.expand(tokens.shape[0], -1, -1)
-        scores = torch.einsum("bqd,btd->bqt", query, tokens) / math.sqrt(
-            self.embed_dim
-        )
+        scores = torch.einsum("bqd,btd->bqt", query, tokens) / math.sqrt(self.embed_dim)
         if not torch.isfinite(scores).all():
             raise AdapterContractError("last_tuned attention scores must be finite")
 
@@ -434,9 +422,7 @@ class AllLayerReveEncoder:
                 "all requires return_output=True to expose the ordered layer sequence"
             )
         if not isinstance(output, (list, tuple)):
-            raise AdapterContractError(
-                "all requires return_output=True to return an ordered sequence"
-            )
+            raise AdapterContractError("all requires return_output=True to return an ordered sequence")
         return output
 
 
@@ -525,10 +511,7 @@ def make_upstream_reve_wrapper(
     else:
         validate_upstream_head_variant(variant)
     if dropout != DEFAULT_UPSTREAM_DROPOUT:
-        raise ValueError(
-            "the first upstream-head comparison fixes dropout=0.0; "
-            f"got {dropout}"
-        )
+        raise ValueError(f"the first upstream-head comparison fixes dropout=0.0; got {dropout}")
 
     from neuralbench.modules import DownstreamWrapper
 
@@ -546,9 +529,7 @@ def make_upstream_reve_wrapper(
             if self.on_the_fly_preprocessor is not None:
                 raise AdapterContractError("upstream REVE wrapper does not support preprocessing")
             if self.channel_adapter_config is not None:
-                raise AdapterContractError(
-                    "upstream REVE wrapper does not support channel adapters"
-                )
+                raise AdapterContractError("upstream REVE wrapper does not support channel adapters")
             if self.model_output_key is not None:
                 raise AdapterContractError("upstream REVE wrapper requires model_output_key=None")
             if self.layers_to_freeze is not None or self.layers_to_unfreeze is not None:
@@ -595,4 +576,3 @@ def make_upstream_reve_wrapper(
         head_variant=variant,
         head_dropout=float(dropout),
     )
-

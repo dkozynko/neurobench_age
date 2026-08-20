@@ -52,10 +52,7 @@ def validate_head_variant(variant: str) -> str:
     """Validate and return a supported head variant."""
 
     if variant not in HEAD_VARIANTS:
-        raise ValueError(
-            f"unsupported REVE head variant {variant!r}; "
-            f"expected one of {HEAD_VARIANTS}"
-        )
+        raise ValueError(f"unsupported REVE head variant {variant!r}; expected one of {HEAD_VARIANTS}")
     return variant
 
 
@@ -104,9 +101,7 @@ def validate_upstream_head_variant(variant: str) -> str:
 
     validate_official_head_variant(variant)
     if variant not in UPSTREAM_HEAD_VARIANTS:
-        raise ValueError(
-            f"{variant!r} is the official baseline, not an upstream head variant"
-        )
+        raise ValueError(f"{variant!r} is the official baseline, not an upstream head variant")
     return variant
 
 PROTOCOL_CONTRACT: dict[str, Any] = {
@@ -210,9 +205,7 @@ def _last_tuned_group_mismatches(groups: Any) -> list[str]:
         for field, expected in expected_fields.items():
             actual = _get_path(group, field)
             if actual is _MISSING or not _same(actual, expected):
-                mismatches.append(
-                    f"{group_path}.{field}: expected {expected!r}, got {actual!r}"
-                )
+                mismatches.append(f"{group_path}.{field}: expected {expected!r}, got {actual!r}")
 
         parameter_names = _get_path(group, "parameter_names")
         if (
@@ -303,12 +296,8 @@ def _validate_last_tuned_resolved_protocol(
         "scheduler.frequency": 1,
     }
     mismatches = _path_mismatches(experiment, experiment_checks)
-    mismatches.extend(
-        _path_mismatches(optimizer_config, optimizer_checks, prefix="optimizer_config.")
-    )
-    mismatches.extend(
-        _last_tuned_group_mismatches(_get_path(optimizer_config, "param_groups"))
-    )
+    mismatches.extend(_path_mismatches(optimizer_config, optimizer_checks, prefix="optimizer_config."))
+    mismatches.extend(_last_tuned_group_mismatches(_get_path(optimizer_config, "param_groups")))
 
     if mismatches:
         raise ProtocolMismatchError(
@@ -390,9 +379,7 @@ def validate_official_protocol(
                 mismatches.append(f"downstream_model_wrapper.{field} must be None")
         for field in ("layers_to_freeze", "layers_to_unfreeze"):
             if _get_path(wrapper, field) not in (None, _MISSING):
-                mismatches.append(
-                    f"downstream_model_wrapper.{field} must be None for full fine-tuning"
-                )
+                mismatches.append(f"downstream_model_wrapper.{field} must be None for full fine-tuning")
 
     if n_total_params is not None and n_trainable_params != n_total_params:
         mismatches.append(
@@ -463,5 +450,3 @@ def runtime_metadata() -> dict[str, Any]:
         "package_versions": package_versions,
         "source_locations": source_locations,
     }
-
-

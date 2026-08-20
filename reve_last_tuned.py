@@ -182,9 +182,7 @@ def initialize_last_tuned_query(
                     else encoder(eeg, pos=channel_positions)
                 )
                 if not isinstance(output, torch.Tensor):
-                    raise AdapterContractError(
-                        "last_tuned encoder must return a final-token tensor"
-                    )
+                    raise AdapterContractError("last_tuned encoder must return a final-token tensor")
                 if output.ndim != 3 or output.shape[0] != 1 or output.shape[1] <= 0:
                     raise AdapterContractError(
                         "last_tuned encoder output must have shape [1, T, D] with T > 0"
@@ -194,9 +192,7 @@ def initialize_last_tuned_query(
                         "last_tuned encoder token count does not match REVE patch geometry"
                     )
                 if output.shape[2] <= 0:
-                    raise AdapterContractError(
-                        "last_tuned encoder output embed dim must be positive"
-                    )
+                    raise AdapterContractError("last_tuned encoder output embed dim must be positive")
                 if not torch.isfinite(output).all():
                     raise AdapterContractError(
                         "last_tuned final token tensor must contain only finite values"
@@ -224,9 +220,7 @@ def initialize_last_tuned_query(
         "query_initialization_query_sha256": _tensor_sha256(query),
     }
     if "subject_ids" in dummy_batch:
-        metadata["query_initialization_subject_ids"] = _json_safe_value(
-            dummy_batch["subject_ids"]
-        )
+        metadata["query_initialization_subject_ids"] = _json_safe_value(dummy_batch["subject_ids"])
     return query, metadata
 
 
@@ -242,9 +236,7 @@ def _last_tuned_total_steps(trainer: Any) -> int:
         or not isinstance(total_steps, int)
         or total_steps <= 0
     ):
-        raise ProtocolMismatchError(
-            "trainer.estimated_stepping_batches must be a positive integer"
-        )
+        raise ProtocolMismatchError("trainer.estimated_stepping_batches must be a positive integer")
     return total_steps
 
 
@@ -287,9 +279,7 @@ def _last_tuned_trainable_parameters(
     head = getattr(model, "head", None)
     query = getattr(head, "query_token", None)
     if not isinstance(query, nn.Parameter):
-        raise ProtocolMismatchError(
-            "last_tuned optimizer requires model.head.query_token"
-        )
+        raise ProtocolMismatchError("last_tuned optimizer requires model.head.query_token")
     if not query.requires_grad:
         raise ProtocolMismatchError("model.head.query_token must be trainable")
 
@@ -328,9 +318,7 @@ def _last_tuned_trainable_parameters(
         parameter for _name, parameter in named_trainable if parameter is not query
     ]
     if not base_parameters:
-        raise ProtocolMismatchError(
-            "last_tuned base optimizer group must contain trainable parameters"
-        )
+        raise ProtocolMismatchError("last_tuned base optimizer group must contain trainable parameters")
 
     resolved_parameters = base_parameters + [query]
     resolved_identities = [id(parameter) for parameter in resolved_parameters]
@@ -571,4 +559,3 @@ def last_tuned_optimizer_metadata(model: nn.Module) -> dict[str, Any]:
             },
         ],
     }
-

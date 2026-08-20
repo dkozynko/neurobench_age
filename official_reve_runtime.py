@@ -22,10 +22,7 @@ def _last_tuned_configure_optimizers(brain_module: Any, *, hooks: Any) -> dict[s
 
     model = getattr(brain_module, "model", None)
     trainer = getattr(brain_module, "trainer", None)
-    return hooks._load_reve_helpers().build_last_tuned_optimizer_config(
-        model,
-        trainer=trainer,
-    )
+    return hooks._load_reve_helpers().build_last_tuned_optimizer_config(model, trainer=trainer)
 
 
 def _patch_last_tuned_configure_optimizers(
@@ -46,9 +43,7 @@ def _patch_last_tuned_configure_optimizers(
     instance_attributes = getattr(brain_module, "__dict__", None)
     if not isinstance(instance_attributes, dict):
         raise TypeError("last_tuned BrainModule must expose instance attributes")
-    previous = instance_attributes.get(
-        "configure_optimizers", _CONFIGURE_OPTIMIZERS_ABSENT
-    )
+    previous = instance_attributes.get("configure_optimizers", _CONFIGURE_OPTIMIZERS_ABSENT)
     record = {
         "module": brain_module,
         "previous": previous,
@@ -84,9 +79,7 @@ def _restore_last_tuned_configure_optimizers(
         except BaseException as error:
             restoration_errors.append(error)
     if restoration_errors:
-        error = RuntimeError(
-            "failed to restore one or more last_tuned configure_optimizers patches"
-        )
+        error = RuntimeError("failed to restore one or more last_tuned configure_optimizers patches")
         for restoration_error in restoration_errors:
             error.add_note(repr(restoration_error))
         raise error
@@ -283,10 +276,7 @@ def _patch_official_components(
 
     reve.validate_head_variant(head_variant)
     if head_dropout != 0.0:
-        raise ValueError(
-            "the upstream REVE comparison fixes head dropout at 0.0; "
-            f"got {head_dropout}"
-        )
+        raise ValueError(f"the upstream REVE comparison fixes head dropout at 0.0; got {head_dropout}")
     resolved_seeds = hooks.validate_seeds(seeds)
 
     from neuralbench.data import Data
@@ -355,10 +345,7 @@ def _patch_official_components(
             hooks._set_frozen_experiment_field(
                 self,
                 "downstream_model_wrapper",
-                reve.make_upstream_reve_wrapper(
-                    variant=head_variant,
-                    dropout=head_dropout,
-                ),
+                reve.make_upstream_reve_wrapper(variant=head_variant, dropout=head_dropout),
             )
         if head_variant == "last_tuned":
             # NeuralBench expresses the actual checkpoint criterion through
@@ -426,17 +413,11 @@ def _patch_official_components(
             brain_module = getattr(self, "_brain_module", None)
             model = getattr(brain_module, "model", None)
             tuning_model = reve._resolve_last_tuned_model(model)
-            query_metadata = getattr(
-                getattr(tuning_model, "head", None), "tuning_metadata", None
-            )
+            query_metadata = getattr(getattr(tuning_model, "head", None), "tuning_metadata", None)
             if not isinstance(query_metadata, Mapping):
                 raise RuntimeError("last_tuned prepared model did not expose tuning metadata")
             optimizer_metadata = reve.last_tuned_optimizer_metadata(tuning_model)
-            _patch_last_tuned_configure_optimizers(
-                brain_module,
-                patched_brain_modules,
-                hooks=hooks,
-            )
+            _patch_last_tuned_configure_optimizers(brain_module, patched_brain_modules, hooks=hooks)
             reve.validate_last_tuned_protocol(
                 head_variant,
                 experiment=self,
@@ -534,41 +515,22 @@ def _restore_official_components(originals: Mapping[str, Any], *, restore_tuned:
 
     attempt(
         "Shirazi2024Hbn.iter_timelines",
-        lambda: setattr(
-            shirazi2024hbn.Shirazi2024Hbn,
-            "iter_timelines",
-            originals["iter_timelines"],
-        ),
+        lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "iter_timelines", originals["iter_timelines"]),
     )
     attempt(
         "Shirazi2024Hbn._info",
-        lambda: setattr(
-            shirazi2024hbn.Shirazi2024Hbn,
-            "_info",
-            originals["info"],
-        ),
+        lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "_info", originals["info"]),
     )
     attempt("Data.prepare", lambda: setattr(Data, "prepare", originals["prepare"]))
-    attempt(
-        "Experiment.setup_run",
-        lambda: setattr(Experiment, "setup_run", originals["setup_run"]),
-    )
+    attempt("Experiment.setup_run", lambda: setattr(Experiment, "setup_run", originals["setup_run"]))
     attempt("Experiment._test", lambda: setattr(Experiment, "_test", originals["test"]))
     attempt(
         "Experiment.prepare_pl_module",
-        lambda: setattr(
-            Experiment,
-            "prepare_pl_module",
-            originals["prepare_pl_module"],
-        ),
+        lambda: setattr(Experiment, "prepare_pl_module", originals["prepare_pl_module"]),
     )
     attempt(
         "Experiment.setup_trainer",
-        lambda: setattr(
-            Experiment,
-            "setup_trainer",
-            originals["setup_trainer"],
-        ),
+        lambda: setattr(Experiment, "setup_trainer", originals["setup_trainer"]),
     )
     attempt(
         "neuralbench.cli.load_yaml_config",
@@ -576,11 +538,7 @@ def _restore_official_components(originals: Mapping[str, Any], *, restore_tuned:
     )
     attempt(
         "neuralbench.experiment_config.load_yaml_config",
-        lambda: setattr(
-            experiment_config,
-            "load_yaml_config",
-            original_experiment_loader,
-        ),
+        lambda: setattr(experiment_config, "load_yaml_config", original_experiment_loader),
     )
     attempt(
         "last_tuned.configure_optimizers",
@@ -631,12 +589,7 @@ def run_official_subset(
         BenchmarkAggregator.prepare = _run_experiments_synchronously
         from neuralbench import run_benchmark
 
-        run_benchmark(
-            device="eeg",
-            task="age",
-            model="reve",
-            force=True,
-        )
+        run_benchmark(device="eeg", task="age", model="reve", force=True)
         # The public runner returns no result for a non-debug local run. The
         # official Experiment._test result is captured above instead. Avoid a
         # second ``plot_cached`` call: it reconstructs the canonical mean head
