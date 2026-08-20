@@ -416,7 +416,11 @@ class AllLayerReveEncoder:
         channel_indices = getattr(self.wrapped_encoder, "channel_indices", None)
         if channel_indices is not None:
             eeg = eeg[:, channel_indices]
-        output = inner(eeg, pos=pos, return_output=True)
+        # The official NeuralBench NtReve wrapper resolves its positions
+        # internally. Keep ``pos`` in this compatibility signature, but do
+        # not forward per-batch channel positions in production.
+        del pos
+        output = inner(eeg, return_output=True)
         if isinstance(output, torch.Tensor):
             raise AdapterContractError("all requires return_output=True to expose the ordered layer sequence")
         if not isinstance(output, (list, tuple)):
@@ -471,14 +475,15 @@ class UpstreamReveHeadModel(nn.Module):
     def _encode(
         self, eeg: torch.Tensor, channel_positions: torch.Tensor | None
     ) -> Any:
+        del channel_positions
         if self.variant == "mean_linear_copy":
             # The official NtReve wrapper keeps its resolved REVE positions
             # internally and does not receive per-batch channel positions.
             return self.encoder(eeg)
         if self.variant == "all":
             assert self.all_layer_encoder is not None
-            return self.all_layer_encoder(eeg, pos=channel_positions)
-        return self.encoder(eeg, pos=channel_positions)
+            return self.all_layer_encoder(eeg)
+        return self.encoder(eeg)
 
     def forward(
         self,

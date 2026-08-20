@@ -169,11 +169,10 @@ def initialize_last_tuned_query(
         encoder.eval()
         with torch.inference_mode():
             with torch.autocast(device_type=eeg.device.type, enabled=False):
-                output = (
-                    encoder(eeg)
-                    if channel_positions is None
-                    else encoder(eeg, pos=channel_positions)
-                )
+                # The official NtReve wrapper resolves its positions
+                # internally; per-batch channel positions are metadata for
+                # this adapter and must not change the encoder input.
+                output = encoder(eeg)
                 if not isinstance(output, torch.Tensor):
                     raise AdapterContractError("last_tuned encoder must return a final-token tensor")
                 if output.ndim != 3 or output.shape[0] != 1 or output.shape[1] <= 0:
