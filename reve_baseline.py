@@ -103,21 +103,14 @@ def build_window_starts(
     if not np.isfinite(recording_duration_s):
         raise ValueError("recording_duration_s must be finite")
     if recording_duration_s <= config.minimum_recording_duration_s:
-        raise ValueError(
-            "recording must be longer than the Age task's 180-second minimum"
-        )
+        raise ValueError("recording must be longer than the Age task's 180-second minimum")
     if config.window_duration_s <= 0 or config.window_stride_s <= 0:
         raise ValueError("window duration and stride must be positive")
     if config.max_crop_duration_s < config.window_duration_s:
         raise ValueError("crop duration must contain at least one full window")
 
     usable_duration_s = min(config.max_crop_duration_s, recording_duration_s)
-    window_count = int(
-        np.floor(
-            (usable_duration_s - config.window_duration_s)
-            / config.window_stride_s
-        )
-    ) + 1
+    window_count = int(np.floor((usable_duration_s - config.window_duration_s) / config.window_stride_s)) + 1
     if window_count <= 0:
         raise ValueError("recording does not contain a complete usable window")
 
@@ -139,15 +132,10 @@ def validate_split_assignments(
     if config.test_release not in assignments:
         raise ValueError(f"test release {config.test_release!r} is missing")
     if assignments[config.test_release] != "test":
-        raise ValueError(
-            f"test release {config.test_release!r} must be assigned to test"
-        )
+        raise ValueError(f"test release {config.test_release!r} must be assigned to test")
     if "train" not in assignments.values() or "valid" not in assignments.values():
         raise ValueError("both train and valid releases are required")
-    if any(
-        split == "test" and release != config.test_release
-        for release, split in assignments.items()
-    ):
+    if any(split == "test" and release != config.test_release for release, split in assignments.items()):
         raise ValueError("only the configured R5 release may be assigned to test")
 
 
@@ -256,14 +244,7 @@ def run_official_reve(
             ) from exc
         benchmark_runner = run_benchmark
 
-    request = build_reve_run_request(
-        debug=debug,
-        download=download,
-        prepare=prepare,
-        force=force,
-        retry=retry,
-        checkpoint=checkpoint,
-    )
+    request = build_reve_run_request(debug=debug, download=download, prepare=prepare, force=force, retry=retry, checkpoint=checkpoint)
     return benchmark_runner(**request)
 
 
@@ -297,15 +278,10 @@ def dry_run(
 
     starts = build_window_starts(recording_duration_s, AGE_TASK)
     rng = np.random.default_rng(seed)
-    raw_input = rng.standard_normal(
-        (batch_size, AGE_TASK.raw_channel_count, AGE_TASK.window_sample_count)
-    )
+    raw_input = rng.standard_normal((batch_size, AGE_TASK.raw_channel_count, AGE_TASK.window_sample_count))
     contract_predictions = raw_input.mean(axis=(1, 2), keepdims=False)[:, None]
 
-    validate_split_assignments(
-        {"R1": "train", "R2": "valid", AGE_TASK.test_release: "test"},
-        AGE_TASK,
-    )
+    validate_split_assignments({"R1": "train", "R2": "valid", AGE_TASK.test_release: "test"}, AGE_TASK)
     dependency_state = dependency_status()
     return {
         "status": "ok",
@@ -330,21 +306,9 @@ def dry_run(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="validate the synthetic input/output contract without downloading data",
-    )
-    mode.add_argument(
-        "--official-run",
-        action="store_true",
-        help="delegate to NeuralBench's official REVE Age runner",
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="use NeuralBench's reduced local debug mode for an official run",
-    )
+    mode.add_argument("--dry-run", action="store_true", help="validate the synthetic input/output contract without downloading data")
+    mode.add_argument("--official-run", action="store_true", help="delegate to NeuralBench's official REVE Age runner")
+    parser.add_argument("--debug", action="store_true", help="use NeuralBench's reduced local debug mode for an official run")
     parser.add_argument("--download", action="store_true", help="download the Age study")
     parser.add_argument("--prepare", action="store_true", help="prepare the Age study")
     parser.add_argument("--force", action="store_true", help="force an official rerun")
@@ -364,10 +328,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             option for option, selected in run_only_options.items() if selected
         ]
         if selected_options:
-            parser.error(
-                "the following options require --official-run: "
-                + ", ".join(selected_options)
-            )
+            parser.error("the following options require --official-run: " + ", ".join(selected_options))
         print(json.dumps(dry_run(), indent=2))
         return 0
     if args.official_run:

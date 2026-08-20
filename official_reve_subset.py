@@ -76,19 +76,14 @@ def load_manifest_timelines(
             "split",
         }
         if set(reader.fieldnames or ()) != required:
-            raise ValueError(
-                "manifest must contain exactly the canonical Age fields: "
-                f"{sorted(required)}"
-            )
+            raise ValueError(f"manifest must contain exactly the canonical Age fields: {sorted(required)}")
         for row in reader:
             relative = Path(row["recording_relpath"]).as_posix()
             recording = (data_root / relative).resolve()
             try:
                 recording.relative_to(data_root)
             except ValueError as exc:
-                raise ValueError(
-                    f"manifest recording escapes data root: {relative}"
-                ) from exc
+                raise ValueError(f"manifest recording escapes data root: {relative}") from exc
             if not recording.is_file():
                 raise FileNotFoundError(f"missing recording: {recording}")
             if relative in seen_paths:
@@ -97,19 +92,10 @@ def load_manifest_timelines(
 
             task, run, filename_subject = _parse_timeline_name(recording)
             if filename_subject != row["subject"]:
-                raise ValueError(
-                    f"manifest subject does not match filename: {relative}"
-                )
+                raise ValueError(f"manifest subject does not match filename: {relative}")
             if task != "task-RestingState":
                 raise ValueError(f"manifest contains a non-resting recording: {relative}")
-            rows.append(
-                {
-                    "release": row["release"],
-                    "subject": row["subject"],
-                    "task": task,
-                    "run": run,
-                }
-            )
+            rows.append({"release": row["release"], "subject": row["subject"], "task": task, "run": run})
 
     if not rows:
         raise ValueError(f"manifest is empty: {manifest_path}")
@@ -251,22 +237,13 @@ def collect_run_artifacts(output_dir: Path) -> list[dict[str, Any]]:
     for config_path in sorted(output_dir.rglob("config.yaml")):
         run_dir = config_path.parent
         checkpoints = sorted(run_dir.glob("*.ckpt"))
-        checkpoint = next(
-            (path for path in checkpoints if path.name == "best.ckpt"),
-            checkpoints[0] if checkpoints else None,
-        )
+        checkpoint = next((path for path in checkpoints if path.name == "best.ckpt"), checkpoints[0] if checkpoints else None)
         prediction_dir = run_dir / "test_predictions"
         prediction_files = []
         if prediction_dir.is_dir():
             for path in sorted(prediction_dir.rglob("*")):
                 if path.is_file():
-                    prediction_files.append(
-                        {
-                            "path": str(path),
-                            "size_bytes": path.stat().st_size,
-                            "sha256": _sha256_file(path),
-                        }
-                    )
+                    prediction_files.append({"path": str(path), "size_bytes": path.stat().st_size, "sha256": _sha256_file(path)})
         records.append(
             {
                 "run_dir": str(run_dir),
@@ -372,12 +349,7 @@ def run_official_stack_smoke(
         # Keep the official smoke variants on their exact existing RNG and
         # construction path.  Only the tuning branch needs encoder tokens
         # before it can construct its explicit query.
-        adapter = reve.UpstreamReveHeadModel(
-            encoder,
-            variant=head_variant,
-            n_outputs=1,
-            dropout=0.0,
-        ).to(device)
+        adapter = reve.UpstreamReveHeadModel(encoder, variant=head_variant, n_outputs=1, dropout=0.0).to(device)
     eeg = torch.randn(2, n_chans, n_times, device=device)
     positions = torch.randn(2, n_chans, 3, device=device)
 
@@ -408,10 +380,7 @@ def run_official_stack_smoke(
     if not isinstance(raw_layers, (list, tuple)):
         raise RuntimeError("official REVE return_output=True did not return layers")
     if len(raw_layers) != depth + 1:
-        raise RuntimeError(
-            "official REVE layer contract changed: expected positional input "
-            f"plus {depth} layers, got {len(raw_layers)}"
-        )
+        raise RuntimeError(f"official REVE layer contract changed: expected positional input plus {depth} layers, got {len(raw_layers)}")
     if tuple(prediction.shape) != (2, 1):
         raise RuntimeError(f"unexpected adapter output shape: {tuple(prediction.shape)}")
 
@@ -472,10 +441,7 @@ def _patch_official_components(*args: Any, **kwargs: Any) -> dict[str, Any]:
 
 
 def _restore_official_components(originals: Mapping[str, Any]) -> None:
-    return _runtime._restore_official_components(
-        originals,
-        restore_tuned=_restore_last_tuned_configure_optimizers,
-    )
+    return _runtime._restore_official_components(originals, restore_tuned=_restore_last_tuned_configure_optimizers)
 
 
 def run_official_subset(
@@ -535,11 +501,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=("last_avg", "last", "all", "last_tuned"),
         help="run a data-free smoke test using the installed official stack",
     )
-    parser.add_argument(
-        "--head-variant",
-        choices=("mean_linear", "last_avg", "last", "all", "last_tuned"),
-        default="mean_linear",
-    )
+    parser.add_argument("--head-variant", choices=("mean_linear", "last_avg", "last", "all", "last_tuned"), default="mean_linear")
     parser.add_argument("--seeds", type=int, nargs="+", default=[33])
     args = parser.parse_args(argv)
 
@@ -609,24 +571,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if selected_checkpoint_epoch is not None:
                         report["selected_checkpoint_epoch"] = selected_checkpoint_epoch
                 run_dir.mkdir(parents=True, exist_ok=True)
-                (run_dir / "report.json").write_text(
-                    json.dumps(report, indent=2, default=str) + "\n",
-                    encoding="utf-8",
-                )
+                (run_dir / "report.json").write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
             except Exception as error:
-                write_failure_diagnostics(
-                    run_dir,
-                    error,
-                    launch_command=launch_command,
-                    metadata=seed_metadata,
-                )
+                write_failure_diagnostics(run_dir, error, launch_command=launch_command, metadata=seed_metadata)
                 report_path = run_dir / "report.json"
                 try:
                     report_path.unlink(missing_ok=True)
                 except OSError as cleanup_error:
-                    error.add_note(
-                        f"failed to remove stale report.json after failure: {cleanup_error!r}"
-                    )
+                    error.add_note(f"failed to remove stale report.json after failure: {cleanup_error!r}")
                 raise
 
             reports.append(report)
@@ -638,10 +590,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "runs": reports,
         }
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        (args.output_dir / "summary.json").write_text(
-            json.dumps(summary, indent=2, default=str) + "\n",
-            encoding="utf-8",
-        )
+        (args.output_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
         print(json.dumps(summary, indent=2, default=str))
         return 0
     except Exception as error:

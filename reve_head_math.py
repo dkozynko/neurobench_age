@@ -78,22 +78,14 @@ def _reject_mask_kwargs(kwargs: Mapping[str, Any]) -> None:
     }
     supplied = sorted(mask_keys.intersection(kwargs))
     if supplied:
-        raise AdapterContractError(
-            "the fixed-window REVE adapter does not accept a required mask; "
-            f"received {supplied}"
-        )
+        raise AdapterContractError(f"the fixed-window REVE adapter does not accept a required mask; received {supplied}")
 
 
 def _validate_final_tokens(tokens: Any, *, embed_dim: int) -> torch.Tensor:
     if not isinstance(tokens, torch.Tensor) or tokens.ndim != 3:
-        raise AdapterContractError(
-            "last/last_avg require a final token tensor with shape [batch, tokens, dim]"
-        )
+        raise AdapterContractError("last/last_avg require a final token tensor with shape [batch, tokens, dim]")
     if tokens.shape[-1] != embed_dim:
-        raise AdapterContractError(
-            f"final token tensor has embedding dimension {tokens.shape[-1]}, "
-            f"expected {embed_dim}"
-        )
+            raise AdapterContractError(f"final token tensor has embedding dimension {tokens.shape[-1]}, expected {embed_dim}")
     if tokens.shape[1] <= 0:
         raise AdapterContractError("final token tensor must contain at least one token")
     return tokens
@@ -137,15 +129,10 @@ def concatenate_all_layers(
         raise AdapterContractError("all requires every encoder output to have shape [batch, tokens, dim]")
     expected_shape = (first.shape[0], first.shape[-1])
     if embed_dim is not None and first.shape[-1] != embed_dim:
-        raise AdapterContractError(
-            f"all output has embedding dimension {first.shape[-1]}, expected {embed_dim}"
-        )
+        raise AdapterContractError(f"all output has embedding dimension {first.shape[-1]}, expected {embed_dim}")
     for index, layer in enumerate(layers):
         if not isinstance(layer, torch.Tensor) or layer.ndim != 3:
-            raise AdapterContractError(
-                "all requires every encoder output to have shape "
-                f"[batch, tokens, dim]; item {index} is invalid"
-            )
+            raise AdapterContractError(f"all requires every encoder output to have shape [batch, tokens, dim]; item {index} is invalid")
         if (layer.shape[0], layer.shape[-1]) != expected_shape:
             raise AdapterContractError(
                 "all encoder outputs must share batch and embedding dimensions; "
@@ -204,9 +191,7 @@ class UpstreamReveHead(nn.Module):
             self.query_initialization = "provided"
         self.query_token = nn.Parameter(query_token.detach().clone())
         if variant == "last_tuned":
-            self.gate_logit = nn.Parameter(
-                torch.tensor(math.log(LAST_TUNED_INITIAL_ALPHA / (1.0 - LAST_TUNED_INITIAL_ALPHA)))
-            )
+            self.gate_logit = nn.Parameter(torch.tensor(math.log(LAST_TUNED_INITIAL_ALPHA / (1.0 - LAST_TUNED_INITIAL_ALPHA))))
             tuning_metadata: dict[str, Any] = {
                 "head_variant": variant,
                 "head_source": LAST_TUNED_HEAD_SOURCE,
@@ -219,9 +204,7 @@ class UpstreamReveHead(nn.Module):
                 tuning_metadata.update(copy.deepcopy(dict(query_initialization_metadata)))
                 query_initialization = tuning_metadata.get("query_initialization")
                 if not isinstance(query_initialization, str):
-                    raise AdapterContractError(
-                        "last_tuned query initialization metadata must name its source"
-                    )
+                    raise AdapterContractError("last_tuned query initialization metadata must name its source")
                 self.query_initialization = query_initialization
             tuning_metadata["query_initialization"] = self.query_initialization
             self._tuning_metadata = MappingProxyType(copy.deepcopy(tuning_metadata))
@@ -309,9 +292,7 @@ class UpstreamReveHead(nn.Module):
             try:
                 _test_alpha = reference.new_tensor(float(_test_alpha))
             except (TypeError, ValueError) as error:
-                raise AdapterContractError(
-                    "last_tuned _test_alpha override must be a finite scalar in [0, 1]"
-                ) from error
+                raise AdapterContractError("last_tuned _test_alpha override must be a finite scalar in [0, 1]") from error
         if not torch.isfinite(_test_alpha).all():
             raise AdapterContractError("last_tuned _test_alpha override must be finite")
         if not bool(((_test_alpha >= 0) & (_test_alpha <= 1)).all()):
@@ -409,18 +390,14 @@ class AllLayerReveEncoder:
         _reject_mask_kwargs(kwargs)
         inner = getattr(self.wrapped_encoder, "model", None)
         if not isinstance(inner, nn.Module):
-            raise AdapterContractError(
-                "all requires the official NeuralTrain REVE wrapper with a model attribute"
-            )
+            raise AdapterContractError("all requires the official NeuralTrain REVE wrapper with a model attribute")
 
         channel_indices = getattr(self.wrapped_encoder, "channel_indices", None)
         if channel_indices is not None:
             eeg = eeg[:, channel_indices]
         output = inner(eeg, pos=pos, return_output=True)
         if isinstance(output, torch.Tensor):
-            raise AdapterContractError(
-                "all requires return_output=True to expose the ordered layer sequence"
-            )
+            raise AdapterContractError("all requires return_output=True to expose the ordered layer sequence")
         if not isinstance(output, (list, tuple)):
             raise AdapterContractError("all requires return_output=True to return an ordered sequence")
         return output
@@ -464,12 +441,7 @@ class UpstreamReveHeadModel(nn.Module):
                 query_initialization_metadata=query_initialization_metadata,
             )
         else:
-            self.head = UpstreamReveHead(
-                variant=variant,
-                embed_dim=embed_dim,
-                n_outputs=n_outputs,
-                dropout=dropout,
-            )
+            self.head = UpstreamReveHead(variant=variant, embed_dim=embed_dim, n_outputs=n_outputs, dropout=dropout)
 
     def _encode(
         self, eeg: torch.Tensor, channel_positions: torch.Tensor | None
@@ -533,19 +505,13 @@ def make_upstream_reve_wrapper(
             if self.model_output_key is not None:
                 raise AdapterContractError("upstream REVE wrapper requires model_output_key=None")
             if self.layers_to_freeze is not None or self.layers_to_unfreeze is not None:
-                raise ProtocolMismatchError(
-                    "upstream REVE head experiment requires full backbone fine-tuning"
-                )
+                raise ProtocolMismatchError("upstream REVE head experiment requires full backbone fine-tuning")
 
             query_token = None
             query_metadata = None
             channel_positions = None
             if self.head_variant == "last_tuned":
-                query_token, query_metadata = initialize_last_tuned_query(
-                    model,
-                    dummy_batch,
-                    provenance=_NEURALBENCH_TRAIN_DUMMY_CONTEXT,
-                )
+                query_token, query_metadata = initialize_last_tuned_query(model, dummy_batch, provenance=_NEURALBENCH_TRAIN_DUMMY_CONTEXT)
                 input_key = _encoder_primary_input_key(model)
                 sample = dummy_batch[input_key]
                 channel_positions = dummy_batch.get("channel_positions")
@@ -569,10 +535,4 @@ def make_upstream_reve_wrapper(
             head_model.train()
             return head_model
 
-    return UpstreamReveHeadWrapper(
-        model_output_key=None,
-        aggregation=None,
-        probe_config=None,
-        head_variant=variant,
-        head_dropout=float(dropout),
-    )
+    return UpstreamReveHeadWrapper(model_output_key=None, aggregation=None, probe_config=None, head_variant=variant, head_dropout=float(dropout))
