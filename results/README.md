@@ -10,6 +10,7 @@ logs, resolved configs, run metadata, and raw test predictions.
 | sync6 | `last` | 0.376 | 0.2097 |
 | sync7 | `all` | 0.421 | 0.2668 |
 | sync8 | `mean_linear` | 0.589 | 0.5942 |
+| positions-fixed | `last_tuned` | — | 0.5734 mean across seeds 33/34/35 |
 
 Large `*.ckpt` files are intentionally excluded from the repository copy;
 the completed checkpoints remain on the Vast.ai workspace.

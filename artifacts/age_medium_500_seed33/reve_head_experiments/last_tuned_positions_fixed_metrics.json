@@ -1,0 +1,46 @@
+{
+  "metric": "test/pearsonr",
+  "checkpoint_selection": "val/pearsonr",
+  "head_variant": "last_tuned",
+  "head_architecture": "last_tuned_residual_query_attention",
+  "positions_policy": "official_internal_positions_no_batch_channel_positions",
+  "remote_output_dir": "/workspace/hbn_subset/results/reve_head_experiments_positions_fixed_20260820",
+  "seeds": [33, 34, 35],
+  "mean_linear_reference": {
+    "pearson_by_seed": {
+      "33": 0.5941864252090454,
+      "34": 0.5342379212379456,
+      "35": 0.6637211441993713
+    },
+    "pearson_mean": 0.5973818302154541,
+    "pearson_sample_standard_deviation": 0.06480072697883729
+  },
+  "last_tuned_positions_fixed": {
+    "pearson_by_seed": {
+      "33": 0.6017087697982788,
+      "34": 0.5879517793655396,
+      "35": 0.5306210517883301
+    },
+    "rmse_by_seed": {
+      "33": 2.9745707511901855,
+      "34": 2.8523902893066406,
+      "35": 3.102003335952759
+    },
+    "mae_by_seed": {
+      "33": 2.2980122566223145,
+      "34": 2.3013997077941895,
+      "35": 2.471452236175537
+    },
+    "pearson_mean": 0.5734272003173828,
+    "pearson_sample_standard_deviation": 0.03770395815242894
+  },
+  "last_tuned_minus_mean_linear": {
+    "pearson_by_seed": {
+      "33": 0.0075223445892333984,
+      "34": 0.053713858127593994,
+      "35": -0.13310009241104126
+    },
+    "pearson_mean_difference": -0.02395462989807129,
+    "pearson_relative_mean_difference": -0.04009936139074018
+  }
+}
