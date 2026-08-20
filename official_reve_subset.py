@@ -322,6 +322,8 @@ def run_official_stack_smoke(
 
     if head_variant == "last_tuned":
         reve.validate_last_tuned_protocol(head_variant)
+    elif head_variant == "mean_linear_copy":
+        reve.validate_local_head_variant(head_variant)
     else:
         reve.validate_upstream_head_variant(head_variant)
     import torch
@@ -392,7 +394,7 @@ def run_official_stack_smoke(
         "prediction_shape": list(prediction.shape),
         "embed_dim": embed_dim,
         "layer_count_including_initial": len(raw_layers),
-        "query_initialization": adapter.head.query_initialization,
+        "query_initialization": getattr(adapter.head, "query_initialization", "not_applicable"),
     }
     if head_variant == "last_tuned":
         tuning_metadata = adapter.head.tuning_metadata
@@ -498,10 +500,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument(
         "--smoke-head",
-        choices=("last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear_copy", "last_avg", "last", "all", "last_tuned"),
         help="run a data-free smoke test using the installed official stack",
     )
-    parser.add_argument("--head-variant", choices=("mean_linear", "last_avg", "last", "all", "last_tuned"), default="mean_linear")
+    parser.add_argument(
+        "--head-variant",
+        choices=("mean_linear", "mean_linear_copy", "last_avg", "last", "all", "last_tuned"),
+        default="mean_linear",
+    )
     parser.add_argument("--seeds", type=int, nargs="+", default=[33])
     args = parser.parse_args(argv)
 

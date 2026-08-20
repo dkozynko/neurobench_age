@@ -19,8 +19,9 @@ UPSTREAM_REVE_FILE_HASHES = {
 }
 
 OFFICIAL_HEAD_VARIANTS = ("mean_linear", "last_avg", "last", "all")
+LOCAL_HEAD_VARIANTS = ("mean_linear_copy",)
 LAST_TUNED_PROTOCOL_VARIANTS = ("last_tuned",)
-HEAD_VARIANTS = OFFICIAL_HEAD_VARIANTS + LAST_TUNED_PROTOCOL_VARIANTS
+HEAD_VARIANTS = OFFICIAL_HEAD_VARIANTS + LOCAL_HEAD_VARIANTS + LAST_TUNED_PROTOCOL_VARIANTS
 UPSTREAM_HEAD_VARIANTS = ("last_avg", "last", "all")
 LAST_TUNED_HEAD_SOURCE = "upstream_reve_tuned"
 LAST_TUNED_HEAD_ARCHITECTURE = "last_tuned_residual_query_attention"
@@ -61,6 +62,14 @@ def validate_official_head_variant(variant: str) -> str:
 
     if variant not in OFFICIAL_HEAD_VARIANTS:
         raise ValueError(f"{variant!r} is not an official REVE head variant; expected one of {OFFICIAL_HEAD_VARIANTS}")
+    return variant
+
+
+def validate_local_head_variant(variant: str) -> str:
+    """Validate a local control head that is not part of the official registry."""
+
+    if variant not in LOCAL_HEAD_VARIANTS:
+        raise ValueError(f"{variant!r} is not a local REVE head variant; expected one of {LOCAL_HEAD_VARIANTS}")
     return variant
 
 

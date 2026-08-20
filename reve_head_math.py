@@ -21,6 +21,7 @@ try:
         RMS_NORM_EPS,
         UPSTREAM_HEAD_INIT_CUTOFF,
         UPSTREAM_HEAD_INIT_STD,
+        validate_local_head_variant,
         validate_last_tuned_protocol,
         validate_upstream_head_variant,
     )
@@ -41,6 +42,7 @@ except ImportError:
         RMS_NORM_EPS,
         UPSTREAM_HEAD_INIT_CUTOFF,
         UPSTREAM_HEAD_INIT_STD,
+        validate_local_head_variant,
         validate_last_tuned_protocol,
         validate_upstream_head_variant,
     )
@@ -85,7 +87,7 @@ def _validate_final_tokens(tokens: Any, *, embed_dim: int) -> torch.Tensor:
     if not isinstance(tokens, torch.Tensor) or tokens.ndim != 3:
         raise AdapterContractError("last/last_avg require a final token tensor with shape [batch, tokens, dim]")
     if tokens.shape[-1] != embed_dim:
-            raise AdapterContractError(f"final token tensor has embedding dimension {tokens.shape[-1]}, expected {embed_dim}")
+        raise AdapterContractError(f"final token tensor has embedding dimension {tokens.shape[-1]}, expected {embed_dim}")
     if tokens.shape[1] <= 0:
         raise AdapterContractError("final token tensor must contain at least one token")
     return tokens
@@ -141,6 +143,25 @@ def concatenate_all_layers(
         if layer.shape[1] <= 0:
             raise AdapterContractError(f"all encoder output {index} has no tokens")
     return torch.cat(tuple(layers), dim=1)
+
+
+class MeanLinearCopyHead(nn.Module):
+    """Readable local copy of NeuralBench's official mean-plus-linear head."""
+
+    def __init__(self, *, embed_dim: int, n_outputs: int):
+        super().__init__()
+        if embed_dim <= 0 or n_outputs <= 0:
+            raise ValueError("embed_dim and n_outputs must be positive")
+        self.embed_dim = embed_dim
+        self.linear = nn.Linear(embed_dim, n_outputs)
+
+    def pool_tokens(self, tokens: Any) -> torch.Tensor:
+        """Average the final REVE token sequence over its token dimension."""
+
+        return _validate_final_tokens(tokens, embed_dim=self.embed_dim).mean(dim=1)
+
+    def forward(self, tokens: Any) -> torch.Tensor:
+        return self.linear(self.pool_tokens(tokens))
 
 
 class UpstreamReveHead(nn.Module):
@@ -417,7 +438,9 @@ class UpstreamReveHeadModel(nn.Module):
         query_initialization_metadata: Mapping[str, Any] | None = None,
     ):
         super().__init__()
-        if variant == "last_tuned":
+        if variant == "mean_linear_copy":
+            validate_local_head_variant(variant)
+        elif variant == "last_tuned":
             validate_last_tuned_protocol(variant)
             if query_token is None:
                 raise AdapterContractError("last_tuned requires an initialized cls_query_token")
@@ -431,7 +454,9 @@ class UpstreamReveHeadModel(nn.Module):
         # ``UpstreamReveHead`` performs that explicit torch.randn init after
         # the official experiment seed has been applied.
         embed_dim = _infer_embed_dim(encoder)
-        if variant == "last_tuned":
+        if variant == "mean_linear_copy":
+            self.head = MeanLinearCopyHead(embed_dim=embed_dim, n_outputs=n_outputs)
+        elif variant == "last_tuned":
             self.head = UpstreamReveHead(
                 variant=variant,
                 embed_dim=embed_dim,
@@ -446,6 +471,10 @@ class UpstreamReveHeadModel(nn.Module):
     def _encode(
         self, eeg: torch.Tensor, channel_positions: torch.Tensor | None
     ) -> Any:
+        if self.variant == "mean_linear_copy":
+            # The official NtReve wrapper keeps its resolved REVE positions
+            # internally and does not receive per-batch channel positions.
+            return self.encoder(eeg)
         if self.variant == "all":
             assert self.all_layer_encoder is not None
             return self.all_layer_encoder(eeg, pos=channel_positions)
@@ -478,7 +507,9 @@ def make_upstream_reve_wrapper(
 ) -> Any:
     """Create a concrete official NeuralBench wrapper config lazily."""
 
-    if variant == "last_tuned":
+    if variant == "mean_linear_copy":
+        validate_local_head_variant(variant)
+    elif variant == "last_tuned":
         validate_last_tuned_protocol(variant)
     else:
         validate_upstream_head_variant(variant)
@@ -520,6 +551,14 @@ def make_upstream_reve_wrapper(
                 sample = dummy_batch[input_name]
             if sample is None:
                 raise AdapterContractError("dummy batch contains no EEG tensor")
+
+            if self.head_variant == "mean_linear_copy":
+                # Match DownstreamWrapper.build: run the already-built model
+                # once before constructing its linear probe.
+                with torch.no_grad():
+                    model.eval()
+                    model(sample)
+                    model.train()
 
             head_model = UpstreamReveHeadModel(
                 model,
