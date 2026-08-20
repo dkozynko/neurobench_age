@@ -156,11 +156,7 @@ class EpochTestPearson(LightningCallback):
         metric = PearsonCorrCoef()
         with torch.inference_mode():
             for batch_index, batch in enumerate(self.test_loader):
-                batch = trainer.strategy.batch_to_device(
-                    batch,
-                    pl_module.device,
-                    dataloader_idx=0,
-                )
+                batch = trainer.strategy.batch_to_device(batch, pl_module.device, dataloader_idx=0)
                 y_pred = pl_module.model_forward(batch)
                 y_true = batch.data["target"]
                 if pl_module.target_scaler is not None:
@@ -585,11 +581,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             epoch_metrics_path = run_dir / "epoch_test_metrics.jsonl"
             seed_metadata = {**metadata, "seed": seed, "data_seed": 33}
             try:
-                _write_config(
-                    config_path,
-                    data_root=args.data_root,
-                    output_dir=run_dir,
-                )
+                _write_config(config_path, data_root=args.data_root, output_dir=run_dir)
                 results = run_official_subset(
                     manifest_path=args.manifest,
                     data_root=args.data_root,
@@ -613,9 +605,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "artifacts": collect_run_artifacts(run_dir),
                 }
                 if args.head_variant == "last_tuned":
-                    selected_checkpoint_epoch = _selected_validation_checkpoint_epoch(
-                        results
-                    )
+                    selected_checkpoint_epoch = _selected_validation_checkpoint_epoch(results)
                     if selected_checkpoint_epoch is not None:
                         report["selected_checkpoint_epoch"] = selected_checkpoint_epoch
                 run_dir.mkdir(parents=True, exist_ok=True)
