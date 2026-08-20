@@ -187,20 +187,30 @@ def _head_metadata(
 
     query_initialization = {
         "mean_linear": "neuralbench_default",
+        "mean_linear_copy": "not_applicable",
         "last_avg": "upstream_random_unused",
         "last_tuned": "train_dummy_final_token_mean",
         "last": "upstream_random",
         "all": "upstream_random",
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
+    is_local_copy = head_variant == "mean_linear_copy"
     metadata: dict[str, Any] = {
         "head_variant": head_variant,
-        "head_source": "neuralbench_default" if is_default_head else "upstream_reve",
+        "head_source": (
+            "neuralbench_default"
+            if is_default_head
+            else "local_mean_linear_copy"
+            if is_local_copy
+            else "upstream_reve"
+        ),
         "head_dropout": 0.0,
         "head_query_initialization": query_initialization,
         "head_linear_initialization": (
             "neuralbench_default"
             if is_default_head
+            else "torch_nn_linear_default"
+            if is_local_copy
             else {
                 "distribution": "truncated_normal",
                 "std": reve.UPSTREAM_HEAD_INIT_STD,
@@ -242,7 +252,7 @@ def _head_metadata(
                 "test_pearsonr_role": "diagnostic_only",
             }
         )
-    if not is_default_head:
+    if not is_default_head and not is_local_copy:
         metadata["head_source_lock"] = reve.source_lock_metadata()
     return metadata
 
