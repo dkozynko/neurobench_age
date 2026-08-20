@@ -163,10 +163,7 @@ def align_prepared_recording(
     target_indices = {name: index for index, name in enumerate(order)}
     unknown = set(prepared.channel_names).difference(target_indices)
     if unknown:
-        raise ValueError(
-            "prepared recording contains channels missing from the global order: "
-            f"{sorted(unknown)}"
-        )
+        raise ValueError(f"prepared recording contains channels missing from the global order: {sorted(unknown)}")
     aligned = np.zeros((len(order), data.shape[1]), dtype=np.float32)
     for source_index, channel_name in enumerate(prepared.channel_names):
         aligned[target_indices[channel_name]] = data[source_index]
@@ -450,9 +447,7 @@ def build_age_window_manifest(
     if not eligible:
         raise ValueError("the Age query returned no eligible recordings")
 
-    split_by_release = assign_release_splits(
-        (recording.release for recording in eligible), config
-    )
+    split_by_release = assign_release_splits((recording.release for recording in eligible), config)
     manifest: list[AgeWindow] = []
     for recording in eligible:
         assert recording.age is not None
@@ -499,9 +494,7 @@ def preprocess_array(
         try:
             from scipy.signal import resample_poly
         except Exception as exc:  # pragma: no cover - optional dependency path
-            raise IndependentPipelineError(
-                "scipy is required when source and target frequencies differ"
-            ) from exc
+            raise IndependentPipelineError("scipy is required when source and target frequencies differ") from exc
         from fractions import Fraction
 
         ratio = Fraction(target_frequency_hz / source_frequency_hz).limit_denominator()
@@ -529,9 +522,7 @@ def _read_hbn_raw(recording: HbnRecording) -> Any:
     try:
         import mne
     except Exception as exc:  # pragma: no cover - optional dependency path
-        raise IndependentPipelineError(
-            "MNE is required for the raw HBN reader; install the pipeline extra"
-        ) from exc
+        raise IndependentPipelineError("MNE is required for the raw HBN reader; install the pipeline extra") from exc
 
     raw = mne.io.read_raw_eeglab(recording.path, preload=True, verbose="ERROR")
     info_path = _task_info_path(recording)
@@ -552,9 +543,7 @@ def preprocess_hbn_recording(
     try:
         import mne
     except Exception as exc:  # pragma: no cover - optional dependency path
-        raise IndependentPipelineError(
-            "MNE is required for HBN preprocessing; install the pipeline extra"
-        ) from exc
+        raise IndependentPipelineError("MNE is required for HBN preprocessing; install the pipeline extra") from exc
 
     raw = _read_hbn_raw(recording)
 
@@ -563,10 +552,7 @@ def preprocess_hbn_recording(
     # the extractor then filters, resamples, and scales that chunk.
     source_frequency_hz = float(raw.info["sfreq"])
     crop_duration_s = AGE_TASK.max_crop_duration_s
-    raw.crop(
-        tmin=0.0,
-        tmax=crop_duration_s - 1.0 / source_frequency_hz,
-    )
+    raw.crop(tmin=0.0, tmax=crop_duration_s - 1.0 / source_frequency_hz)
     eeg_picks = mne.pick_types(raw.info, eeg=True, exclude=[])
     if len(eeg_picks) == 0:
         raise IndependentPipelineError(f"no EEG channels found in {recording.path}")
@@ -576,12 +562,7 @@ def preprocess_hbn_recording(
     raw.filter(low, high, n_jobs=config.mne_n_jobs, verbose="ERROR")
     raw.resample(config.frequency_hz, n_jobs=config.mne_n_jobs, verbose="ERROR")
 
-    processed = preprocess_array(
-        raw.get_data(),
-        source_frequency_hz=config.frequency_hz,
-        target_frequency_hz=config.frequency_hz,
-        clamp=config.clamp,
-    )
+    processed = preprocess_array(raw.get_data(), source_frequency_hz=config.frequency_hz, target_frequency_hz=config.frequency_hz, clamp=config.clamp)
     return PreparedRecording(processed, tuple(raw.ch_names))
 
 
@@ -596,9 +577,7 @@ class PreprocessedRecordingStore:
     def _cache_paths(self, recording: HbnRecording) -> tuple[Path, Path]:
         if self.cache_dir is None:
             raise RuntimeError("cache paths requested without cache_dir")
-        fingerprint = hashlib.sha256(
-            f"{PREPROCESSING_CACHE_VERSION}|{recording.path.resolve()}|{REVE_MODEL}".encode()
-        ).hexdigest()[:24]
+        fingerprint = hashlib.sha256(f"{PREPROCESSING_CACHE_VERSION}|{recording.path.resolve()}|{REVE_MODEL}".encode()).hexdigest()[:24]
         return (
             self.cache_dir / f"{fingerprint}.npy",
             self.cache_dir / f"{fingerprint}.json",
@@ -612,10 +591,7 @@ class PreprocessedRecordingStore:
         if data_path.is_file() and metadata_path.is_file():
             try:
                 metadata = json.loads(metadata_path.read_text())
-                return PreparedRecording(
-                    np.load(data_path, mmap_mode="r"),
-                    tuple(metadata["channel_names"]),
-                )
+                return PreparedRecording(np.load(data_path, mmap_mode="r"), tuple(metadata["channel_names"]))
             except (OSError, TypeError, ValueError, KeyError):
                 # A worker can be interrupted between the data and metadata
                 # writes. Treat that pair as a cache miss and rebuild it.
@@ -704,9 +680,7 @@ def _raw_duration_seconds(path: Path) -> float:
     try:
         import mne
     except Exception as exc:  # pragma: no cover - optional dependency path
-        raise IndependentPipelineError(
-            "MNE is required to inspect HBN recordings; install the pipeline extra"
-        ) from exc
+        raise IndependentPipelineError("MNE is required to inspect HBN recordings; install the pipeline extra") from exc
     raw = mne.io.read_raw_eeglab(path, preload=False, verbose="ERROR")
     return float(raw.n_times / raw.info["sfreq"])
 
@@ -741,10 +715,7 @@ def load_recordings_from_subject_manifest(
     else:
         required = {"release", "subject", "age", "set_file"}
         if not required.issubset(fields):
-            raise ValueError(
-                "unsupported subject manifest fields; expected either "
-                f"{MANIFEST_FIELDS} or fields containing {sorted(required)}"
-            )
+            raise ValueError(f"unsupported subject manifest fields; expected either {MANIFEST_FIELDS} or fields containing {sorted(required)}")
         with subjects_file.open(newline="", encoding="utf-8") as handle:
             rows = list(csv.DictReader(handle))
         specifications = []
@@ -758,15 +729,7 @@ def load_recordings_from_subject_manifest(
                 relative_path = (
                     Path(release) / "download" / subject / "eeg" / set_file
                 )
-            specifications.append(
-                (
-                    release,
-                    subject,
-                    float(row["age"]),
-                    relative_path.as_posix(),
-                    None,
-                )
-            )
+            specifications.append((release, subject, float(row["age"]), relative_path.as_posix(), None))
 
     recordings: list[HbnRecording] = []
     seen_paths: set[Path] = set()
@@ -781,30 +744,14 @@ def load_recordings_from_subject_manifest(
             raise ValueError(f"subject manifest age is not finite for {subject}")
 
         task = _task_from_set_path(path)
-        recording = HbnRecording(
-            path=path,
-            release=release,
-            subject=subject,
-            task=task,
-            age=age,
-            duration_s=0.0,
-        )
+        recording = HbnRecording(path=path, release=release, subject=subject, task=task, age=age, duration_s=0.0)
         if duration is None:
             duration = _cached_duration_seconds(recording, cache_dir)
         if duration is None:
             duration = _raw_duration_seconds(path)
         if not np.isfinite(duration) or duration <= 0:
             raise ValueError(f"recording duration is invalid for {path}: {duration}")
-        recordings.append(
-            HbnRecording(
-                path=path,
-                release=release,
-                subject=subject,
-                task=task,
-                age=age,
-                duration_s=float(duration),
-            )
-        )
+        recordings.append(HbnRecording(path=path, release=release, subject=subject, task=task, age=age, duration_s=float(duration)))
     if not recordings:
         raise ValueError(f"subject manifest contains no recordings: {subjects_file}")
     return recordings
@@ -816,9 +763,7 @@ def discover_hbn_recordings(data_root: Path) -> list[HbnRecording]:
     try:
         import mne
     except Exception as exc:  # pragma: no cover - optional dependency path
-        raise IndependentPipelineError(
-            "MNE is required to inspect HBN recordings; install the pipeline extra"
-        ) from exc
+        raise IndependentPipelineError("MNE is required to inspect HBN recordings; install the pipeline extra") from exc
 
     recordings: list[HbnRecording] = []
     for release in HBN_RELEASES:
@@ -847,20 +792,9 @@ def discover_hbn_recordings(data_root: Path) -> list[HbnRecording]:
             subject, task = parts[0], parts[1]
             raw = mne.io.read_raw_eeglab(path, preload=False, verbose="ERROR")
             duration_s = float(raw.n_times / raw.info["sfreq"])
-            recordings.append(
-                HbnRecording(
-                    path=path,
-                    release=release,
-                    subject=subject,
-                    task=task,
-                    age=ages.get(subject),
-                    duration_s=duration_s,
-                )
-            )
+            recordings.append(HbnRecording(path=path, release=release, subject=subject, task=task, age=ages.get(subject), duration_s=duration_s))
     if not recordings:
-        raise FileNotFoundError(
-            f"no HBN recordings found below {data_root}; expected R1..R11/download"
-        )
+        raise FileNotFoundError(f"no HBN recordings found below {data_root}; expected R1..R11/download")
     return recordings
 
 
@@ -869,9 +803,7 @@ def _require_torch() -> tuple[Any, Any]:
         import torch
         from torch import nn
     except Exception as exc:  # pragma: no cover - optional dependency path
-        raise IndependentPipelineError(
-            "PyTorch is required for REVE training; install the pipeline extra"
-        ) from exc
+        raise IndependentPipelineError("PyTorch is required for REVE training; install the pipeline extra") from exc
     return torch, nn
 
 
@@ -912,17 +844,13 @@ if _nn is not None:
         def forward(self, x: Any) -> Any:
             output = self.backbone(x)
             if isinstance(output, dict):
-                raise IndependentPipelineError(
-                    "REVE backbone returned a dict; expected encoder tensor"
-                )
+                raise IndependentPipelineError("REVE backbone returned a dict; expected encoder tensor")
             if output.ndim == 3:
                 features = output.mean(dim=1)
             elif output.ndim == 2:
                 features = output
             else:
-                raise IndependentPipelineError(
-                    f"unexpected REVE encoder output shape: {tuple(output.shape)}"
-                )
+                raise IndependentPipelineError(f"unexpected REVE encoder output shape: {tuple(output.shape)}")
             return self.head(features)
 
 else:
@@ -958,9 +886,7 @@ class AgeWindowDataset:  # Defined without a torch base to keep imports lazy.
             )
             for window in windows
         }
-        self._aligned_recordings: dict[str, PreparedRecording] = dict(
-            aligned_recordings or {}
-        )
+        self._aligned_recordings: dict[str, PreparedRecording] = dict(aligned_recordings or {})
 
     def __len__(self) -> int:
         return len(self.windows)
@@ -976,9 +902,7 @@ class AgeWindowDataset:  # Defined without a torch base to keep imports lazy.
 
         for recording_key, recording in self._recordings.items():
             if recording_key not in self._aligned_recordings:
-                self._aligned_recordings[recording_key] = align_prepared_recording(
-                    self.store.load(recording), self.channel_order
-                )
+                self._aligned_recordings[recording_key] = align_prepared_recording(self.store.load(recording), self.channel_order)
 
     def __getitem__(self, index: int) -> tuple[Any, Any]:
         torch, _ = _require_torch()
@@ -986,20 +910,14 @@ class AgeWindowDataset:  # Defined without a torch base to keep imports lazy.
         recording_key = str(window.path)
         prepared = self._aligned_recordings.get(recording_key)
         if prepared is None:
-            prepared = align_prepared_recording(
-                self.store.load(self._recordings[recording_key]),
-                self.channel_order,
-            )
+            prepared = align_prepared_recording(self.store.load(self._recordings[recording_key]), self.channel_order)
             self._aligned_recordings[recording_key] = prepared
         start = int(round(window.start_s * REVE_MODEL.frequency_hz))
         stop = start + int(round(window.duration_s * REVE_MODEL.frequency_hz))
         values = np.asarray(prepared.data[:, start:stop], dtype=np.float32)
         expected_samples = int(round(window.duration_s * REVE_MODEL.frequency_hz))
         if values.shape[1] != expected_samples:
-            raise IndependentPipelineError(
-                f"window {window.path}:{window.start_s} has shape {values.shape}; "
-                f"expected {expected_samples} samples"
-            )
+            raise IndependentPipelineError(f"window {window.path}:{window.start_s} has shape {values.shape}; expected {expected_samples} samples")
         values = np.clip(values, -REVE_MODEL.clamp, REVE_MODEL.clamp)
         return torch.from_numpy(values), torch.tensor([window.age], dtype=torch.float32)
 
@@ -1033,10 +951,7 @@ def build_data_loaders(
             loader_kwargs["worker_init_fn"] = _seed_data_loader_worker
             if config.prefetch_factor is not None:
                 loader_kwargs["prefetch_factor"] = config.prefetch_factor
-        loaders[split] = torch.utils.data.DataLoader(
-            datasets[split],
-            **loader_kwargs,
-        )
+        loaders[split] = torch.utils.data.DataLoader(datasets[split], **loader_kwargs)
     return loaders
 
 
@@ -1053,15 +968,10 @@ def load_reve_backbone(
     try:
         from neuraltrain.models.reve import NtReve
     except Exception as exc:  # pragma: no cover - optional dependency path
-        raise ReveDependencyError(
-            "neuraltrain.NtReve is unavailable. Install the project's [pipeline] extra."
-        ) from exc
+        raise ReveDependencyError("neuraltrain.NtReve is unavailable. Install the project's [pipeline] extra.") from exc
 
     mapping = load_reve_channel_mapping(mapping_path)
-    model_config = NtReve(
-        from_pretrained_name=pretrained_name,
-        channel_mapping=mapping,
-    )
+    model_config = NtReve(from_pretrained_name=pretrained_name, channel_mapping=mapping)
     return model_config.build(
         n_spatial_locations=len(channel_names),
         n_temporal_samples=n_times,
@@ -1083,15 +993,9 @@ def load_reve_channel_mapping(mapping_path: Path | None) -> dict[str, str]:
         if spec is not None and spec.origin is not None:
             resolved = Path(spec.origin).parent / "models" / "channel_mappings" / "reve.json"
     if resolved is None or not resolved.is_file():
-        raise FileNotFoundError(
-            "official reve.json was not found; pass --mapping pointing to "
-            "neuralbench/models/channel_mappings/reve.json"
-        )
+        raise FileNotFoundError("official reve.json was not found; pass --mapping pointing to neuralbench/models/channel_mappings/reve.json")
     mapping = json.loads(resolved.read_text())
-    if not isinstance(mapping, dict) or not all(
-        isinstance(key, str) and isinstance(value, str)
-        for key, value in mapping.items()
-    ):
+    if not isinstance(mapping, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in mapping.items()):
         raise ValueError(f"invalid REVE channel mapping: {resolved}")
     return mapping
 
@@ -1194,9 +1098,7 @@ def fit_independent_model(
         _synchronize_device(device)
         _evaluate(model, validation_loader, device)
 
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
-    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
         max_lr=config.learning_rate,
@@ -1347,9 +1249,7 @@ def compare_prediction_rows(
         targets.append(own_age)
         own_predictions.append(float(own_row["prediction"]))
         official_predictions.append(float(official_row["prediction"]))
-    return compare_predictions(
-        targets, own_predictions, official_predictions, atol=atol
-    )
+    return compare_predictions(targets, own_predictions, official_predictions, atol=atol)
 
 
 def compare_prediction_files(
@@ -1357,9 +1257,7 @@ def compare_prediction_files(
 ) -> PredictionComparison:
     """Compare two CSV prediction artifacts after deterministic row alignment."""
 
-    return compare_prediction_rows(
-        read_prediction_rows(own_path), read_prediction_rows(official_path), atol=atol
-    )
+    return compare_prediction_rows(read_prediction_rows(own_path), read_prediction_rows(official_path), atol=atol)
 
 
 def compare_scores(
@@ -1417,15 +1315,9 @@ def run_independent_reve(
     else:
         if _manifest_fieldnames(subjects_file) == MANIFEST_FIELDS:
             selected_manifest = read_manifest(subjects_file)
-        recordings = load_recordings_from_subject_manifest(
-            subjects_file,
-            data_root=data_root,
-            cache_dir=cache_dir,
-        )
+        recordings = load_recordings_from_subject_manifest(subjects_file, data_root=data_root, cache_dir=cache_dir)
     if selected_manifest is not None:
-        recordings = filter_recordings_by_manifest(
-            recordings, selected_manifest, data_root=data_root
-        )
+        recordings = filter_recordings_by_manifest(recordings, selected_manifest, data_root=data_root)
     eligible_recordings = filter_age_recordings(recordings)
     manifest = build_age_window_manifest(recordings)
     if selected_manifest is not None:
@@ -1435,10 +1327,7 @@ def run_independent_reve(
         for window in manifest:
             relative = window.path.resolve().relative_to(data_root.resolve()).as_posix()
             if expected_splits.get(relative) != window.split:
-                raise IndependentPipelineError(
-                    f"manifest split mismatch for {relative}: "
-                    f"{window.split!r} != {expected_splits.get(relative)!r}"
-                )
+                raise IndependentPipelineError(f"manifest split mismatch for {relative}: {window.split!r} != {expected_splits.get(relative)!r}")
     store = PreprocessedRecordingStore(cache_dir)
     preload_started = time.perf_counter()
     prepared_by_path = {
@@ -1457,9 +1346,7 @@ def run_independent_reve(
     preload_s = time.perf_counter() - preload_started
 
     torch, _ = _require_torch()
-    train_state, _, val_state, test_state = np.random.SeedSequence(
-        train_config.data_seed
-    ).generate_state(4)
+    train_state, _, val_state, test_state = np.random.SeedSequence(train_config.data_seed).generate_state(4)
     loader_generators = {
         "train": torch.Generator().manual_seed(int(train_state)),
         "val": torch.Generator().manual_seed(int(val_state)),
@@ -1487,14 +1374,8 @@ def run_independent_reve(
     first_batch_started = time.perf_counter()
     sample_values, _ = next(iter(loaders["train"]))
     first_batch_s = time.perf_counter() - first_batch_started
-    backbone = load_reve_backbone(
-        channel_order,
-        mapping_path=mapping_path,
-        n_times=AGE_TASK.window_sample_count,
-    )
-    model = IndependentReveRegressor(
-        backbone, freeze_backbone=train_config.freeze_backbone
-    )
+    backbone = load_reve_backbone(channel_order, mapping_path=mapping_path, n_times=AGE_TASK.window_sample_count)
+    model = IndependentReveRegressor(backbone, freeze_backbone=train_config.freeze_backbone)
     _materialize_model(model, sample_values, "cpu")
 
     # NeuralBench reseeds after constructing the model and before validation or
@@ -1540,11 +1421,7 @@ def run_independent_reve(
         report["manifest_sha256"] = manifest_sha256(subjects_file)
         report["manifest_rows"] = len(selected_manifest or recordings)
     if official_predictions_path is not None:
-        comparison = compare_prediction_rows(
-            prediction_rows,
-            read_prediction_rows(official_predictions_path),
-            atol=score_atol,
-        )
+        comparison = compare_prediction_rows(prediction_rows, read_prediction_rows(official_predictions_path), atol=score_atol)
         report["prediction_comparison"] = asdict(comparison)
     report["timings"] = {
         "preload_s": float(preload_s),
@@ -1609,11 +1486,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         score_atol=args.score_atol,
     )
     if args.official_score is not None:
-        comparison = compare_scores(
-            result.test_pearsonr,
-            args.official_score,
-            atol=args.score_atol,
-        )
+        comparison = compare_scores(result.test_pearsonr, args.official_score, atol=args.score_atol)
         report["score_comparison"] = asdict(comparison)
     print(json.dumps(report, indent=2, default=str))
     return 0

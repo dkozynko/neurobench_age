@@ -328,13 +328,7 @@ def _patch_official_components(
             loaders = captured_loaders.get(id(self.data))
             if loaders is None or "test" not in loaders:
                 raise RuntimeError("official test loader was not captured")
-            trainer.callbacks.append(
-                hooks.EpochTestPearson(
-                    loaders["test"],
-                    epoch_metrics_path,
-                    seed=getattr(self, "seed", None),
-                )
-            )
+            trainer.callbacks.append(hooks.EpochTestPearson(loaders["test"], epoch_metrics_path, seed=getattr(self, "seed", None)))
         return trainer
 
     def setup_with_metadata(self: Any) -> Any:
@@ -378,10 +372,7 @@ def _patch_official_components(
                     "protocol": reve.PROTOCOL_CONTRACT,
                 }
             )
-            (uid_folder / "run_metadata.json").write_text(
-                json.dumps(payload, indent=2, default=str) + "\n",
-                encoding="utf-8",
-            )
+            (uid_folder / "run_metadata.json").write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
         return result
 
     def persist_tuning_metadata(self: Any, metadata: Mapping[str, Any]) -> None:
@@ -398,10 +389,7 @@ def _patch_official_components(
                 raise ValueError("run_metadata.json must contain a JSON object")
             payload.update(loaded)
         payload.update(metadata)
-        path.write_text(
-            json.dumps(payload, indent=2, default=str) + "\n",
-            encoding="utf-8",
-        )
+        path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
 
     def prepare_with_protocol(
         self: Any,
@@ -418,25 +406,13 @@ def _patch_official_components(
                 raise RuntimeError("last_tuned prepared model did not expose tuning metadata")
             optimizer_metadata = reve.last_tuned_optimizer_metadata(tuning_model)
             _patch_last_tuned_configure_optimizers(brain_module, patched_brain_modules, hooks=hooks)
-            reve.validate_last_tuned_protocol(
-                head_variant,
-                experiment=self,
-                optimizer_config=optimizer_metadata,
-            )
-            tuning_metadata = hooks._last_tuned_report_metadata(
-                query_metadata=query_metadata,
-                optimizer_config=optimizer_metadata,
-            )
+            reve.validate_last_tuned_protocol(head_variant, experiment=self, optimizer_config=optimizer_metadata)
+            tuning_metadata = hooks._last_tuned_report_metadata(query_metadata=query_metadata, optimizer_config=optimizer_metadata)
             tuning_metadata_by_experiment[id(self)] = tuning_metadata
             persist_tuning_metadata(self, tuning_metadata)
         else:
             loaders = captured_loaders.get(id(self.data))
-            reve.validate_official_protocol(
-                self,
-                loaders=loaders,
-                n_total_params=self._n_total_params,
-                n_trainable_params=self._n_trainable_params,
-            )
+            reve.validate_official_protocol(self, loaders=loaders, n_total_params=self._n_total_params, n_trainable_params=self._n_trainable_params)
         return result
 
     # NeuralBench's CLI and experiment_config modules each keep a local alias
@@ -479,9 +455,7 @@ def _patch_official_components(
     try:
         shirazi2024hbn.Shirazi2024Hbn.iter_timelines = iter_manifest_timelines
         if original_info is not None:
-            shirazi2024hbn.Shirazi2024Hbn._info = original_info.model_copy(
-                update={"num_timelines": len(timelines)}
-            )
+            shirazi2024hbn.Shirazi2024Hbn._info = original_info.model_copy(update={"num_timelines": len(timelines)})
         Data.prepare = prepare_and_capture
         Experiment._test = test_and_capture
         Experiment.setup_trainer = setup_with_epoch_test
@@ -513,37 +487,16 @@ def _restore_official_components(originals: Mapping[str, Any], *, restore_tuned:
         except BaseException as error:
             restoration_errors.append((label, error))
 
-    attempt(
-        "Shirazi2024Hbn.iter_timelines",
-        lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "iter_timelines", originals["iter_timelines"]),
-    )
-    attempt(
-        "Shirazi2024Hbn._info",
-        lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "_info", originals["info"]),
-    )
+    attempt("Shirazi2024Hbn.iter_timelines", lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "iter_timelines", originals["iter_timelines"]))
+    attempt("Shirazi2024Hbn._info", lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "_info", originals["info"]))
     attempt("Data.prepare", lambda: setattr(Data, "prepare", originals["prepare"]))
     attempt("Experiment.setup_run", lambda: setattr(Experiment, "setup_run", originals["setup_run"]))
     attempt("Experiment._test", lambda: setattr(Experiment, "_test", originals["test"]))
-    attempt(
-        "Experiment.prepare_pl_module",
-        lambda: setattr(Experiment, "prepare_pl_module", originals["prepare_pl_module"]),
-    )
-    attempt(
-        "Experiment.setup_trainer",
-        lambda: setattr(Experiment, "setup_trainer", originals["setup_trainer"]),
-    )
-    attempt(
-        "neuralbench.cli.load_yaml_config",
-        lambda: setattr(cli, "load_yaml_config", original_cli_loader),
-    )
-    attempt(
-        "neuralbench.experiment_config.load_yaml_config",
-        lambda: setattr(experiment_config, "load_yaml_config", original_experiment_loader),
-    )
-    attempt(
-        "last_tuned.configure_optimizers",
-        lambda: restore_tuned(originals.get("patched_brain_modules", [])),
-    )
+    attempt("Experiment.prepare_pl_module", lambda: setattr(Experiment, "prepare_pl_module", originals["prepare_pl_module"]))
+    attempt("Experiment.setup_trainer", lambda: setattr(Experiment, "setup_trainer", originals["setup_trainer"]))
+    attempt("neuralbench.cli.load_yaml_config", lambda: setattr(cli, "load_yaml_config", original_cli_loader))
+    attempt("neuralbench.experiment_config.load_yaml_config", lambda: setattr(experiment_config, "load_yaml_config", original_experiment_loader))
+    attempt("last_tuned.configure_optimizers", lambda: restore_tuned(originals.get("patched_brain_modules", [])))
 
     if restoration_errors:
         error = RuntimeError("official component restoration failed")

@@ -53,9 +53,7 @@ def _unwrap_reve_module(module: nn.Module) -> nn.Module:
 def _tensor_sha256(tensor: torch.Tensor) -> str:
     """Return a device-independent SHA-256 digest for a tensor's raw values."""
 
-    return hashlib.sha256(
-        tensor.detach().to(device="cpu").contiguous().view(torch.uint8).numpy().tobytes()
-    ).hexdigest()
+    return hashlib.sha256(tensor.detach().to(device="cpu").contiguous().view(torch.uint8).numpy().tobytes()).hexdigest()
 
 
 def _encoder_primary_input_key(encoder: nn.Module) -> str:
@@ -143,9 +141,7 @@ def initialize_last_tuned_query(
     """Initialize ``last_tuned`` from NeuralBench's train-dummy batch only."""
 
     if provenance is not _NEURALBENCH_TRAIN_DUMMY_CONTEXT:
-        raise AdapterContractError(
-            "last_tuned initialization requires the internal train-dummy provenance context"
-        )
+        raise AdapterContractError("last_tuned initialization requires the internal train-dummy provenance context")
     if not isinstance(dummy_batch, Mapping):
         raise AdapterContractError("last_tuned dummy batch must be a mapping")
 
@@ -153,10 +149,7 @@ def initialize_last_tuned_query(
     allowed_keys = {input_key, "channel_positions", "subject_ids"}
     keys = set(dummy_batch)
     if input_key not in keys or not keys <= allowed_keys:
-        raise AdapterContractError(
-            "last_tuned dummy batch must contain the encoder primary input and optional "
-            "channel_positions or subject_ids"
-        )
+        raise AdapterContractError("last_tuned dummy batch must contain the encoder primary input and optional channel_positions or subject_ids")
 
     eeg = dummy_batch[input_key]
     if not isinstance(eeg, torch.Tensor):
@@ -184,24 +177,16 @@ def initialize_last_tuned_query(
                 if not isinstance(output, torch.Tensor):
                     raise AdapterContractError("last_tuned encoder must return a final-token tensor")
                 if output.ndim != 3 or output.shape[0] != 1 or output.shape[1] <= 0:
-                    raise AdapterContractError(
-                        "last_tuned encoder output must have shape [1, T, D] with T > 0"
-                    )
+                    raise AdapterContractError("last_tuned encoder output must have shape [1, T, D] with T > 0")
                 if output.shape[1] != expected_token_count:
-                    raise AdapterContractError(
-                        "last_tuned encoder token count does not match REVE patch geometry"
-                    )
+                    raise AdapterContractError("last_tuned encoder token count does not match REVE patch geometry")
                 if output.shape[2] <= 0:
                     raise AdapterContractError("last_tuned encoder output embed dim must be positive")
                 if not torch.isfinite(output).all():
-                    raise AdapterContractError(
-                        "last_tuned final token tensor must contain only finite values"
-                    )
+                    raise AdapterContractError("last_tuned final token tensor must contain only finite values")
                 mean_query = output.mean(dim=1, keepdim=True)
                 if not torch.isfinite(mean_query).all():
-                    raise AdapterContractError(
-                        "last_tuned train-dummy mean query must contain only finite values"
-                    )
+                    raise AdapterContractError("last_tuned train-dummy mean query must contain only finite values")
         query = mean_query.detach().clone()
     finally:
         for module, was_training in zip(modules, training_flags):
@@ -264,10 +249,7 @@ def _resolve_last_tuned_model(model: nn.Module) -> nn.Module:
             current = inner
             continue
         break
-    raise ProtocolMismatchError(
-        "last_tuned optimizer requires a model with a REVE head under "
-        "head or wrapped_model.head"
-    )
+    raise ProtocolMismatchError("last_tuned optimizer requires a model with a REVE head under head or wrapped_model.head")
 
 
 def _last_tuned_trainable_parameters(
@@ -296,10 +278,7 @@ def _last_tuned_trainable_parameters(
         identity = id(parameter)
         previous_name = names_by_identity.get(identity)
         if previous_name is not None:
-            raise ProtocolMismatchError(
-                "duplicate trainable parameter identity registered as "
-                f"{previous_name!r} and {name!r}"
-            )
+            raise ProtocolMismatchError(f"duplicate trainable parameter identity registered as {previous_name!r} and {name!r}")
         names_by_identity[identity] = name
 
     query_entries = [
@@ -309,10 +288,7 @@ def _last_tuned_trainable_parameters(
     ]
     if len(query_entries) != 1 or query_entries[0][0] != "head.query_token":
         observed = [name for name, _parameter in query_entries]
-        raise ProtocolMismatchError(
-            "last_tuned query must be registered exactly once as "
-            f"'head.query_token'; got {observed!r}"
-        )
+        raise ProtocolMismatchError(f"last_tuned query must be registered exactly once as 'head.query_token'; got {observed!r}")
 
     base_parameters = [
         parameter for _name, parameter in named_trainable if parameter is not query
@@ -331,10 +307,7 @@ def _last_tuned_trainable_parameters(
     if set(resolved_identities) != set(model_identities):
         missing = set(model_identities) - set(resolved_identities)
         unexpected = set(resolved_identities) - set(model_identities)
-        raise ProtocolMismatchError(
-            "last_tuned optimizer parameter resolution mismatch: "
-            f"missing={len(missing)}, unexpected={len(unexpected)}"
-        )
+        raise ProtocolMismatchError(f"last_tuned optimizer parameter resolution mismatch: missing={len(missing)}, unexpected={len(unexpected)}")
     return base_parameters, query
 
 
@@ -352,9 +325,7 @@ def _validate_tuned_optimizer_group(
     if [id(parameter) for parameter in observed_parameters] != [
         id(parameter) for parameter in expected_parameters
     ]:
-        raise ProtocolMismatchError(
-            f"last_tuned optimizer group {index} parameter membership changed"
-        )
+        raise ProtocolMismatchError(f"last_tuned optimizer group {index} parameter membership changed")
 
     expected_values = {
         "weight_decay": LAST_TUNED_WEIGHT_DECAY,
@@ -365,16 +336,8 @@ def _validate_tuned_optimizer_group(
     }
     for field, expected in expected_values.items():
         actual = group.get(field)
-        if not isinstance(actual, (int, float)) or not math.isclose(
-            float(actual),
-            expected,
-            rel_tol=1e-12,
-            abs_tol=1e-15,
-        ):
-            raise ProtocolMismatchError(
-                f"last_tuned optimizer group {index} {field} mismatch: "
-                f"expected {expected!r}, got {actual!r}"
-            )
+        if not isinstance(actual, (int, float)) or not math.isclose(float(actual), expected, rel_tol=1e-12, abs_tol=1e-15):
+            raise ProtocolMismatchError(f"last_tuned optimizer group {index} {field} mismatch: expected {expected!r}, got {actual!r}")
     return [id(parameter) for parameter in observed_parameters]
 
 
@@ -404,28 +367,12 @@ def _validate_last_tuned_optimizer_config(
 
     expected_parameters = (list(base_parameters), [query])
     expected_max_lrs = LAST_TUNED_SCHEDULER_MAX_LR
-    expected_initial_lrs = tuple(
-        max_lr / LAST_TUNED_SCHEDULER_DIV_FACTOR
-        for max_lr in expected_max_lrs
-    )
+    expected_initial_lrs = tuple(max_lr / LAST_TUNED_SCHEDULER_DIV_FACTOR for max_lr in expected_max_lrs)
     observed_identities: list[int] = []
     for index, (group, parameters, max_lr, initial_lr) in enumerate(
-        zip(
-            optimizer.param_groups,
-            expected_parameters,
-            expected_max_lrs,
-            expected_initial_lrs,
-        )
+        zip(optimizer.param_groups, expected_parameters, expected_max_lrs, expected_initial_lrs)
     ):
-        observed_identities.extend(
-            _validate_tuned_optimizer_group(
-                index,
-                group,
-                parameters,
-                max_lr=max_lr,
-                initial_lr=initial_lr,
-            )
-        )
+        observed_identities.extend(_validate_tuned_optimizer_group(index, group, parameters, max_lr=max_lr, initial_lr=initial_lr))
 
     trainable_identities = {
         id(parameter) for parameter in model.parameters() if parameter.requires_grad
@@ -435,19 +382,11 @@ def _validate_last_tuned_optimizer_config(
     if set(observed_identities) != trainable_identities:
         missing = trainable_identities - set(observed_identities)
         unexpected = set(observed_identities) - trainable_identities
-        raise ProtocolMismatchError(
-            "last_tuned optimizer trainable-parameter mismatch: "
-            f"missing={len(missing)}, unexpected={len(unexpected)}"
-        )
+        raise ProtocolMismatchError(f"last_tuned optimizer trainable-parameter mismatch: missing={len(missing)}, unexpected={len(unexpected)}")
 
     expected_first_phase_end = total_steps * LAST_TUNED_SCHEDULER_PCT_START - 1
     phases = getattr(scheduler, "_schedule_phases", ())
-    if not phases or not math.isclose(
-        float(phases[0].get("end_step", float("nan"))),
-        expected_first_phase_end,
-        rel_tol=1e-12,
-        abs_tol=1e-12,
-    ):
+    if not phases or not math.isclose(float(phases[0].get("end_step", float("nan"))), expected_first_phase_end, rel_tol=1e-12, abs_tol=1e-12):
         raise ProtocolMismatchError("last_tuned OneCycleLR pct_start is invalid")
 
 
@@ -522,9 +461,7 @@ def last_tuned_optimizer_metadata(model: nn.Module) -> dict[str, Any]:
     base_names = [names_by_identity.get(id(parameter)) for parameter in base_parameters]
     query_name = names_by_identity.get(id(query))
     if any(name is None for name in base_names) or query_name != "head.query_token":
-        raise ProtocolMismatchError(
-            "last_tuned optimizer metadata could not resolve deterministic parameter names"
-        )
+        raise ProtocolMismatchError("last_tuned optimizer metadata could not resolve deterministic parameter names")
 
     return {
         "optimizer": {

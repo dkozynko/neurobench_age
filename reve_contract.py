@@ -60,10 +60,7 @@ def validate_official_head_variant(variant: str) -> str:
     """Validate a head variant admitted by the official protocol."""
 
     if variant not in OFFICIAL_HEAD_VARIANTS:
-        raise ValueError(
-            f"{variant!r} is not an official REVE head variant; "
-            f"expected one of {OFFICIAL_HEAD_VARIANTS}"
-        )
+        raise ValueError(f"{variant!r} is not an official REVE head variant; expected one of {OFFICIAL_HEAD_VARIANTS}")
     return variant
 
 
@@ -81,17 +78,11 @@ def validate_last_tuned_protocol(
     """
 
     if variant not in LAST_TUNED_PROTOCOL_VARIANTS:
-        raise ValueError(
-            f"{variant!r} is not a last_tuned protocol variant; "
-            f"expected one of {LAST_TUNED_PROTOCOL_VARIANTS}"
-        )
+        raise ValueError(f"{variant!r} is not a last_tuned protocol variant; expected one of {LAST_TUNED_PROTOCOL_VARIANTS}")
     if experiment is None and optimizer_config is None:
         return variant
     if experiment is None or optimizer_config is None:
-        raise ProtocolMismatchError(
-            "last_tuned resolved validation requires both experiment and "
-            "optimizer_config"
-        )
+        raise ProtocolMismatchError("last_tuned resolved validation requires both experiment and optimizer_config")
     _validate_last_tuned_resolved_protocol(experiment, optimizer_config)
     return variant
 
@@ -213,37 +204,22 @@ def _last_tuned_group_mismatches(groups: Any) -> list[str]:
             or not isinstance(parameter_names, (list, tuple))
             or not all(isinstance(name, str) and name for name in parameter_names)
         ):
-            mismatches.append(
-                f"{group_path}.parameter_names: expected a non-empty sequence of names, "
-                f"got {parameter_names!r}"
-            )
+            mismatches.append(f"{group_path}.parameter_names: expected a non-empty sequence of names, got {parameter_names!r}")
             continue
         if len(parameter_names) != len(set(parameter_names)):
             mismatches.append(f"{group_path}.parameter_names: duplicate parameter names")
         overlap = seen_parameter_names.intersection(parameter_names)
         if overlap:
-            mismatches.append(
-                "optimizer_config.param_groups.parameter_names: duplicate names "
-                f"{sorted(overlap)!r}"
-            )
+            mismatches.append(f"optimizer_config.param_groups.parameter_names: duplicate names {sorted(overlap)!r}")
         seen_parameter_names.update(parameter_names)
 
         if expected_name == "base":
             if "head.query_token" in parameter_names:
-                mismatches.append(
-                    f"{group_path}.parameter_names: base group must exclude "
-                    "'head.query_token'"
-                )
+                mismatches.append(f"{group_path}.parameter_names: base group must exclude 'head.query_token'")
             if "head.gate_logit" not in parameter_names:
-                mismatches.append(
-                    f"{group_path}.parameter_names: base group must include "
-                    "'head.gate_logit'"
-                )
+                mismatches.append(f"{group_path}.parameter_names: base group must include 'head.gate_logit'")
         elif list(parameter_names) != ["head.query_token"]:
-            mismatches.append(
-                f"{group_path}.parameter_names: query group must contain only "
-                "'head.query_token'"
-            )
+            mismatches.append(f"{group_path}.parameter_names: query group must contain only 'head.query_token'")
     return mismatches
 
 
@@ -382,10 +358,7 @@ def validate_official_protocol(
                 mismatches.append(f"downstream_model_wrapper.{field} must be None for full fine-tuning")
 
     if n_total_params is not None and n_trainable_params != n_total_params:
-        mismatches.append(
-            "backbone trainability: expected all parameters trainable, "
-            f"got {n_trainable_params}/{n_total_params}"
-        )
+        mismatches.append(f"backbone trainability: expected all parameters trainable, got {n_trainable_params}/{n_total_params}")
 
     if mismatches:
         raise ProtocolMismatchError(
@@ -405,10 +378,7 @@ def verify_upstream_source_hashes(source_root: Path) -> dict[str, str]:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         observed[relative] = digest
         if digest != expected:
-            raise ValueError(
-                f"upstream source hash mismatch for {relative}: "
-                f"expected {expected}, got {digest}"
-            )
+            raise ValueError(f"upstream source hash mismatch for {relative}: expected {expected}, got {digest}")
     return observed
 
 

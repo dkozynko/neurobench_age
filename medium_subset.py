@@ -81,9 +81,7 @@ def select_midpoint_indices(candidate_count: int, selection_count: int) -> list[
     """Select evenly spaced zero-based midpoint indices deterministically."""
 
     if candidate_count < selection_count or selection_count <= 0:
-        raise ValueError(
-            f"cannot select {selection_count} rows from {candidate_count} candidates"
-        )
+        raise ValueError(f"cannot select {selection_count} rows from {candidate_count} candidates")
     return [
         math.floor((index + 0.5) * candidate_count / selection_count)
         for index in range(selection_count)
@@ -201,10 +199,7 @@ def build_medium_manifest(
     quotas = {release: 6 + int(index < 6) for index, release in enumerate(train_releases)}
     for release in train_releases:
         rows = by_release[release]
-        selected.extend(
-            rows[index]
-            for index in select_midpoint_indices(len(rows), quotas[release])
-        )
+        selected.extend(rows[index] for index in select_midpoint_indices(len(rows), quotas[release]))
 
     assignments = split_releases(RELEASE_ORDER)
     result = [
@@ -221,11 +216,7 @@ def build_medium_manifest(
     result.sort(key=lambda row: (int(row.release[1:]), row.subject))
     validate_selected_recordings(
         [
-            next(
-                recording
-                for recording in recordings
-                if _recording_relpath(recording.path, data_root) == row.recording_relpath
-            )
+            next(recording for recording in recordings if _recording_relpath(recording.path, data_root) == row.recording_relpath)
             for row in result
         ],
         data_root=data_root,
@@ -237,9 +228,7 @@ def _canonical_manifest_bytes(rows: Sequence[SelectedRecording]) -> bytes:
     import io
 
     buffer = io.StringIO(newline="")
-    writer = csv.DictWriter(
-        buffer, fieldnames=MANIFEST_FIELDS, lineterminator="\n", extrasaction="raise"
-    )
+    writer = csv.DictWriter(buffer, fieldnames=MANIFEST_FIELDS, lineterminator="\n", extrasaction="raise")
     writer.writeheader()
     for row in rows:
         writer.writerow(
@@ -308,9 +297,7 @@ def filter_recordings_by_manifest(
             or recording.subject != expected.subject
             or recording.age is None
             or not np.isclose(float(recording.age), expected.age, atol=1e-6, rtol=0.0)
-            or not np.isclose(
-                float(recording.duration_s), expected.duration_s, atol=1e-6, rtol=0.0
-            )
+            or not np.isclose(float(recording.duration_s), expected.duration_s, atol=1e-6, rtol=0.0)
             or not _is_eligible(recording)
         ):
             raise ValueError(f"metadata mismatch for {relative}")
