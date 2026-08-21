@@ -164,6 +164,37 @@ class MeanLinearCopyHead(nn.Module):
         return self.linear(self.pool_tokens(tokens))
 
 
+class MeanAnchorHead(nn.Module):
+    """Mean-linear baseline with a learnable, zero-initialized attention residual."""
+
+    def __init__(self, *, embed_dim: int, n_outputs: int):
+        super().__init__()
+        if embed_dim <= 0 or n_outputs <= 0:
+            raise ValueError("embed_dim and n_outputs must be positive")
+        self.embed_dim = embed_dim
+        self.query_initialization = "zero_uniform_attention"
+        self.gamma_initialization = "zero"
+        self.query_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.gamma = nn.Parameter(torch.zeros(()))
+        # Keep this construction after the zero-only parameters so the Linear
+        # consumes the same RNG position as MeanLinearCopyHead.
+        self.linear = nn.Linear(embed_dim, n_outputs)
+
+    def pool_tokens(self, tokens: Any) -> torch.Tensor:
+        """Pool final tokens, starting as exact mean pooling."""
+
+        tokens = _validate_final_tokens(tokens, embed_dim=self.embed_dim)
+        mean = tokens.mean(dim=1)
+        query = self.query_token.expand(tokens.shape[0], -1, -1)
+        scores = torch.matmul(query, tokens.transpose(-1, -2)) / math.sqrt(self.embed_dim)
+        weights = torch.softmax(scores, dim=-1)
+        attention = torch.matmul(weights, tokens).squeeze(1)
+        return mean + self.gamma * (attention - mean)
+
+    def forward(self, tokens: Any) -> torch.Tensor:
+        return self.linear(self.pool_tokens(tokens))
+
+
 class UpstreamReveHead(nn.Module):
     """Upstream REVE heads plus the isolated pure ``last_tuned`` head."""
 
@@ -442,7 +473,7 @@ class UpstreamReveHeadModel(nn.Module):
         query_initialization_metadata: Mapping[str, Any] | None = None,
     ):
         super().__init__()
-        if variant == "mean_linear_copy":
+        if variant in {"mean_linear_copy", "mean_anchor"}:
             validate_local_head_variant(variant)
         elif variant == "last_tuned":
             validate_last_tuned_protocol(variant)
@@ -460,6 +491,8 @@ class UpstreamReveHeadModel(nn.Module):
         embed_dim = _infer_embed_dim(encoder)
         if variant == "mean_linear_copy":
             self.head = MeanLinearCopyHead(embed_dim=embed_dim, n_outputs=n_outputs)
+        elif variant == "mean_anchor":
+            self.head = MeanAnchorHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "last_tuned":
             self.head = UpstreamReveHead(
                 variant=variant,
@@ -476,7 +509,7 @@ class UpstreamReveHeadModel(nn.Module):
         self, eeg: torch.Tensor, channel_positions: torch.Tensor | None
     ) -> Any:
         del channel_positions
-        if self.variant == "mean_linear_copy":
+        if self.variant in {"mean_linear_copy", "mean_anchor"}:
             # The official NtReve wrapper keeps its resolved REVE positions
             # internally and does not receive per-batch channel positions.
             return self.encoder(eeg)
@@ -512,7 +545,7 @@ def make_upstream_reve_wrapper(
 ) -> Any:
     """Create a concrete official NeuralBench wrapper config lazily."""
 
-    if variant == "mean_linear_copy":
+    if variant in {"mean_linear_copy", "mean_anchor"}:
         validate_local_head_variant(variant)
     elif variant == "last_tuned":
         validate_last_tuned_protocol(variant)
@@ -557,7 +590,7 @@ def make_upstream_reve_wrapper(
             if sample is None:
                 raise AdapterContractError("dummy batch contains no EEG tensor")
 
-            if self.head_variant == "mean_linear_copy":
+            if self.head_variant in {"mean_linear_copy", "mean_anchor"}:
                 # Match DownstreamWrapper.build: run the already-built model
                 # once before constructing its linear probe.
                 with torch.no_grad():

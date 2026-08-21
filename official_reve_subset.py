@@ -322,7 +322,7 @@ def run_official_stack_smoke(
 
     if head_variant == "last_tuned":
         reve.validate_last_tuned_protocol(head_variant)
-    elif head_variant == "mean_linear_copy":
+    elif head_variant in {"mean_linear_copy", "mean_anchor"}:
         reve.validate_local_head_variant(head_variant)
     else:
         reve.validate_upstream_head_variant(head_variant)
@@ -337,6 +337,7 @@ def run_official_stack_smoke(
     model = REVE(
         n_outputs=1,
         n_chans=n_chans,
+        chs_info=[{"ch_name": name} for name in ("Fp1", "Fp2", "F3")],
         n_times=n_times,
         sfreq=200.0,
         embed_dim=embed_dim,
@@ -500,12 +501,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument(
         "--smoke-head",
-        choices=("mean_linear_copy", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear_copy", "mean_anchor", "last_avg", "last", "all", "last_tuned"),
         help="run a data-free smoke test using the installed official stack",
     )
     parser.add_argument(
         "--head-variant",
-        choices=("mean_linear", "mean_linear_copy", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear", "mean_linear_copy", "mean_anchor", "last_avg", "last", "all", "last_tuned"),
         default="mean_linear",
     )
     parser.add_argument("--seeds", type=int, nargs="+", default=[33])

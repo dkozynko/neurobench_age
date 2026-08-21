@@ -78,6 +78,7 @@ __all__ = [
     "PROTOCOL_CONTRACT",
     "ProtocolMismatchError",
     "RMSNorm",
+    "MeanAnchorHead",
     "MeanLinearCopyHead",
     "UPSTREAM_HEAD_HIDDEN_SIZE",
     "UPSTREAM_HEAD_INIT_CUTOFF",
