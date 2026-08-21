@@ -132,13 +132,13 @@ def _json_safe_value(value: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def initialize_last_tuned_query(
+def _initialize_train_dummy_mean_query(
     encoder: nn.Module,
     dummy_batch: Mapping[str, Any],
     *,
     provenance: Any = None,
 ) -> tuple[torch.Tensor, dict[str, Any]]:
-    """Initialize ``last_tuned`` from NeuralBench's train-dummy batch only."""
+    """Initialize a query from NeuralBench's first training dummy sample."""
 
     if provenance is not _NEURALBENCH_TRAIN_DUMMY_CONTEXT:
         raise AdapterContractError("last_tuned initialization requires the internal train-dummy provenance context")
@@ -206,6 +206,28 @@ def initialize_last_tuned_query(
     if "subject_ids" in dummy_batch:
         metadata["query_initialization_subject_ids"] = _json_safe_value(dummy_batch["subject_ids"])
     return query, metadata
+
+
+def initialize_last_tuned_query(
+    encoder: nn.Module,
+    dummy_batch: Mapping[str, Any],
+    *,
+    provenance: Any = None,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    """Initialize ``last_tuned`` from NeuralBench's train-dummy batch only."""
+
+    return _initialize_train_dummy_mean_query(encoder, dummy_batch, provenance=provenance)
+
+
+def initialize_mean_anchor_query(
+    encoder: nn.Module,
+    dummy_batch: Mapping[str, Any],
+    *,
+    provenance: Any = None,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    """Initialize ``mean_anchor`` from the same train-dummy sample as last_tuned."""
+
+    return _initialize_train_dummy_mean_query(encoder, dummy_batch, provenance=provenance)
 
 
 

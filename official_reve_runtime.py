@@ -188,14 +188,20 @@ def _head_metadata(
     query_initialization = {
         "mean_linear": "neuralbench_default",
         "mean_linear_copy": "not_applicable",
-        "mean_anchor": "zero_uniform_attention",
+        "mean_linear_detached": "not_applicable",
+        "mean_anchor": "train_dummy_final_token_mean",
+        "mean_residual": "train_dummy_final_token_mean",
+        "mean_vector_anchor": "train_dummy_final_token_mean",
+        "mean_mlp_residual": "not_applicable",
+        "mean_stats_residual": "not_applicable",
+        "mean_stats_residual_detached": "not_applicable",
         "last_avg": "upstream_random_unused",
         "last_tuned": "train_dummy_final_token_mean",
         "last": "upstream_random",
         "all": "upstream_random",
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
-    is_local_head = head_variant in {"mean_linear_copy", "mean_anchor"}
+    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached"}
     metadata: dict[str, Any] = {
         "head_variant": head_variant,
         "head_source": (
@@ -203,6 +209,18 @@ def _head_metadata(
             if is_default_head
             else "local_mean_anchor"
             if head_variant == "mean_anchor"
+            else "local_mean_residual"
+            if head_variant == "mean_residual"
+            else "local_mean_vector_anchor"
+            if head_variant == "mean_vector_anchor"
+            else "local_mean_mlp_residual"
+            if head_variant == "mean_mlp_residual"
+            else "local_mean_stats_residual"
+            if head_variant == "mean_stats_residual"
+            else "local_mean_stats_residual_detached"
+            if head_variant == "mean_stats_residual_detached"
+            else "local_mean_linear_detached"
+            if head_variant == "mean_linear_detached"
             else "local_mean_linear_copy"
             if is_local_head
             else "upstream_reve"
@@ -230,12 +248,71 @@ def _head_metadata(
         "protocol": reve.PROTOCOL_CONTRACT,
         "runtime": reve.runtime_metadata(),
     }
+    if head_variant == "mean_linear_detached":
+        metadata.update(
+            {
+                "head_architecture": "mean_linear_detached_encoder",
+                "query_initialization": "not_applicable",
+                "encoder_gradient": "detached",
+                "normalization": "none",
+            }
+        )
     if head_variant == "mean_anchor":
         metadata.update(
             {
-                "head_architecture": "mean_anchor_zero_query_residual",
-                "query_initialization": "zero_uniform_attention",
+                "head_architecture": "mean_anchor_train_dummy_query_residual",
+                "query_initialization": "train_dummy_final_token_mean",
                 "gamma_initialization": 0.0,
+        "normalization": "none",
+            }
+        )
+    if head_variant == "mean_residual":
+        metadata.update(
+            {
+                "head_architecture": "mean_residual_zero_correction_query_attention",
+                "query_initialization": "train_dummy_final_token_mean",
+                "correction_initialization": "zero",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_vector_anchor":
+        metadata.update(
+            {
+                "head_architecture": "mean_vector_anchor_train_dummy_query_residual",
+                "query_initialization": "train_dummy_final_token_mean",
+                "gamma_initialization": 0.0,
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_mlp_residual":
+        metadata.update(
+            {
+                "head_architecture": "mean_mlp_zero_correction",
+                "query_initialization": "not_applicable",
+                "correction_initialization": "zero",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_stats_residual":
+        metadata.update(
+            {
+                "head_architecture": "mean_stats_zero_correction",
+                "query_initialization": "not_applicable",
+                "correction_initialization": "zero",
+                "correction_features": "per_feature_std_and_range",
+                "correction_scale": 0.5,
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_stats_residual_detached":
+        metadata.update(
+            {
+                "head_architecture": "mean_stats_zero_correction_detached_statistics",
+                "query_initialization": "not_applicable",
+                "correction_initialization": "zero",
+                "correction_features": "per_feature_std_and_range",
+                "correction_scale": 0.5,
+                "correction_backbone_gradient": "detached",
                 "normalization": "none",
             }
         )

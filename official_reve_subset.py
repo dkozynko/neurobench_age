@@ -322,7 +322,7 @@ def run_official_stack_smoke(
 
     if head_variant == "last_tuned":
         reve.validate_last_tuned_protocol(head_variant)
-    elif head_variant in {"mean_linear_copy", "mean_anchor"}:
+    elif head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached"}:
         reve.validate_local_head_variant(head_variant)
     else:
         reve.validate_upstream_head_variant(head_variant)
@@ -348,10 +348,10 @@ def run_official_stack_smoke(
         attention_pooling=True,
     )
     encoder = _ReveWrapper(model, encoder_only=True).to(device)
-    if head_variant != "last_tuned":
+    if head_variant not in {"last_tuned", "mean_anchor", "mean_residual", "mean_vector_anchor"}:
         # Keep the official smoke variants on their exact existing RNG and
-        # construction path.  Only the tuning branch needs encoder tokens
-        # before it can construct its explicit query.
+        # construction path.  Query-initialization branches need encoder
+        # tokens before they can construct their explicit query.
         adapter = reve.UpstreamReveHeadModel(encoder, variant=head_variant, n_outputs=1, dropout=0.0).to(device)
     eeg = torch.randn(2, n_chans, n_times, device=device)
     positions = torch.randn(2, n_chans, 3, device=device)
@@ -359,13 +359,13 @@ def run_official_stack_smoke(
     with torch.inference_mode():
         raw_layers = model(eeg, pos=positions, return_output=True)
         final = encoder(eeg, pos=positions)
-    if head_variant == "last_tuned":
+    if head_variant in {"last_tuned", "mean_anchor", "mean_residual", "mean_vector_anchor"}:
         if not isinstance(final, torch.Tensor) or final.ndim != 3:
-            raise RuntimeError("last_tuned smoke encoder did not return final tokens")
+            raise RuntimeError(f"{head_variant} smoke encoder did not return final tokens")
         with torch.inference_mode(False):
             query_token = final[:1].mean(dim=1, keepdim=True).detach().clone()
         if not torch.isfinite(query_token).all():
-            raise RuntimeError("last_tuned smoke mean-token query is not finite")
+            raise RuntimeError(f"{head_variant} smoke mean-token query is not finite")
         adapter = reve.UpstreamReveHeadModel(
             encoder,
             variant=head_variant,
@@ -406,6 +406,44 @@ def run_official_stack_smoke(
                 ],
                 "prediction_finite": bool(torch.isfinite(prediction).all().item()),
                 "metadata_finite": _metadata_values_are_finite(tuning_metadata),
+            }
+        )
+    elif head_variant in {"mean_anchor", "mean_residual", "mean_vector_anchor"}:
+        smoke_metadata = {
+            "query_initialization": adapter.head.query_initialization,
+            "query_initialization_provenance": "smoke",
+        }
+        output.update(
+            {
+                "query_initialization_provenance": smoke_metadata[
+                    "query_initialization_provenance"
+                ],
+                "prediction_finite": bool(torch.isfinite(prediction).all().item()),
+                "metadata_finite": _metadata_values_are_finite(smoke_metadata),
+            }
+        )
+    elif head_variant == "mean_mlp_residual":
+        output.update(
+            {
+                "prediction_finite": bool(torch.isfinite(prediction).all().item()),
+            }
+        )
+    elif head_variant == "mean_stats_residual":
+        output.update(
+            {
+                "prediction_finite": bool(torch.isfinite(prediction).all().item()),
+            }
+        )
+    elif head_variant == "mean_stats_residual_detached":
+        output.update(
+            {
+                "prediction_finite": bool(torch.isfinite(prediction).all().item()),
+            }
+        )
+    elif head_variant == "mean_linear_detached":
+        output.update(
+            {
+                "prediction_finite": bool(torch.isfinite(prediction).all().item()),
             }
         )
     return output
@@ -501,12 +539,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument(
         "--smoke-head",
-        choices=("mean_linear_copy", "mean_anchor", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear_copy", "mean_linear_detached", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "last_avg", "last", "all", "last_tuned"),
         help="run a data-free smoke test using the installed official stack",
     )
     parser.add_argument(
         "--head-variant",
-        choices=("mean_linear", "mean_linear_copy", "mean_anchor", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "last_avg", "last", "all", "last_tuned"),
         default="mean_linear",
     )
     parser.add_argument("--seeds", type=int, nargs="+", default=[33])

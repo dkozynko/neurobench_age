@@ -1,0 +1,61 @@
+{
+  "metric": "test/pearsonr",
+  "checkpoint_selection": "val/pearsonr",
+  "head_variant": "mean_anchor",
+  "head_source": "local_mean_anchor",
+  "head_architecture": "mean_anchor_train_dummy_query_residual",
+  "query_initialization": "train_dummy_final_token_mean",
+  "gamma_initialization": 0.0,
+  "normalization": "none",
+  "positions_policy": "official_internal_positions_no_batch_channel_positions",
+  "remote_output_dir": "/workspace/hbn_subset/results/reve_head_experiments_mean_anchor_train_dummy_positions_fixed_20260821",
+  "seeds": [33, 34, 35],
+  "metrics_by_seed": {
+    "33": {
+      "test_pearsonr": 0.5992392897605896,
+      "test_rmse": 2.921116828918457,
+      "test_mae": 2.315275192260742,
+      "test_loss": 8.532923698425293,
+      "test_normalized_rmse": 0.8587591052055359
+    },
+    "34": {
+      "test_pearsonr": 0.5570296049118042,
+      "test_rmse": 2.905984401702881,
+      "test_mae": 2.262739658355713,
+      "test_loss": 8.444745063781738,
+      "test_normalized_rmse": 0.8543104529380798
+    },
+    "35": {
+      "test_pearsonr": 0.6668158173561096,
+      "test_rmse": 2.6025233268737793,
+      "test_mae": 2.0268752574920654,
+      "test_loss": 6.773128032684326,
+      "test_normalized_rmse": 0.765097975730896
+    }
+  },
+  "aggregate": {
+    "test_pearsonr_mean": 0.607694904009501,
+    "test_pearsonr_sample_standard_deviation": 0.055379383979612,
+    "test_rmse_mean": 2.809874852498373,
+    "test_rmse_sample_standard_deviation": 0.179731018392745,
+    "test_mae_mean": 2.201630036036173,
+    "test_mae_sample_standard_deviation": 0.153604752689075
+  },
+  "mean_linear_reference": {
+    "pearson_by_seed": {
+      "33": 0.5941864252090454,
+      "34": 0.5342379212379456,
+      "35": 0.6637211441993713
+    },
+    "pearson_mean": 0.5973818302154541,
+    "pearson_sample_standard_deviation": 0.06480072697883729
+  },
+  "mean_anchor_minus_mean_linear": {
+    "pearson_by_seed": {
+      "33": 0.0050528645515442,
+      "34": 0.0227916836738586,
+      "35": 0.0030946731567383
+    },
+    "pearson_mean_difference": 0.0103130737940469
+  }
+}
