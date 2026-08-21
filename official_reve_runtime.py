@@ -189,19 +189,22 @@ def _head_metadata(
         "mean_linear": "neuralbench_default",
         "mean_linear_copy": "not_applicable",
         "mean_linear_detached": "not_applicable",
+        "mean_linear_warmup": "not_applicable",
+        "mean_linear_gradient_scaled": "not_applicable",
         "mean_anchor": "train_dummy_final_token_mean",
         "mean_residual": "train_dummy_final_token_mean",
         "mean_vector_anchor": "train_dummy_final_token_mean",
         "mean_mlp_residual": "not_applicable",
         "mean_stats_residual": "not_applicable",
         "mean_stats_residual_detached": "not_applicable",
+        "mean_stats_residual_gradient_scaled": "not_applicable",
         "last_avg": "upstream_random_unused",
         "last_tuned": "train_dummy_final_token_mean",
         "last": "upstream_random",
         "all": "upstream_random",
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
-    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached"}
+    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled"}
     metadata: dict[str, Any] = {
         "head_variant": head_variant,
         "head_source": (
@@ -219,8 +222,14 @@ def _head_metadata(
             if head_variant == "mean_stats_residual"
             else "local_mean_stats_residual_detached"
             if head_variant == "mean_stats_residual_detached"
+            else "local_mean_stats_residual_gradient_scaled"
+            if head_variant == "mean_stats_residual_gradient_scaled"
             else "local_mean_linear_detached"
             if head_variant == "mean_linear_detached"
+            else "local_mean_linear_warmup"
+            if head_variant == "mean_linear_warmup"
+            else "local_mean_linear_gradient_scaled"
+            if head_variant == "mean_linear_gradient_scaled"
             else "local_mean_linear_copy"
             if is_local_head
             else "upstream_reve"
@@ -254,6 +263,27 @@ def _head_metadata(
                 "head_architecture": "mean_linear_detached_encoder",
                 "query_initialization": "not_applicable",
                 "encoder_gradient": "detached",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_linear_warmup":
+        metadata.update(
+            {
+                "head_architecture": "mean_linear_zero_gate_residual_warmup",
+                "query_initialization": "not_applicable",
+                "residual_initialization": "torch_nn_linear_default",
+                "gate_initialization": 0.0,
+                "baseline_encoder_gradient": "detached",
+                "residual_encoder_gradient": "enabled_after_gate_update",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_linear_gradient_scaled":
+        metadata.update(
+            {
+                "head_architecture": "mean_linear_gradient_scaled",
+                "query_initialization": "not_applicable",
+                "encoder_gradient_scale": 0.1,
                 "normalization": "none",
             }
         )
@@ -312,6 +342,19 @@ def _head_metadata(
                 "correction_initialization": "zero",
                 "correction_features": "per_feature_std_and_range",
                 "correction_scale": 0.5,
+                "correction_backbone_gradient": "detached",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_stats_residual_gradient_scaled":
+        metadata.update(
+            {
+                "head_architecture": "mean_stats_zero_correction_gradient_scaled",
+                "query_initialization": "not_applicable",
+                "correction_initialization": "zero",
+                "correction_features": "per_feature_std_and_range",
+                "correction_scale": 0.5,
+                "encoder_gradient_scale": 0.1,
                 "correction_backbone_gradient": "detached",
                 "normalization": "none",
             }

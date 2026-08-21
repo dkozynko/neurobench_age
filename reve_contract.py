@@ -22,12 +22,15 @@ OFFICIAL_HEAD_VARIANTS = ("mean_linear", "last_avg", "last", "all")
 LOCAL_HEAD_VARIANTS = (
     "mean_linear_copy",
     "mean_linear_detached",
+    "mean_linear_warmup",
+    "mean_linear_gradient_scaled",
     "mean_anchor",
     "mean_residual",
     "mean_vector_anchor",
     "mean_mlp_residual",
     "mean_stats_residual",
     "mean_stats_residual_detached",
+    "mean_stats_residual_gradient_scaled",
 )
 LAST_TUNED_PROTOCOL_VARIANTS = ("last_tuned",)
 HEAD_VARIANTS = OFFICIAL_HEAD_VARIANTS + LOCAL_HEAD_VARIANTS + LAST_TUNED_PROTOCOL_VARIANTS
