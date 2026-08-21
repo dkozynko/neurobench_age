@@ -19,7 +19,7 @@ UPSTREAM_REVE_FILE_HASHES = {
 }
 
 OFFICIAL_HEAD_VARIANTS = ("mean_linear", "last_avg", "last", "all")
-LOCAL_HEAD_VARIANTS = ("mean_linear_copy",)
+LOCAL_HEAD_VARIANTS = ("mean_linear_copy", "mean_anchor")
 LAST_TUNED_PROTOCOL_VARIANTS = ("last_tuned",)
 HEAD_VARIANTS = OFFICIAL_HEAD_VARIANTS + LOCAL_HEAD_VARIANTS + LAST_TUNED_PROTOCOL_VARIANTS
 UPSTREAM_HEAD_VARIANTS = ("last_avg", "last", "all")
