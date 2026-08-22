@@ -132,6 +132,17 @@ class EpochTestPearson(LightningCallback):
         import torch
         from torchmetrics.regression import PearsonCorrCoef
 
+        # Lightning exposes the validation metrics collected by the official
+        # validation loop on ``callback_metrics``.  Copy the monitored value
+        # for observability only; it never affects checkpoint selection or the
+        # diagnostic test pass below.
+        callback_metrics = getattr(trainer, "callback_metrics", {})
+        validation_value = callback_metrics.get("val/pearsonr")
+        if validation_value is None:
+            validation_pearsonr = None
+        else:
+            validation_pearsonr = float(torch.as_tensor(validation_value).detach().cpu())
+
         was_training = pl_module.training
         pl_module.eval()
         # Keep the diagnostic metric on CPU. Lightning's strategy may expose
@@ -155,11 +166,13 @@ class EpochTestPearson(LightningCallback):
         record = {
             "seed": self.seed,
             "epoch": int(trainer.current_epoch + 1),
+            "val/pearsonr": validation_pearsonr,
             "test_pearsonr": score,
         }
         message = (
             "EPOCH_TEST "
             f"epoch={record['epoch']} "
+            f"val/pearsonr={validation_pearsonr if validation_pearsonr is not None else 'unavailable'} "
             f"test/pearsonr={record['test_pearsonr']:.12f}"
         )
         LOGGER.info(message)
@@ -322,7 +335,7 @@ def run_official_stack_smoke(
 
     if head_variant == "last_tuned":
         reve.validate_last_tuned_protocol(head_variant)
-    elif head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled"}:
+    elif head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated"}:
         reve.validate_local_head_variant(head_variant)
     else:
         reve.validate_upstream_head_variant(head_variant)
@@ -348,7 +361,7 @@ def run_official_stack_smoke(
         attention_pooling=True,
     )
     encoder = _ReveWrapper(model, encoder_only=True).to(device)
-    if head_variant not in {"last_tuned", "mean_anchor", "mean_residual", "mean_vector_anchor"}:
+    if head_variant not in {"last_tuned", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_stats_attention_residual", "mean_attention_gated"}:
         # Keep the official smoke variants on their exact existing RNG and
         # construction path.  Query-initialization branches need encoder
         # tokens before they can construct their explicit query.
@@ -359,7 +372,7 @@ def run_official_stack_smoke(
     with torch.inference_mode():
         raw_layers = model(eeg, pos=positions, return_output=True)
         final = encoder(eeg, pos=positions)
-    if head_variant in {"last_tuned", "mean_anchor", "mean_residual", "mean_vector_anchor"}:
+    if head_variant in {"last_tuned", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_stats_attention_residual", "mean_attention_gated"}:
         if not isinstance(final, torch.Tensor) or final.ndim != 3:
             raise RuntimeError(f"{head_variant} smoke encoder did not return final tokens")
         with torch.inference_mode(False):
@@ -408,7 +421,7 @@ def run_official_stack_smoke(
                 "metadata_finite": _metadata_values_are_finite(tuning_metadata),
             }
         )
-    elif head_variant in {"mean_anchor", "mean_residual", "mean_vector_anchor"}:
+    elif head_variant in {"mean_anchor", "mean_residual", "mean_vector_anchor", "mean_stats_attention_residual", "mean_attention_gated"}:
         smoke_metadata = {
             "query_initialization": adapter.head.query_initialization,
             "query_initialization_provenance": "smoke",
@@ -458,7 +471,31 @@ def run_official_stack_smoke(
                 "prediction_finite": bool(torch.isfinite(prediction).all().item()),
             }
         )
+    elif head_variant == "mean_linear_probe_scaled":
+        output.update(
+            {
+                "prediction_finite": bool(torch.isfinite(prediction).all().item()),
+            }
+        )
     elif head_variant == "mean_stats_residual_gradient_scaled":
+        output.update(
+            {
+                "prediction_finite": bool(torch.isfinite(prediction).all().item()),
+            }
+        )
+    elif head_variant == "mean_stats_probe_scaled":
+        output.update(
+            {
+                "prediction_finite": bool(torch.isfinite(prediction).all().item()),
+            }
+        )
+    elif head_variant == "mean_stats_attention_residual":
+        output.update(
+            {
+                "prediction_finite": bool(torch.isfinite(prediction).all().item()),
+            }
+        )
+    elif head_variant == "mean_attention_gated":
         output.update(
             {
                 "prediction_finite": bool(torch.isfinite(prediction).all().item()),
@@ -557,12 +594,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument(
         "--smoke-head",
-        choices=("mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "last_avg", "last", "all", "last_tuned"),
         help="run a data-free smoke test using the installed official stack",
     )
     parser.add_argument(
         "--head-variant",
-        choices=("mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "last_avg", "last", "all", "last_tuned"),
         default="mean_linear",
     )
     parser.add_argument("--seeds", type=int, nargs="+", default=[33])

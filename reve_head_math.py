@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 try:
     from .reve_contract import (
@@ -218,6 +219,47 @@ class MeanLinearGradientScaledHead(MeanLinearCopyHead):
         return mean.detach() + self.encoder_gradient_scale * (mean - mean.detach())
 
 
+class MeanLinearProbeScaledHead(MeanLinearCopyHead):
+    """Mean-linear probe with separate encoder and probe gradient scales."""
+
+    def __init__(
+        self,
+        *,
+        embed_dim: int,
+        n_outputs: int,
+        encoder_gradient_scale: float = 0.1,
+        probe_gradient_scale: float = 10.0,
+    ):
+        super().__init__(embed_dim=embed_dim, n_outputs=n_outputs)
+        if not 0.0 <= encoder_gradient_scale <= 1.0:
+            raise ValueError("encoder_gradient_scale must be in [0, 1]")
+        if probe_gradient_scale <= 0.0:
+            raise ValueError("probe_gradient_scale must be positive")
+        self.encoder_gradient_scale = float(encoder_gradient_scale)
+        self.probe_gradient_scale = float(probe_gradient_scale)
+    def pool_tokens(self, tokens: Any) -> torch.Tensor:
+        """Keep mean forward values while scaling encoder gradients."""
+
+        mean = _validate_final_tokens(tokens, embed_dim=self.embed_dim).mean(dim=1)
+        return mean.detach() + self.encoder_gradient_scale * (mean - mean.detach())
+
+    def forward(self, tokens: Any) -> torch.Tensor:
+        mean = self.pool_tokens(tokens)
+        # Detach-based interpolation preserves the parameter's forward value
+        # while multiplying its backward gradient by the requested scale.
+        weight = self.linear.weight.detach() + self.probe_gradient_scale * (
+            self.linear.weight - self.linear.weight.detach()
+        )
+        bias = self.linear.bias.detach() + self.probe_gradient_scale * (
+            self.linear.bias - self.linear.bias.detach()
+        )
+        return F.linear(
+            mean,
+            weight,
+            bias,
+        )
+
+
 class MeanAnchorHead(nn.Module):
     """Mean-linear baseline with a learnable, zero-gamma attention residual."""
 
@@ -423,6 +465,133 @@ class MeanStatsResidualHead(nn.Module):
         return self.linear(mean) + self.correction_scale * self.correction(self.pool_tokens(tokens))
 
 
+class MeanStatsAttentionResidualHead(nn.Module):
+    """Mean-linear baseline with zero-start attention and statistics corrections."""
+
+    def __init__(
+        self,
+        *,
+        embed_dim: int,
+        n_outputs: int,
+        query_token: torch.Tensor | None = None,
+        query_initialization_metadata: Mapping[str, Any] | None = None,
+    ):
+        super().__init__()
+        if embed_dim <= 0 or n_outputs <= 0:
+            raise ValueError("embed_dim and n_outputs must be positive")
+        self.embed_dim = embed_dim
+        if query_token is None:
+            query_token = torch.zeros(1, 1, embed_dim)
+            self.query_initialization = "zero_uniform_attention"
+        else:
+            query_token = _validate_query_token(query_token, embed_dim=embed_dim)
+            self.query_initialization = "provided"
+        if query_initialization_metadata is not None:
+            initialization_name = query_initialization_metadata.get("query_initialization")
+            if not isinstance(initialization_name, str):
+                raise AdapterContractError("mean_stats_attention_residual query initialization metadata must name its source")
+            self.query_initialization = initialization_name
+
+        self.query_token = nn.Parameter(query_token.detach().clone())
+        self.linear = nn.Linear(embed_dim, n_outputs)
+        self.attention_correction = nn.Linear(embed_dim, n_outputs, bias=False)
+        self.stats_correction = nn.Linear(2 * embed_dim, n_outputs, bias=False)
+        nn.init.zeros_(self.attention_correction.weight)
+        nn.init.zeros_(self.stats_correction.weight)
+        self.attention_scale = 0.25
+        self.stats_scale = 0.5
+
+    def _features(self, tokens: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        mean = tokens.mean(dim=1)
+        query = self.query_token.expand(tokens.shape[0], -1, -1)
+        scores = torch.matmul(query, tokens.transpose(-1, -2)) / math.sqrt(self.embed_dim)
+        weights = torch.softmax(scores, dim=-1)
+        attention = torch.matmul(weights, tokens).squeeze(1)
+        standard_deviation = tokens.std(dim=1, unbiased=False)
+        value_range = tokens.amax(dim=1) - tokens.amin(dim=1)
+        statistics = torch.cat((standard_deviation, value_range), dim=-1)
+        return mean, attention - mean, statistics
+
+    def pool_tokens(self, tokens: Any) -> torch.Tensor:
+        """Return the mean representation used by the baseline branch."""
+
+        tokens = _validate_final_tokens(tokens, embed_dim=self.embed_dim)
+        return tokens.mean(dim=1)
+
+    def forward(self, tokens: Any) -> torch.Tensor:
+        tokens = _validate_final_tokens(tokens, embed_dim=self.embed_dim)
+        mean, attention_residual, statistics = self._features(tokens)
+        return (
+            self.linear(mean)
+            + self.attention_scale * self.attention_correction(attention_residual)
+            + self.stats_scale * self.stats_correction(statistics)
+        )
+
+
+class MeanAttentionGatedHead(nn.Module):
+    """Mean-linear baseline plus a detached, scalar-gated attention correction.
+
+    The baseline branch is always ``Linear(mean(tokens))``.  The correction
+    sees detached tokens, so it cannot change the encoder gradient.  A scalar
+    ``gamma`` starts at zero, making the initial prediction exactly the
+    mean-linear baseline while still allowing backpropagation to learn when
+    the correction is useful.
+    """
+
+    def __init__(
+        self,
+        *,
+        embed_dim: int,
+        n_outputs: int,
+        query_token: torch.Tensor | None = None,
+        query_initialization_metadata: Mapping[str, Any] | None = None,
+    ):
+        super().__init__()
+        if embed_dim <= 0 or n_outputs <= 0:
+            raise ValueError("embed_dim and n_outputs must be positive")
+        self.embed_dim = embed_dim
+        if query_token is None:
+            query_token = torch.zeros(1, 1, embed_dim)
+            self.query_initialization = "zero_uniform_attention"
+        else:
+            query_token = _validate_query_token(query_token, embed_dim=embed_dim)
+            self.query_initialization = "provided"
+        if query_initialization_metadata is not None:
+            initialization_name = query_initialization_metadata.get("query_initialization")
+            if not isinstance(initialization_name, str):
+                raise AdapterContractError("mean_attention_gated query initialization metadata must name its source")
+            self.query_initialization = initialization_name
+
+        self.query_token = nn.Parameter(query_token.detach().clone())
+        # Construct the baseline probe first so its initialization matches the
+        # mean-linear control. The correction is small but non-zero: gamma=0
+        # makes the initial output exact while giving gamma a learning signal.
+        self.linear = nn.Linear(embed_dim, n_outputs)
+        self.correction = nn.Linear(embed_dim, n_outputs, bias=False)
+        nn.init.normal_(self.correction.weight, mean=0.0, std=0.01)
+        self.gamma = nn.Parameter(torch.zeros(()))
+        self.correction_scale = 0.25
+
+    def _attention_residual(self, tokens: torch.Tensor) -> torch.Tensor:
+        detached_tokens = tokens.detach()
+        query = self.query_token.expand(detached_tokens.shape[0], -1, -1)
+        scores = torch.matmul(query, detached_tokens.transpose(-1, -2)) / math.sqrt(self.embed_dim)
+        weights = torch.softmax(scores, dim=-1)
+        attention = torch.matmul(weights, detached_tokens).squeeze(1)
+        return attention - detached_tokens.mean(dim=1)
+
+    def pool_tokens(self, tokens: Any) -> torch.Tensor:
+        """Return the mean representation used by the baseline branch."""
+
+        return _validate_final_tokens(tokens, embed_dim=self.embed_dim).mean(dim=1)
+
+    def forward(self, tokens: Any) -> torch.Tensor:
+        tokens = _validate_final_tokens(tokens, embed_dim=self.embed_dim)
+        mean = tokens.mean(dim=1)
+        correction = self.correction(self._attention_residual(tokens))
+        return self.linear(mean) + self.correction_scale * self.gamma * correction
+
+
 class MeanStatsResidualDetachedHead(MeanStatsResidualHead):
     """Mean-linear head with a statistics correction that cannot alter encoder gradients."""
 
@@ -436,7 +605,7 @@ class MeanStatsResidualDetachedHead(MeanStatsResidualHead):
 class MeanStatsResidualGradientScaledHead(MeanStatsResidualHead):
     """Statistics residual with a controlled gradient into the encoder."""
 
-    def __init__(self, *, embed_dim: int, n_outputs: int, encoder_gradient_scale: float = 0.1):
+    def __init__(self, *, embed_dim: int, n_outputs: int, encoder_gradient_scale: float = 0.5):
         super().__init__(embed_dim=embed_dim, n_outputs=n_outputs)
         if not 0.0 <= encoder_gradient_scale <= 1.0:
             raise ValueError("encoder_gradient_scale must be in [0, 1]")
@@ -447,6 +616,47 @@ class MeanStatsResidualGradientScaledHead(MeanStatsResidualHead):
         mean = tokens.mean(dim=1)
         scaled_mean = mean.detach() + self.encoder_gradient_scale * (mean - mean.detach())
         return self.linear(scaled_mean) + self.correction_scale * self.correction(self.pool_tokens(tokens.detach()))
+
+
+class MeanStatsProbeScaledHead(MeanStatsResidualHead):
+    """Statistics head with a modestly faster probe update."""
+
+    def __init__(
+        self,
+        *,
+        embed_dim: int,
+        n_outputs: int,
+        encoder_gradient_scale: float = 1.0,
+        probe_gradient_scale: float = 2.0,
+    ):
+        super().__init__(embed_dim=embed_dim, n_outputs=n_outputs)
+        if not 0.0 <= encoder_gradient_scale <= 1.0:
+            raise ValueError("encoder_gradient_scale must be in [0, 1]")
+        if probe_gradient_scale <= 0.0:
+            raise ValueError("probe_gradient_scale must be positive")
+        self.encoder_gradient_scale = float(encoder_gradient_scale)
+        self.probe_gradient_scale = float(probe_gradient_scale)
+    def forward(self, tokens: Any) -> torch.Tensor:
+        tokens = _validate_final_tokens(tokens, embed_dim=self.embed_dim)
+        mean = tokens.mean(dim=1)
+        scaled_mean = mean.detach() + self.encoder_gradient_scale * (mean - mean.detach())
+        statistics = self.pool_tokens(tokens.detach())
+        linear_weight = self.linear.weight.detach() + self.probe_gradient_scale * (
+            self.linear.weight - self.linear.weight.detach()
+        )
+        linear_bias = self.linear.bias.detach() + self.probe_gradient_scale * (
+            self.linear.bias - self.linear.bias.detach()
+        )
+        correction_weight = self.correction.weight.detach() + self.probe_gradient_scale * (
+            self.correction.weight - self.correction.weight.detach()
+        )
+        linear_output = F.linear(scaled_mean, linear_weight, linear_bias)
+        correction_output = F.linear(
+            statistics,
+            correction_weight,
+            self.correction.bias,
+        )
+        return linear_output + self.correction_scale * correction_output
 
 
 class UpstreamReveHead(nn.Module):
@@ -727,7 +937,7 @@ class UpstreamReveHeadModel(nn.Module):
         query_initialization_metadata: Mapping[str, Any] | None = None,
     ):
         super().__init__()
-        if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled"}:
+        if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated"}:
             validate_local_head_variant(variant)
         elif variant == "last_tuned":
             validate_last_tuned_protocol(variant)
@@ -751,6 +961,8 @@ class UpstreamReveHeadModel(nn.Module):
             self.head = MeanLinearWarmupHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "mean_linear_gradient_scaled":
             self.head = MeanLinearGradientScaledHead(embed_dim=embed_dim, n_outputs=n_outputs)
+        elif variant == "mean_linear_probe_scaled":
+            self.head = MeanLinearProbeScaledHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "mean_anchor":
             self.head = MeanAnchorHead(
                 embed_dim=embed_dim,
@@ -780,6 +992,22 @@ class UpstreamReveHeadModel(nn.Module):
             self.head = MeanStatsResidualDetachedHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "mean_stats_residual_gradient_scaled":
             self.head = MeanStatsResidualGradientScaledHead(embed_dim=embed_dim, n_outputs=n_outputs)
+        elif variant == "mean_stats_probe_scaled":
+            self.head = MeanStatsProbeScaledHead(embed_dim=embed_dim, n_outputs=n_outputs)
+        elif variant == "mean_stats_attention_residual":
+            self.head = MeanStatsAttentionResidualHead(
+                embed_dim=embed_dim,
+                n_outputs=n_outputs,
+                query_token=query_token,
+                query_initialization_metadata=query_initialization_metadata,
+            )
+        elif variant == "mean_attention_gated":
+            self.head = MeanAttentionGatedHead(
+                embed_dim=embed_dim,
+                n_outputs=n_outputs,
+                query_token=query_token,
+                query_initialization_metadata=query_initialization_metadata,
+            )
         elif variant == "last_tuned":
             self.head = UpstreamReveHead(
                 variant=variant,
@@ -796,7 +1024,7 @@ class UpstreamReveHeadModel(nn.Module):
         self, eeg: torch.Tensor, channel_positions: torch.Tensor | None
     ) -> Any:
         del channel_positions
-        if self.variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled"}:
+        if self.variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated"}:
             # The official NtReve wrapper keeps its resolved REVE positions
             # internally and does not receive per-batch channel positions.
             return self.encoder(eeg)
@@ -832,7 +1060,7 @@ def make_upstream_reve_wrapper(
 ) -> Any:
     """Create a concrete official NeuralBench wrapper config lazily."""
 
-    if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled"}:
+    if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated"}:
         validate_local_head_variant(variant)
     elif variant == "last_tuned":
         validate_last_tuned_protocol(variant)
@@ -871,7 +1099,7 @@ def make_upstream_reve_wrapper(
                 input_key = _encoder_primary_input_key(model)
                 sample = dummy_batch[input_key]
                 channel_positions = dummy_batch.get("channel_positions")
-            elif self.head_variant in {"mean_anchor", "mean_residual", "mean_vector_anchor"}:
+            elif self.head_variant in {"mean_anchor", "mean_residual", "mean_vector_anchor", "mean_stats_attention_residual", "mean_attention_gated"}:
                 query_token, query_metadata = initialize_mean_anchor_query(model, dummy_batch, provenance=_NEURALBENCH_TRAIN_DUMMY_CONTEXT)
                 input_key = _encoder_primary_input_key(model)
                 sample = dummy_batch[input_key]
@@ -881,7 +1109,7 @@ def make_upstream_reve_wrapper(
             if sample is None:
                 raise AdapterContractError("dummy batch contains no EEG tensor")
 
-            if self.head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled"}:
+            if self.head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated"}:
                 # Match DownstreamWrapper.build: run the already-built model
                 # once before constructing its linear probe.
                 with torch.no_grad():
