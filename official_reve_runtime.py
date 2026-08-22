@@ -191,6 +191,7 @@ def _head_metadata(
         "mean_linear_detached": "not_applicable",
         "mean_linear_warmup": "not_applicable",
         "mean_linear_gradient_scaled": "not_applicable",
+        "mean_linear_probe_scaled": "not_applicable",
         "mean_anchor": "train_dummy_final_token_mean",
         "mean_residual": "train_dummy_final_token_mean",
         "mean_vector_anchor": "train_dummy_final_token_mean",
@@ -198,13 +199,16 @@ def _head_metadata(
         "mean_stats_residual": "not_applicable",
         "mean_stats_residual_detached": "not_applicable",
         "mean_stats_residual_gradient_scaled": "not_applicable",
+        "mean_stats_probe_scaled": "not_applicable",
+        "mean_stats_attention_residual": "train_dummy_final_token_mean",
+        "mean_attention_gated": "train_dummy_final_token_mean",
         "last_avg": "upstream_random_unused",
         "last_tuned": "train_dummy_final_token_mean",
         "last": "upstream_random",
         "all": "upstream_random",
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
-    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled"}
+    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated"}
     metadata: dict[str, Any] = {
         "head_variant": head_variant,
         "head_source": (
@@ -230,6 +234,14 @@ def _head_metadata(
             if head_variant == "mean_linear_warmup"
             else "local_mean_linear_gradient_scaled"
             if head_variant == "mean_linear_gradient_scaled"
+            else "local_mean_linear_probe_scaled"
+            if head_variant == "mean_linear_probe_scaled"
+            else "local_mean_stats_probe_scaled"
+            if head_variant == "mean_stats_probe_scaled"
+            else "local_mean_stats_attention_residual"
+            if head_variant == "mean_stats_attention_residual"
+            else "local_mean_attention_gated"
+            if head_variant == "mean_attention_gated"
             else "local_mean_linear_copy"
             if is_local_head
             else "upstream_reve"
@@ -287,13 +299,23 @@ def _head_metadata(
                 "normalization": "none",
             }
         )
+    if head_variant == "mean_linear_probe_scaled":
+        metadata.update(
+            {
+                "head_architecture": "mean_linear_probe_gradient_scaled",
+                "query_initialization": "not_applicable",
+                "encoder_gradient_scale": 0.1,
+                "probe_gradient_scale": 10.0,
+                "normalization": "none",
+            }
+        )
     if head_variant == "mean_anchor":
         metadata.update(
             {
                 "head_architecture": "mean_anchor_train_dummy_query_residual",
                 "query_initialization": "train_dummy_final_token_mean",
                 "gamma_initialization": 0.0,
-        "normalization": "none",
+                "normalization": "none",
             }
         )
     if head_variant == "mean_residual":
@@ -354,8 +376,46 @@ def _head_metadata(
                 "correction_initialization": "zero",
                 "correction_features": "per_feature_std_and_range",
                 "correction_scale": 0.5,
-                "encoder_gradient_scale": 0.1,
+                "encoder_gradient_scale": 0.5,
                 "correction_backbone_gradient": "detached",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_stats_probe_scaled":
+        metadata.update(
+            {
+                "head_architecture": "mean_stats_zero_correction_probe_gradient_scaled",
+                "query_initialization": "not_applicable",
+                "correction_initialization": "zero",
+                "correction_features": "per_feature_std_and_range",
+                "correction_scale": 0.5,
+                "encoder_gradient_scale": 1.0,
+                "probe_gradient_scale": 2.0,
+                "correction_backbone_gradient": "detached",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_stats_attention_residual":
+        metadata.update(
+            {
+                "head_architecture": "mean_stats_attention_zero_correction",
+                "query_initialization": "train_dummy_final_token_mean",
+                "correction_initialization": "zero",
+                "attention_correction_scale": 0.25,
+                "stats_correction_scale": 0.5,
+                "correction_features": "query_attention_residual_plus_per_feature_std_and_range",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_attention_gated":
+        metadata.update(
+            {
+                "head_architecture": "mean_linear_detached_attention_scalar_gate",
+                "query_initialization": "train_dummy_final_token_mean",
+                "correction_initialization": "small_normal",
+                "correction_scale": 0.25,
+                "gamma_initialization": 0.0,
+                "correction_encoder_gradient": "detached",
                 "normalization": "none",
             }
         )
