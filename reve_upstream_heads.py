@@ -88,6 +88,8 @@ __all__ = [
     "MeanVectorAnchorHead",
     "MeanMLPResidualHead",
     "MeanStatsResidualHead",
+    "GlobalStatsResidualHead",
+    "MeanRichStatsResidualHead",
     "MeanStatsResidualDetachedHead",
     "MeanStatsResidualGradientScaledHead",
     "MeanStatsProbeScaledHead",

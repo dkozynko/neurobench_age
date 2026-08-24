@@ -35,6 +35,8 @@ LOCAL_HEAD_VARIANTS = (
     "mean_stats_probe_scaled",
     "mean_stats_attention_residual",
     "mean_attention_gated",
+    "global_stats_residual",
+    "mean_rich_stats_residual",
 )
 LAST_TUNED_PROTOCOL_VARIANTS = ("last_tuned",)
 HEAD_VARIANTS = OFFICIAL_HEAD_VARIANTS + LOCAL_HEAD_VARIANTS + LAST_TUNED_PROTOCOL_VARIANTS

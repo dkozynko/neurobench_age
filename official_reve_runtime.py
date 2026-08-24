@@ -202,13 +202,15 @@ def _head_metadata(
         "mean_stats_probe_scaled": "not_applicable",
         "mean_stats_attention_residual": "train_dummy_final_token_mean",
         "mean_attention_gated": "train_dummy_final_token_mean",
+        "global_stats_residual": "not_applicable",
+        "mean_rich_stats_residual": "not_applicable",
         "last_avg": "upstream_random_unused",
         "last_tuned": "train_dummy_final_token_mean",
         "last": "upstream_random",
         "all": "upstream_random",
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
-    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated"}
+    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual"}
     metadata: dict[str, Any] = {
         "head_variant": head_variant,
         "head_source": (
@@ -242,6 +244,10 @@ def _head_metadata(
             if head_variant == "mean_stats_attention_residual"
             else "local_mean_attention_gated"
             if head_variant == "mean_attention_gated"
+            else "local_global_stats_residual"
+            if head_variant == "global_stats_residual"
+            else "local_mean_rich_stats_residual"
+            if head_variant == "mean_rich_stats_residual"
             else "local_mean_linear_copy"
             if is_local_head
             else "upstream_reve"
@@ -416,6 +422,30 @@ def _head_metadata(
                 "correction_scale": 0.25,
                 "gamma_initialization": 0.0,
                 "correction_encoder_gradient": "detached",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "global_stats_residual":
+        metadata.update(
+            {
+                "head_architecture": "mean_global_stats_zero_correction",
+                "query_initialization": "not_applicable",
+                "correction_initialization": "zero",
+                "correction_features": "global_std_range_mad_and_mean_abs",
+                "correction_scale": 0.5,
+                "correction_backbone_gradient": "enabled",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_rich_stats_residual":
+        metadata.update(
+            {
+                "head_architecture": "mean_rich_stats_zero_correction",
+                "query_initialization": "not_applicable",
+                "correction_initialization": "zero",
+                "correction_features": "per_feature_std_range_mad_and_mean_abs",
+                "correction_scale": 0.5,
+                "correction_backbone_gradient": "enabled",
                 "normalization": "none",
             }
         )
