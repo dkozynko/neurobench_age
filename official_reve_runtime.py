@@ -502,13 +502,14 @@ def _head_metadata(
         "global_stats_residual": "not_applicable",
         "mean_rich_stats_residual": "not_applicable",
         "grouped_rich_stats_shrinkage": "not_applicable",
+        "grouped_stats_shared_gate": "not_applicable",
         "last_avg": "upstream_random_unused",
         "last_tuned": "train_dummy_final_token_mean",
         "last": "upstream_random",
         "all": "upstream_random",
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
-    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage"}
+    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate"}
     metadata: dict[str, Any] = {
         "head_variant": head_variant,
         "head_source": (
@@ -548,6 +549,8 @@ def _head_metadata(
             if head_variant == "mean_rich_stats_residual"
             else "local_grouped_rich_stats_shrinkage"
             if head_variant == "grouped_rich_stats_shrinkage"
+            else "local_grouped_stats_shared_gate"
+            if head_variant == "grouped_stats_shared_gate"
             else "local_mean_linear_copy"
             if is_local_head
             else "upstream_reve"
@@ -762,6 +765,25 @@ def _head_metadata(
                 ),
                 "projection_shape": "D_to_D",
                 "parameter_count_formula": "D*n_outputs+n_outputs+4*(D*D+D)+4",
+                "correction_scale": 0.5,
+                "correction_backbone_gradient": "enabled",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "grouped_stats_shared_gate":
+        metadata.update(
+            {
+                "head_architecture": "mean_grouped_stats_shared_gate",
+                "query_initialization": "not_applicable",
+                "correction_initialization": "zero",
+                "statistic_groups": ["std", "range", "mad", "mean_abs"],
+                "gate_parameterization": "shared_scalar",
+                "gate_initialization": 0.0,
+                "projection_initialization": (
+                    "linspace_-1_1_roll_group_plus_row_alternating_sign_l2_normalized_zero_bias"
+                ),
+                "projection_shape": "D_to_D",
+                "parameter_count_formula": "D*n_outputs+n_outputs+4*(D*D+D)+1",
                 "correction_scale": 0.5,
                 "correction_backbone_gradient": "enabled",
                 "normalization": "none",
@@ -1039,20 +1061,25 @@ def _patch_official_components(
         val_loader: Any = None,
     ) -> Any:
         result = original_prepare_pl_module(self, train_loader, val_loader)
-        if head_variant == "grouped_rich_stats_shrinkage":
+        if head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate"}:
             brain_module = getattr(self, "_brain_module", None)
             grouped_head = None
+            expected_class_name = (
+                "GroupedRichStatsShrinkageHead"
+                if head_variant == "grouped_rich_stats_shrinkage"
+                else "GroupedStatsSharedGateHead"
+            )
             if brain_module is not None and hasattr(brain_module, "modules"):
                 grouped_head = next(
                     (
                         module
                         for module in brain_module.modules()
-                        if module.__class__.__name__ == "GroupedRichStatsShrinkageHead"
+                        if module.__class__.__name__ == expected_class_name
                     ),
                     None,
                 )
             if grouped_head is None or not callable(getattr(grouped_head, "metadata", None)):
-                raise RuntimeError("grouped_rich_stats_shrinkage model did not expose its head metadata")
+                raise RuntimeError(f"{head_variant} model did not expose its head metadata")
             head_metadata = dict(grouped_head.metadata())
             head_metadata["parameter_count"] = sum(
                 parameter.numel() for parameter in grouped_head.parameters()

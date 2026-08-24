@@ -91,6 +91,7 @@ __all__ = [
     "GlobalStatsResidualHead",
     "MeanRichStatsResidualHead",
     "GroupedRichStatsShrinkageHead",
+    "GroupedStatsSharedGateHead",
     "MeanStatsResidualDetachedHead",
     "MeanStatsResidualGradientScaledHead",
     "MeanStatsProbeScaledHead",
