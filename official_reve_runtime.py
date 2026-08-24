@@ -11,6 +11,7 @@ import math
 import os
 import sys
 import types
+import uuid
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -145,6 +146,254 @@ def _capture_test_result(
     merged.update(tuning_metadata_by_experiment.get(experiment_id, {}))
     captured["tuning_metadata"] = merged
     return captured
+
+
+def _read_validation_history(path: Path, *, seed: int) -> list[dict[str, Any]]:
+    """Read and validate strict one-based validation history records."""
+
+    if not path.is_file():
+        raise RuntimeError(f"strict validation history is missing: {path}")
+
+    records: list[dict[str, Any]] = []
+    seen_epochs: set[int] = set()
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"invalid strict validation JSON at line {line_number}") from error
+        if not isinstance(row, Mapping):
+            raise RuntimeError(f"strict validation record at line {line_number} is not an object")
+        row_seed = row.get("seed")
+        epoch = row.get("epoch")
+        metric = row.get("val/pearsonr")
+        if row_seed != seed or isinstance(row_seed, bool):
+            raise RuntimeError(f"strict validation seed mismatch at line {line_number}")
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise RuntimeError(f"strict validation epoch is invalid at line {line_number}")
+        if epoch in seen_epochs:
+            raise RuntimeError(f"duplicate epoch in strict validation history: {epoch}")
+        if isinstance(metric, bool) or not isinstance(metric, (int, float)):
+            raise RuntimeError(f"strict validation val/pearsonr is invalid at line {line_number}")
+        metric_value = float(metric)
+        if not math.isfinite(metric_value):
+            raise RuntimeError(f"strict validation val/pearsonr is non-finite at line {line_number}")
+        seen_epochs.add(epoch)
+        records.append({"seed": seed, "epoch": epoch, "val/pearsonr": metric_value})
+
+    if not records:
+        raise RuntimeError(f"strict validation history is empty: {path}")
+    return records
+
+
+def _resolve_selected_validation(
+    checkpoint_path: Path,
+    validation_history_path: Path,
+    *,
+    seed: int,
+) -> dict[str, int | float]:
+    """Bind the checkpoint's raw epoch to exactly one validation record."""
+
+    import torch
+
+    if not checkpoint_path.is_file():
+        raise RuntimeError(f"strict selected checkpoint is missing: {checkpoint_path}")
+    checkpoint = torch.load(
+        checkpoint_path,
+        map_location=torch.device("cpu"),
+        weights_only=True,
+    )
+    if not isinstance(checkpoint, Mapping):
+        raise RuntimeError("strict checkpoint payload is not a mapping")
+    raw_epoch = checkpoint.get("epoch")
+    if isinstance(raw_epoch, bool) or not isinstance(raw_epoch, int) or raw_epoch < 0:
+        raise RuntimeError("strict checkpoint does not contain a valid integer epoch")
+
+    selected_epoch = raw_epoch + 1
+    records = _read_validation_history(validation_history_path, seed=seed)
+    matches = [row for row in records if row["epoch"] == selected_epoch]
+    if len(matches) != 1:
+        raise RuntimeError("strict selected epoch must match exactly one validation record")
+    return {
+        "checkpoint_epoch_zero_based": raw_epoch,
+        "selected_epoch": selected_epoch,
+        "selected_val_pearsonr": matches[0]["val/pearsonr"],
+    }
+
+
+def _build_strict_selection_record(
+    *,
+    checkpoint_path: Path,
+    official_config_path: Path,
+    manifest_path: Path,
+    validation_history_path: Path,
+    selection_monitor: str,
+    selection_mode: str,
+    seed: int,
+    head_variant: str,
+    strict_final_test: bool,
+    sha256_file: Any,
+) -> dict[str, Any]:
+    """Build the immutable provenance record without writing it."""
+
+    if selection_monitor != "val/pearsonr" or selection_mode != "max":
+        raise RuntimeError("strict selection must monitor val/pearsonr in max mode")
+    selected = _resolve_selected_validation(checkpoint_path, validation_history_path, seed=seed)
+    for path in (official_config_path, manifest_path):
+        if not path.is_file():
+            raise RuntimeError(f"strict provenance file is missing: {path}")
+    return {
+        "evaluation_protocol": "strict",
+        "selection_monitor": selection_monitor,
+        "selection_mode": selection_mode,
+        "seed": int(seed),
+        "head_variant": head_variant,
+        **selected,
+        "strict_final_test": bool(strict_final_test),
+        "checkpoint_path": str(checkpoint_path.resolve()),
+        "checkpoint_sha256": sha256_file(checkpoint_path),
+        "official_config_path": str(official_config_path.resolve()),
+        "official_config_sha256": sha256_file(official_config_path),
+        "manifest_path": str(manifest_path.resolve()),
+        "manifest_sha256": sha256_file(manifest_path),
+        "validation_history_path": str(validation_history_path.resolve()),
+        "validation_history_sha256": sha256_file(validation_history_path),
+        "test_status": "sealed" if strict_final_test else "withheld",
+    }
+
+
+def _canonical_json_bytes(payload: Mapping[str, Any]) -> bytes:
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _publish_json_create_if_absent(path: Path, payload: Mapping[str, Any]) -> None:
+    """Publish JSON atomically without replacing an existing evidence file."""
+
+    data = _canonical_json_bytes(payload)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temp_path.open("xb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temp_path, path)
+            _fsync_directory(path.parent)
+        except FileExistsError as error:
+            if not path.is_file() or path.read_bytes() != data:
+                raise RuntimeError(f"existing strict evidence differs: {path}") from error
+            return
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _create_test_start_marker(path: Path, payload: Mapping[str, Any]) -> None:
+    """Create a durable, exclusive marker before consuming test data."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = _canonical_json_bytes(payload)
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError as error:
+        raise RuntimeError(f"strict test marker already exists: {path}") from error
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _fsync_directory(path.parent)
+    except BaseException:
+        # The marker intentionally remains when a write is interrupted: its
+        # existence conservatively consumes the one permitted test access.
+        raise
+
+
+def _create_test_completed_marker(path: Path, payload: Mapping[str, Any]) -> None:
+    """Record successful post-test integrity verification exactly once."""
+
+    _publish_json_create_if_absent(path, payload)
+
+
+def _extract_official_test_pearson(results: Sequence[Mapping[str, Any]]) -> float:
+    """Extract only the pinned official ``test/pearsonr`` result."""
+
+    if len(results) != 1:
+        raise RuntimeError("strict final test requires exactly one official result")
+    result = results[0]
+    if "test/pearsonr" not in result:
+        raise RuntimeError("official strict result is missing test/pearsonr")
+    value = result["test/pearsonr"]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError("official test/pearsonr must be numeric")
+    pearson = float(value)
+    if not math.isfinite(pearson):
+        raise RuntimeError("official test/pearsonr must be finite")
+    return pearson
+
+
+def _run_strict_test_phase(
+    *,
+    original_test: Any,
+    experiment: Any,
+    loaders: Mapping[str, Any],
+    best_model_path: str,
+    selection_path: Path,
+    test_started_path: Path,
+    test_completed_path: Path,
+    selection_record: Mapping[str, Any],
+    strict_final_test: bool,
+    invocation_key: int,
+    test_invocations: set[int],
+    sha256_file: Any,
+) -> dict[str, Any]:
+    """Seal selection and optionally consume the one permitted test pass."""
+
+    _publish_json_create_if_absent(selection_path, selection_record)
+    if not strict_final_test:
+        return {}
+    if invocation_key in test_invocations:
+        raise RuntimeError("strict experiment was already evaluated")
+
+    checkpoint_path = Path(best_model_path)
+    expected_checkpoint_sha256 = selection_record.get("checkpoint_sha256")
+    if not isinstance(expected_checkpoint_sha256, str):
+        raise RuntimeError("strict selection is missing checkpoint_sha256")
+    test_started_payload = {
+        "selection_sha256": sha256_file(selection_path),
+        "checkpoint_sha256": expected_checkpoint_sha256,
+        "test_evaluations": 1,
+    }
+    _create_test_start_marker(test_started_path, test_started_payload)
+    test_invocations.add(invocation_key)
+
+    result = original_test(experiment, loaders, best_model_path)
+    if not isinstance(result, Mapping):
+        raise RuntimeError("official strict test result is not a mapping")
+    test_pearson = _extract_official_test_pearson([result])
+    actual_checkpoint_sha256 = sha256_file(checkpoint_path)
+    if actual_checkpoint_sha256 != expected_checkpoint_sha256:
+        raise RuntimeError("strict checkpoint hash changed during test")
+
+    _create_test_completed_marker(
+        test_completed_path,
+        {
+            "selection_sha256": sha256_file(selection_path),
+            "checkpoint_sha256_after_test": actual_checkpoint_sha256,
+            "test_pearsonr": test_pearson,
+            "test_evaluations": 1,
+        },
+    )
+    return dict(result)
 
 
 def _selected_validation_checkpoint_epoch(
@@ -479,6 +728,31 @@ def _head_metadata(
     return metadata
 
 
+def _append_evaluation_callback(
+    trainer: Any,
+    *,
+    evaluation_protocol: str,
+    epoch_metrics_path: Path,
+    seed: int | None,
+    loaders: Mapping[str, Any],
+    hooks: Any,
+) -> None:
+    """Attach exactly one training-time metric callback for the protocol."""
+
+    if evaluation_protocol == "strict":
+        trainer.callbacks.append(
+            hooks.EpochValidationMetrics(epoch_metrics_path, seed=seed)
+        )
+        return
+    if evaluation_protocol != "legacy":
+        raise ValueError(f"unsupported evaluation protocol: {evaluation_protocol!r}")
+    if "test" not in loaders:
+        raise RuntimeError("official test loader was not captured")
+    trainer.callbacks.append(
+        hooks.EpochTestPearson(loaders["test"], epoch_metrics_path, seed=seed)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Official run patch lifecycle
 # ---------------------------------------------------------------------------
@@ -488,10 +762,13 @@ def _patch_official_components(
     manifest_path: Path,
     data_root: Path,
     epoch_metrics_path: Path,
+    selection_path: Path,
     *,
     head_variant: str = "mean_linear",
     head_dropout: float = 0.0,
     seeds: Sequence[int] = (33,),
+    evaluation_protocol: str = "strict",
+    strict_final_test: bool = False,
     run_metadata: Mapping[str, Any] | None = None,
     final_results: list[dict[str, Any]] | None = None,
     hooks: Any,
@@ -504,6 +781,10 @@ def _patch_official_components(
     process.
     """
 
+    evaluation_protocol, strict_final_test = hooks.validate_evaluation_options(
+        evaluation_protocol,
+        strict_final_test=strict_final_test,
+    )
     reve = hooks._load_reve_helpers()
 
     reve.validate_head_variant(head_variant)
@@ -531,6 +812,7 @@ def _patch_official_components(
     captured_loaders: dict[int, dict[str, Any]] = {}
     patched_brain_modules: list[dict[str, Any]] = []
     tuning_metadata_by_experiment: dict[int, dict[str, Any]] = {}
+    test_invocations: set[int] = set()
 
     def prepare_and_capture(data: Any) -> dict[str, Any]:
         loaders = original_prepare(data)
@@ -542,8 +824,51 @@ def _patch_official_components(
         loaders: dict[str, Any],
         best_model_path: str | None,
     ) -> dict[str, Any]:
-        result = original_test(self, loaders, best_model_path)
-        if final_results is not None:
+        if evaluation_protocol == "legacy":
+            result = original_test(self, loaders, best_model_path)
+            if final_results is not None:
+                final_results.append(
+                    hooks._capture_test_result(
+                        result,
+                        head_variant=head_variant,
+                        experiment_id=id(self),
+                        tuning_metadata_by_experiment=tuning_metadata_by_experiment,
+                    )
+                )
+            return result
+
+        uid_folder = self.infra.uid_folder()
+        if uid_folder is None:
+            raise RuntimeError("strict evaluation requires an official uid folder")
+        if best_model_path is None:
+            raise RuntimeError("strict evaluation requires a selected checkpoint")
+        selection_record = hooks._build_strict_selection_record(
+            checkpoint_path=Path(best_model_path),
+            official_config_path=uid_folder / "config.yaml",
+            manifest_path=manifest_path,
+            validation_history_path=epoch_metrics_path,
+            selection_monitor="val/pearsonr",
+            selection_mode="max",
+            seed=int(getattr(self, "seed", 0)),
+            head_variant=head_variant,
+            strict_final_test=strict_final_test,
+            sha256_file=hooks._sha256_file,
+        )
+        result = hooks._run_strict_test_phase(
+            original_test=original_test,
+            experiment=self,
+            loaders=loaders,
+            best_model_path=best_model_path,
+            selection_path=selection_path,
+            test_started_path=selection_path.parent / "test_started.json",
+            test_completed_path=selection_path.parent / "test_completed.json",
+            selection_record=selection_record,
+            strict_final_test=strict_final_test,
+            invocation_key=id(self),
+            test_invocations=test_invocations,
+            sha256_file=hooks._sha256_file,
+        )
+        if strict_final_test and final_results is not None:
             final_results.append(
                 hooks._capture_test_result(
                     result,
@@ -554,13 +879,20 @@ def _patch_official_components(
             )
         return result
 
-    def setup_with_epoch_test(self: Any, is_test: bool = False) -> Any:
+    def setup_with_evaluation_callbacks(self: Any, is_test: bool = False) -> Any:
         trainer = original_setup_trainer(self, is_test=is_test)
         if not is_test:
             loaders = captured_loaders.get(id(self.data))
-            if loaders is None or "test" not in loaders:
-                raise RuntimeError("official test loader was not captured")
-            trainer.callbacks.append(hooks.EpochTestPearson(loaders["test"], epoch_metrics_path, seed=getattr(self, "seed", None)))
+            if loaders is None:
+                raise RuntimeError("official loaders were not captured")
+            _append_evaluation_callback(
+                trainer,
+                evaluation_protocol=evaluation_protocol,
+                epoch_metrics_path=epoch_metrics_path,
+                seed=getattr(self, "seed", None),
+                loaders=loaders,
+                hooks=hooks,
+            )
         return trainer
 
     def setup_with_metadata(self: Any) -> Any:
@@ -602,6 +934,15 @@ def _patch_official_components(
                     "seed": int(self.seed),
                     "data_seed": hooks._get_attr_or_key(self.data, "seed"),
                     "protocol": reve.PROTOCOL_CONTRACT,
+                    "evaluation_protocol": evaluation_protocol,
+                    "strict_final_test": bool(strict_final_test),
+                    "test_access_policy": (
+                        "single_use_predeclared"
+                        if strict_final_test
+                        else "withheld"
+                        if evaluation_protocol == "strict"
+                        else "epoch_diagnostic"
+                    ),
                 }
             )
             (uid_folder / "run_metadata.json").write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
@@ -690,7 +1031,7 @@ def _patch_official_components(
             shirazi2024hbn.Shirazi2024Hbn._info = original_info.model_copy(update={"num_timelines": len(timelines)})
         Data.prepare = prepare_and_capture
         Experiment._test = test_and_capture
-        Experiment.setup_trainer = setup_with_epoch_test
+        Experiment.setup_trainer = setup_with_evaluation_callbacks
         Experiment.setup_run = setup_with_metadata
         Experiment.prepare_pl_module = prepare_with_protocol
         cli.load_yaml_config = load_seed_grid
@@ -742,10 +1083,13 @@ def run_official_subset(
     manifest_path: Path,
     data_root: Path,
     epoch_metrics_path: Path,
+    selection_path: Path,
     config_path: Path,
     head_variant: str = "mean_linear",
     head_dropout: float = 0.0,
     seeds: Sequence[int] = (33,),
+    evaluation_protocol: str = "strict",
+    strict_final_test: bool = False,
     run_metadata: Mapping[str, Any] | None = None,
     hooks: Any,
 ) -> list[dict[str, Any]]:
@@ -761,9 +1105,12 @@ def run_official_subset(
             manifest_path,
             data_root,
             epoch_metrics_path,
+            selection_path,
             head_variant=head_variant,
             head_dropout=head_dropout,
             seeds=seeds,
+            evaluation_protocol=evaluation_protocol,
+            strict_final_test=strict_final_test,
             run_metadata=run_metadata,
             final_results=final_results,
         )

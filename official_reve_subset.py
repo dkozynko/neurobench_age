@@ -108,6 +108,60 @@ def manifest_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+EVALUATION_PROTOCOLS = ("strict", "legacy")
+
+
+def validate_evaluation_options(
+    evaluation_protocol: str = "strict",
+    *,
+    strict_final_test: bool = False,
+) -> tuple[str, bool]:
+    """Validate the holdout-access policy before the official stack starts."""
+
+    if evaluation_protocol not in EVALUATION_PROTOCOLS:
+        raise ValueError(
+            "evaluation protocol must be one of "
+            f"{EVALUATION_PROTOCOLS}; got {evaluation_protocol!r}"
+        )
+    if evaluation_protocol == "legacy" and strict_final_test:
+        raise ValueError("--strict-final-test is valid only for strict evaluation")
+    return evaluation_protocol, bool(strict_final_test)
+
+
+class EpochValidationMetrics(LightningCallback):
+    """Persist validation Pearson without retaining or touching test data."""
+
+    def __init__(self, output_path: Path, seed: int | None = None):
+        self.output_path = output_path
+        self.seed = seed
+        self.training_started = False
+
+    def on_train_start(self, trainer: Any, pl_module: Any) -> None:
+        self.training_started = True
+
+    def on_validation_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+        if not self.training_started or trainer.sanity_checking:
+            return
+
+        import torch
+
+        value = getattr(trainer, "callback_metrics", {}).get("val/pearsonr")
+        if value is None:
+            raise RuntimeError("strict validation did not expose val/pearsonr")
+        pearson = float(torch.as_tensor(value).detach().cpu())
+        if not math.isfinite(pearson):
+            raise RuntimeError("strict validation produced non-finite val/pearsonr")
+
+        record = {
+            "seed": self.seed,
+            "epoch": int(trainer.current_epoch + 1),
+            "val/pearsonr": pearson,
+        }
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.output_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
 class EpochTestPearson(LightningCallback):
     """Lightning callback that reports test Pearson after each train epoch."""
 
@@ -315,6 +369,208 @@ def _metadata_values_are_finite(value: Any) -> bool:
     if isinstance(value, (list, tuple)):
         return all(_metadata_values_are_finite(item) for item in value)
     return False
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    """Load one JSON evidence file and require an object payload."""
+
+    if not path.is_file():
+        raise RuntimeError(f"strict evidence file is missing: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"strict evidence file is not valid JSON: {path}") from error
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"strict evidence file must contain an object: {path}")
+    return payload
+
+
+def _strict_report_fields(
+    *,
+    selection_path: Path,
+    results: Sequence[Mapping[str, Any]],
+    strict_final_test: bool,
+) -> dict[str, Any]:
+    """Validate strict evidence and return the stable per-seed report fields."""
+
+    selection = _load_json_object(selection_path)
+    if selection.get("evaluation_protocol") != "strict":
+        raise RuntimeError("strict selection record has the wrong evaluation protocol")
+    if bool(selection.get("strict_final_test")) != bool(strict_final_test):
+        raise RuntimeError("strict selection gate does not match the run")
+    if selection.get("selection_monitor") != "val/pearsonr":
+        raise RuntimeError("strict selection monitor must be val/pearsonr")
+    if selection.get("selection_mode") != "max":
+        raise RuntimeError("strict selection mode must be max")
+
+    required_hash_fields = (
+        "checkpoint_sha256",
+        "official_config_sha256",
+        "manifest_sha256",
+        "validation_history_sha256",
+    )
+    for field in required_hash_fields:
+        value = selection.get(field)
+        if not isinstance(value, str) or len(value) != 64:
+            raise RuntimeError(f"strict selection has invalid {field}")
+    for path_field, hash_field in (
+        ("checkpoint_path", "checkpoint_sha256"),
+        ("official_config_path", "official_config_sha256"),
+        ("manifest_path", "manifest_sha256"),
+        ("validation_history_path", "validation_history_sha256"),
+    ):
+        raw_path = selection.get(path_field)
+        if not isinstance(raw_path, str):
+            raise RuntimeError(f"strict selection is missing {path_field}")
+        path = Path(raw_path)
+        if not path.is_file():
+            raise RuntimeError(f"strict provenance file is missing: {path}")
+        if _sha256_file(path) != selection[hash_field]:
+            raise RuntimeError(f"strict provenance hash changed: {path}")
+
+    seed = selection.get("seed")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise RuntimeError("strict selection seed is invalid")
+    selected_epoch = selection.get("selected_epoch")
+    selected_value = selection.get("selected_val_pearsonr")
+    checkpoint_epoch = selection.get("checkpoint_epoch_zero_based")
+    if (
+        isinstance(selected_epoch, bool)
+        or not isinstance(selected_epoch, int)
+        or selected_epoch < 1
+        or isinstance(checkpoint_epoch, bool)
+        or not isinstance(checkpoint_epoch, int)
+        or checkpoint_epoch < 0
+        or selected_epoch != checkpoint_epoch + 1
+        or isinstance(selected_value, bool)
+        or not isinstance(selected_value, (int, float))
+        or not math.isfinite(float(selected_value))
+    ):
+        raise RuntimeError("strict selection has invalid selected validation fields")
+
+    expected_status = "sealed" if strict_final_test else "withheld"
+    if selection.get("test_status") != expected_status:
+        raise RuntimeError("strict selection test status does not match the run")
+
+    report: dict[str, Any] = {
+        "evaluation_protocol": "strict",
+        "strict_final_test": bool(strict_final_test),
+        "selection_monitor": "val/pearsonr",
+        "selection_mode": "max",
+        "seed": seed,
+        "head_variant": selection.get("head_variant"),
+        "selected_epoch": selected_epoch,
+        "checkpoint_epoch_zero_based": checkpoint_epoch,
+        "selected_val_pearsonr": float(selected_value),
+        **{field: selection[field] for field in (
+            "checkpoint_path",
+            "checkpoint_sha256",
+            "official_config_path",
+            "official_config_sha256",
+            "manifest_path",
+            "manifest_sha256",
+            "validation_history_path",
+            "validation_history_sha256",
+        )},
+        "test_status": expected_status,
+    }
+
+    start_path = selection_path.parent / "test_started.json"
+    completed_path = selection_path.parent / "test_completed.json"
+    if not strict_final_test:
+        if results:
+            raise RuntimeError("strict validation-only run unexpectedly returned test results")
+        if start_path.exists() or completed_path.exists():
+            raise RuntimeError("strict validation-only run consumed test evidence")
+        report.update(
+            {
+                "test_evaluations": 0,
+                "checkpoint_integrity_verified": False,
+            }
+        )
+        return report
+
+    if not start_path.is_file() or not completed_path.is_file():
+        raise RuntimeError("strict final test is missing start/completion evidence")
+    start = _load_json_object(start_path)
+    completed = _load_json_object(completed_path)
+    selection_sha = _sha256_file(selection_path)
+    checkpoint_sha = selection["checkpoint_sha256"]
+    if (
+        start.get("selection_sha256") != selection_sha
+        or start.get("checkpoint_sha256") != checkpoint_sha
+        or start.get("test_evaluations") != 1
+    ):
+        raise RuntimeError("strict test start marker does not bind the selection")
+    if (
+        completed.get("selection_sha256") != selection_sha
+        or completed.get("checkpoint_sha256_after_test") != checkpoint_sha
+        or completed.get("test_evaluations") != 1
+    ):
+        raise RuntimeError("strict test completion marker does not bind the selection")
+    test_pearson = _runtime._extract_official_test_pearson(results)
+    completed_value = completed.get("test_pearsonr")
+    if (
+        isinstance(completed_value, bool)
+        or not isinstance(completed_value, (int, float))
+        or not math.isfinite(float(completed_value))
+        or float(completed_value) != test_pearson
+    ):
+        raise RuntimeError("strict test completion marker does not match test/pearsonr")
+    report.update(
+        {
+            "test_pearsonr": test_pearson,
+            "test_evaluations": 1,
+            "checkpoint_integrity_verified": True,
+        }
+    )
+    return report
+
+
+def _strict_summary_fields(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Aggregate strict per-seed reports without inventing withheld test data."""
+
+    if not reports:
+        raise RuntimeError("strict summary requires at least one completed seed")
+    protocols = {report.get("evaluation_protocol") for report in reports}
+    if protocols != {"strict"}:
+        raise RuntimeError("strict summary contains a non-strict report")
+    gates = {bool(report.get("strict_final_test")) for report in reports}
+    if len(gates) != 1:
+        raise RuntimeError("strict summary mixes validation-only and final-test reports")
+    gate = gates.pop()
+    selected_epochs: dict[str, int] = {}
+    selected_values: dict[str, float] = {}
+    for report in reports:
+        seed = report.get("seed")
+        epoch = report.get("selected_epoch")
+        value = report.get("selected_val_pearsonr")
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            raise RuntimeError("strict summary contains an invalid seed")
+        if isinstance(epoch, bool) or not isinstance(epoch, int):
+            raise RuntimeError("strict summary contains an invalid selected epoch")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            raise RuntimeError("strict summary contains an invalid validation metric")
+        selected_epochs[str(seed)] = epoch
+        selected_values[str(seed)] = float(value)
+    summary: dict[str, Any] = {
+        "evaluation_protocol": "strict",
+        "strict_final_test": gate,
+        "completed_seed_count": len(reports),
+        "selected_epoch_by_seed": selected_epochs,
+        "selected_val_pearson_by_seed": selected_values,
+    }
+    if gate:
+        test_values: dict[str, float] = {}
+        for report in reports:
+            seed = report["seed"]
+            value = report.get("test_pearsonr")
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                raise RuntimeError("strict final summary is missing a test metric")
+            test_values[str(seed)] = float(value)
+        summary["test_pearson_by_seed"] = test_values
+        summary["mean_test_pearson"] = sum(test_values.values()) / len(test_values)
+    return summary
 
 
 def run_official_stack_smoke(
@@ -530,6 +786,8 @@ _head_metadata = _runtime._head_metadata
 _last_tuned_report_metadata = _runtime._last_tuned_report_metadata
 _merge_last_tuned_result_metadata = _runtime._merge_last_tuned_result_metadata
 _selected_validation_checkpoint_epoch = _runtime._selected_validation_checkpoint_epoch
+_build_strict_selection_record = _runtime._build_strict_selection_record
+_run_strict_test_phase = _runtime._run_strict_test_phase
 
 
 def _hooks() -> Any:
@@ -557,20 +815,26 @@ def run_official_subset(
     manifest_path: Path,
     data_root: Path,
     epoch_metrics_path: Path,
+    selection_path: Path,
     config_path: Path,
     head_variant: str = "mean_linear",
     head_dropout: float = 0.0,
     seeds: Sequence[int] = (33,),
+    evaluation_protocol: str = "strict",
+    strict_final_test: bool = False,
     run_metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     return _runtime.run_official_subset(
         manifest_path=manifest_path,
         data_root=data_root,
         epoch_metrics_path=epoch_metrics_path,
+        selection_path=selection_path,
         config_path=config_path,
         head_variant=head_variant,
         head_dropout=head_dropout,
         seeds=seeds,
+        evaluation_protocol=evaluation_protocol,
+        strict_final_test=strict_final_test,
         run_metadata=run_metadata,
         hooks=_hooks(),
     )
@@ -614,8 +878,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=("mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "last_avg", "last", "all", "last_tuned"),
         default="mean_linear",
     )
+    parser.add_argument(
+        "--evaluation-protocol",
+        choices=EVALUATION_PROTOCOLS,
+        default="strict",
+        help="strict holdout (default) or explicit legacy epoch-level diagnostics",
+    )
+    parser.add_argument(
+        "--strict-final-test",
+        action="store_true",
+        help="consume the single predeclared strict test pass after validation selection",
+    )
     parser.add_argument("--seeds", type=int, nargs="+", default=[33])
     args = parser.parse_args(argv)
+
+    try:
+        args.evaluation_protocol, args.strict_final_test = validate_evaluation_options(
+            args.evaluation_protocol,
+            strict_final_test=args.strict_final_test,
+        )
+    except ValueError as error:
+        parser.error(str(error))
 
     if args.smoke_head is not None:
         print(json.dumps(run_official_stack_smoke(head_variant=args.smoke_head), indent=2))
@@ -652,7 +935,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         for seed in resolved_seeds:
             run_dir = args.output_dir / args.head_variant / f"seed{seed}"
             config_path = run_dir / "neuralbench_config.json"
-            epoch_metrics_path = run_dir / "epoch_test_metrics.jsonl"
+            epoch_metrics_path = run_dir / (
+                "epoch_validation_metrics.jsonl"
+                if args.evaluation_protocol == "strict"
+                else "epoch_test_metrics.jsonl"
+            )
+            selection_path = run_dir / "selection.json"
             seed_metadata = {**metadata, "seed": seed, "data_seed": 33}
             try:
                 _write_config(config_path, data_root=args.data_root, output_dir=run_dir)
@@ -660,9 +948,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     manifest_path=args.manifest,
                     data_root=args.data_root,
                     epoch_metrics_path=epoch_metrics_path,
+                    selection_path=selection_path,
                     config_path=config_path,
                     head_variant=args.head_variant,
                     seeds=(seed,),
+                    evaluation_protocol=args.evaluation_protocol,
+                    strict_final_test=args.strict_final_test,
                     run_metadata=seed_metadata,
                 )
                 tuning_metadata = (
@@ -676,8 +967,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                     **tuning_metadata,
                     "official_results": results,
                     "epoch_metrics": str(epoch_metrics_path),
+                    "selection_path": str(selection_path),
                     "artifacts": collect_run_artifacts(run_dir),
                 }
+                if args.evaluation_protocol == "strict":
+                    report.update(
+                        _strict_report_fields(
+                            selection_path=selection_path,
+                            results=results,
+                            strict_final_test=args.strict_final_test,
+                        )
+                    )
+                else:
+                    report.update(
+                        {
+                            "evaluation_protocol": "legacy",
+                            "strict_final_test": False,
+                            "test_status": "epoch_diagnostic",
+                            "test_evaluations": len(results),
+                        }
+                    )
                 if args.head_variant == "last_tuned":
                     selected_checkpoint_epoch = _selected_validation_checkpoint_epoch(results)
                     if selected_checkpoint_epoch is not None:
@@ -701,6 +1010,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             "seeds": list(resolved_seeds),
             "runs": reports,
         }
+        if args.evaluation_protocol == "strict":
+            summary.update(_strict_summary_fields(reports))
+        else:
+            summary.update(
+                {
+                    "evaluation_protocol": "legacy",
+                    "strict_final_test": False,
+                    "test_status": "epoch_diagnostic",
+                }
+            )
         args.output_dir.mkdir(parents=True, exist_ok=True)
         (args.output_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
         print(json.dumps(summary, indent=2, default=str))
