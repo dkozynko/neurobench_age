@@ -139,7 +139,8 @@ python official_reve_subset.py --smoke-head all
 
 New runs use a validation-only strict holdout by default. During training the
 runner writes `epoch_validation_metrics.jsonl` and selects the checkpoint only
-from `val/pearsonr`; it never constructs or touches the test loader. The seed
+from `val/pearsonr`; training callbacks never iterate or read the test loader.
+The seed
 directory then contains an immutable `selection.json` with the checkpoint,
 configuration, manifest, validation-history, and SHA-256 provenance. A strict
 validation-only report has `test_status: withheld` and no test metric.

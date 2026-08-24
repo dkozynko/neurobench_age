@@ -358,6 +358,21 @@ def _run_strict_test_phase(
 ) -> dict[str, Any]:
     """Seal selection and optionally consume the one permitted test pass."""
 
+    run_dir = selection_path.parent
+    legacy_metrics_path = run_dir / "epoch_test_metrics.jsonl"
+    if legacy_metrics_path.exists():
+        raise RuntimeError(
+            "strict evaluation cannot reuse a directory with legacy test metrics: "
+            f"{legacy_metrics_path}"
+        )
+    prior_prediction_dirs = [
+        path for path in run_dir.rglob("test_predictions") if path.is_dir()
+    ]
+    if prior_prediction_dirs:
+        raise RuntimeError(
+            "strict evaluation cannot reuse a directory with prior test predictions: "
+            f"{prior_prediction_dirs[0]}"
+        )
     _publish_json_create_if_absent(selection_path, selection_record)
     if not strict_final_test:
         return {}

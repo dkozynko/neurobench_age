@@ -3,9 +3,9 @@
 The public NeuralBench CLI discovers every recording under ``DATA_DIR``.  This
 module keeps the official experiment unchanged, but replaces only the HBN
 study's timeline iterator with rows from the canonical 500-subject manifest.
-It also adds a read-only test pass after every training epoch so the test
-Pearson trajectory is visible without affecting validation, checkpointing, or
-early stopping.
+Strict evaluation records validation Pearson after each training epoch and
+withholds the test set until an explicit one-time finalist gate. An explicit
+legacy mode retains the historical read-only test pass for parity diagnostics.
 """
 
 from __future__ import annotations
@@ -472,6 +472,8 @@ def _strict_report_fields(
             "validation_history_path",
             "validation_history_sha256",
         )},
+        "validation_metrics": selection["validation_history_path"],
+        "selection_record": str(selection_path.resolve()),
         "test_status": expected_status,
     }
 
@@ -556,9 +558,11 @@ def _strict_summary_fields(reports: Sequence[Mapping[str, Any]]) -> dict[str, An
     summary: dict[str, Any] = {
         "evaluation_protocol": "strict",
         "strict_final_test": gate,
+        "test_status": "completed" if gate else "withheld",
         "completed_seed_count": len(reports),
         "selected_epoch_by_seed": selected_epochs,
         "selected_val_pearson_by_seed": selected_values,
+        "mean_selected_val_pearson": sum(selected_values.values()) / len(selected_values),
     }
     if gate:
         test_values: dict[str, float] = {}
@@ -932,6 +936,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
         reports: list[dict[str, Any]] = []
+        summary_path = args.output_dir / "summary.json"
         for seed in resolved_seeds:
             run_dir = args.output_dir / args.head_variant / f"seed{seed}"
             config_path = run_dir / "neuralbench_config.json"
@@ -1000,6 +1005,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     report_path.unlink(missing_ok=True)
                 except OSError as cleanup_error:
                     error.add_note(f"failed to remove stale report.json after failure: {cleanup_error!r}")
+                try:
+                    summary_path.unlink(missing_ok=True)
+                except OSError as cleanup_error:
+                    error.add_note(f"failed to remove stale summary.json after failure: {cleanup_error!r}")
                 raise
 
             reports.append(report)
@@ -1021,10 +1030,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 }
             )
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        (args.output_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
+        summary_path.write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
         print(json.dumps(summary, indent=2, default=str))
         return 0
     except Exception as error:
+        try:
+            (args.output_dir / "summary.json").unlink(missing_ok=True)
+        except OSError as cleanup_error:
+            error.add_note(f"failed to remove stale summary.json after failure: {cleanup_error!r}")
         LOGGER.error("official REVE run failed: %s", error)
         return 1
 
