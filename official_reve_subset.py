@@ -873,6 +873,20 @@ def _write_config(path: Path, *, data_root: Path, output_dir: Path) -> None:
     path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
 
+def _resolved_head_metadata(run_dir: Path) -> dict[str, Any]:
+    """Read late-bound head metadata written after the official model builds."""
+
+    for path in sorted(run_dir.rglob("run_metadata.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        metadata = payload.get("head_metadata") if isinstance(payload, Mapping) else None
+        if isinstance(metadata, Mapping):
+            return dict(metadata)
+    return {}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path)
@@ -982,6 +996,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "selection_path": str(selection_path),
                     "artifacts": collect_run_artifacts(run_dir),
                 }
+                resolved_head_metadata = _resolved_head_metadata(run_dir)
+                if resolved_head_metadata:
+                    report["head_metadata"] = resolved_head_metadata
+                    if "parameter_count" in resolved_head_metadata:
+                        report["head_parameter_count"] = resolved_head_metadata["parameter_count"]
                 if args.evaluation_protocol == "strict":
                     report.update(
                         _strict_report_fields(

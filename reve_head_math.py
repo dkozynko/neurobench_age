@@ -543,7 +543,7 @@ class GroupedRichStatsShrinkageHead(nn.Module):
 
     statistic_names = ("std", "range", "mad", "mean_abs")
     projection_initialization = (
-        "linspace(-1,1,D)_roll_group_plus_row_alternating_sign_l2_normalized"
+        "linspace_-1_1_roll_group_plus_row_alternating_sign_l2_normalized_zero_bias"
     )
 
     def __init__(self, *, embed_dim: int, n_outputs: int):
@@ -556,10 +556,17 @@ class GroupedRichStatsShrinkageHead(nn.Module):
         # Construct the baseline first to preserve MeanLinearCopyHead's RNG
         # order and exact baseline parameters at initialization.
         self.linear = nn.Linear(embed_dim, n_outputs)
-        self.projections = nn.ModuleList(
-            nn.Linear(embed_dim, embed_dim, bias=True)
-            for _ in self.statistic_names
-        )
+        # Allocating temporary Linear modules normally advances the global
+        # RNG. Preserve the stream so adding deterministic projections cannot
+        # change the baseline encoder/training randomness.
+        rng_state = torch.random.get_rng_state()
+        try:
+            self.projections = nn.ModuleList(
+                nn.Linear(embed_dim, embed_dim, bias=True)
+                for _ in self.statistic_names
+            )
+        finally:
+            torch.random.set_rng_state(rng_state)
         for group_index, projection in enumerate(self.projections):
             rows = []
             for row_index in range(embed_dim):

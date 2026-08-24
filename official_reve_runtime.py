@@ -758,7 +758,7 @@ def _head_metadata(
                 "gate_parameterization": "direct_scalar",
                 "gate_initialization": 0.0,
                 "projection_initialization": (
-                    "linspace(-1,1,D)_roll_group_plus_row_alternating_sign_l2_normalized"
+                    "linspace_-1_1_roll_group_plus_row_alternating_sign_l2_normalized_zero_bias"
                 ),
                 "projection_shape": "D_to_D",
                 "parameter_count_formula": "D*n_outputs+n_outputs+4*(D*D+D)+4",
@@ -1039,6 +1039,31 @@ def _patch_official_components(
         val_loader: Any = None,
     ) -> Any:
         result = original_prepare_pl_module(self, train_loader, val_loader)
+        if head_variant == "grouped_rich_stats_shrinkage":
+            brain_module = getattr(self, "_brain_module", None)
+            grouped_head = None
+            if brain_module is not None and hasattr(brain_module, "modules"):
+                grouped_head = next(
+                    (
+                        module
+                        for module in brain_module.modules()
+                        if module.__class__.__name__ == "GroupedRichStatsShrinkageHead"
+                    ),
+                    None,
+                )
+            if grouped_head is None or not callable(getattr(grouped_head, "metadata", None)):
+                raise RuntimeError("grouped_rich_stats_shrinkage model did not expose its head metadata")
+            head_metadata = dict(grouped_head.metadata())
+            head_metadata["parameter_count"] = sum(
+                parameter.numel() for parameter in grouped_head.parameters()
+            )
+            persist_tuning_metadata(
+                self,
+                {
+                    "head_metadata": head_metadata,
+                    "head_parameter_count": head_metadata["parameter_count"],
+                },
+            )
         if head_variant == "last_tuned":
             brain_module = getattr(self, "_brain_module", None)
             model = getattr(brain_module, "model", None)
