@@ -39,6 +39,7 @@ LOCAL_HEAD_VARIANTS = (
     "mean_rich_stats_residual",
     "grouped_rich_stats_shrinkage",
     "grouped_stats_shared_gate",
+    "temporal_pyramid_stats",
 )
 LAST_TUNED_PROTOCOL_VARIANTS = ("last_tuned",)
 HEAD_VARIANTS = OFFICIAL_HEAD_VARIANTS + LOCAL_HEAD_VARIANTS + LAST_TUNED_PROTOCOL_VARIANTS
