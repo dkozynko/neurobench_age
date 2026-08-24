@@ -258,7 +258,10 @@ def _build_strict_selection_record(
     *,
     checkpoint_path: Path,
     official_config_path: Path,
-    manifest_path: Path,
+    manifest_path: Path | None = None,
+    provenance_path: Path | None = None,
+    data_mode: str = "manifest",
+    timeline_count: int | None = None,
     validation_history_path: Path,
     selection_monitor: str,
     selection_mode: str,
@@ -271,13 +274,35 @@ def _build_strict_selection_record(
 
     if selection_monitor != "val/pearsonr" or selection_mode != "max":
         raise RuntimeError("strict selection must monitor val/pearsonr in max mode")
+    if data_mode not in {"manifest", "full"}:
+        raise RuntimeError(f"unsupported strict data mode: {data_mode!r}")
     selected = _resolve_selected_validation(checkpoint_path, validation_history_path, seed=seed)
     immutable_config_path = _freeze_provenance_snapshot(official_config_path)
-    for path in (immutable_config_path, manifest_path):
-        if not path.is_file():
-            raise RuntimeError(f"strict provenance file is missing: {path}")
+    if not immutable_config_path.is_file():
+        raise RuntimeError(f"strict provenance file is missing: {immutable_config_path}")
+
+    if data_mode == "manifest":
+        if manifest_path is None:
+            raise RuntimeError("manifest strict selection requires manifest_path")
+        if provenance_path is None:
+            provenance_path = manifest_path
+        if not manifest_path.is_file():
+            raise RuntimeError(f"strict provenance file is missing: {manifest_path}")
+    else:
+        if manifest_path is not None:
+            raise RuntimeError("full-data strict selection must not include manifest_path")
+        if provenance_path is None:
+            raise RuntimeError("full-data strict selection requires provenance_path")
+        if isinstance(timeline_count, bool) or not isinstance(timeline_count, int) or timeline_count < 1:
+            raise RuntimeError("full-data strict selection requires a positive timeline_count")
+    if not provenance_path.is_file():
+        raise RuntimeError(f"strict provenance file is missing: {provenance_path}")
+
+    manifest_sha256 = sha256_file(manifest_path) if manifest_path is not None else None
     return {
         "evaluation_protocol": "strict",
+        "data_mode": data_mode,
+        "timeline_count": timeline_count,
         "selection_monitor": selection_monitor,
         "selection_mode": selection_mode,
         "seed": int(seed),
@@ -288,8 +313,10 @@ def _build_strict_selection_record(
         "checkpoint_sha256": sha256_file(checkpoint_path),
         "official_config_path": str(immutable_config_path.resolve()),
         "official_config_sha256": sha256_file(immutable_config_path),
-        "manifest_path": str(manifest_path.resolve()),
-        "manifest_sha256": sha256_file(manifest_path),
+        "manifest_path": str(manifest_path.resolve()) if manifest_path is not None else None,
+        "manifest_sha256": manifest_sha256,
+        "provenance_path": str(provenance_path.resolve()),
+        "provenance_sha256": sha256_file(provenance_path),
         "validation_history_path": str(validation_history_path.resolve()),
         "validation_history_sha256": sha256_file(validation_history_path),
         "test_status": "sealed" if strict_final_test else "withheld",
@@ -306,6 +333,39 @@ def _fsync_directory(path: Path) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _replace_bytes_atomic(
+    path: Path,
+    data: bytes,
+    *,
+    remove_final_on_failure: bool = False,
+) -> None:
+    """Replace one file atomically and clean up incomplete evidence."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_name(
+        f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    )
+    try:
+        with temporary_path.open("xb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        _fsync_directory(path.parent)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        if remove_final_on_failure:
+            path.unlink(missing_ok=True)
+        raise
+
+
+def _replace_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
+    """Atomically replace a JSON object used as late-bound run metadata."""
+
+    data = (json.dumps(payload, indent=2, default=str) + "\n").encode("utf-8")
+    _replace_bytes_atomic(path, data)
 
 
 def _publish_json_create_if_absent(path: Path, payload: Mapping[str, Any]) -> None:
@@ -474,9 +534,13 @@ def _head_metadata(
     reve: Any,
     *,
     head_variant: str,
-    manifest_path: Path,
-    manifest_digest: str,
-    rows: int,
+    data_mode: str = "manifest",
+    manifest_path: Path | None = None,
+    manifest_digest: str | None = None,
+    provenance_path: Path | None = None,
+    provenance_digest: str | None = None,
+    timeline_count: int | None = None,
+    rows: int | None = None,
     seeds: Sequence[int],
     launch_command: str,
 ) -> dict[str, Any]:
@@ -511,6 +575,11 @@ def _head_metadata(
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
     is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats"}
+    if data_mode not in {"manifest", "full"}:
+        raise ValueError(f"unsupported data mode: {data_mode!r}")
+    if data_mode == "manifest" and manifest_path is not None and provenance_path is None:
+        provenance_path = manifest_path
+        provenance_digest = manifest_digest
     metadata: dict[str, Any] = {
         "head_variant": head_variant,
         "head_source": (
@@ -572,8 +641,13 @@ def _head_metadata(
                 "bias": 0.0,
             }
         ),
-        "manifest": str(manifest_path),
+        "data_mode": data_mode,
+        "manifest": str(manifest_path) if manifest_path is not None else None,
+        "manifest_path": str(manifest_path) if manifest_path is not None else None,
         "manifest_sha256": manifest_digest,
+        "provenance_path": str(provenance_path) if provenance_path is not None else None,
+        "provenance_sha256": provenance_digest,
+        "timeline_count": timeline_count if timeline_count is not None else rows,
         "rows": rows,
         "device": "eeg",
         "seeds": list(seeds),
@@ -870,7 +944,7 @@ def _append_evaluation_callback(
 
 
 def _patch_official_components(
-    manifest_path: Path,
+    manifest_path: Path | None,
     data_root: Path,
     epoch_metrics_path: Path,
     selection_path: Path,
@@ -880,6 +954,9 @@ def _patch_official_components(
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
+    data_mode: str = "manifest",
+    provenance_path: Path | None = None,
+    timeline_count: int | None = None,
     run_metadata: Mapping[str, Any] | None = None,
     final_results: list[dict[str, Any]] | None = None,
     hooks: Any,
@@ -902,12 +979,26 @@ def _patch_official_components(
     if head_dropout != 0.0:
         raise ValueError(f"the upstream REVE comparison fixes head dropout at 0.0; got {head_dropout}")
     resolved_seeds = hooks.validate_seeds(seeds)
+    if data_mode not in {"manifest", "full"}:
+        raise ValueError(f"unsupported data mode: {data_mode!r}")
+    if data_mode == "manifest" and manifest_path is None:
+        raise ValueError("manifest data mode requires manifest_path")
+    if data_mode == "full" and manifest_path is not None:
+        raise ValueError("full data mode must not receive manifest_path")
+    if data_mode == "full" and provenance_path is None:
+        raise ValueError("full data mode requires provenance_path")
+    if data_mode == "full":
+        assert provenance_path is not None
+        provenance_path.unlink(missing_ok=True)
 
     from neuralbench.data import Data
     from neuralbench.main import Experiment
     from neuralfetch.studies import shirazi2024hbn
 
-    timelines = hooks.load_manifest_timelines(manifest_path, data_root)
+    timelines: list[dict[str, Any]] | None = None
+    if data_mode == "manifest":
+        assert manifest_path is not None
+        timelines = hooks.load_manifest_timelines(manifest_path, data_root)
 
     original_iter_timelines = shirazi2024hbn.Shirazi2024Hbn.iter_timelines
     original_info = shirazi2024hbn.Shirazi2024Hbn._info
@@ -918,9 +1009,11 @@ def _patch_official_components(
     original_setup_trainer = Experiment.setup_trainer
 
     def iter_manifest_timelines(_study: Any) -> Iterable[dict[str, Any]]:
+        assert timelines is not None
         return iter(timelines)
 
     captured_loaders: dict[int, dict[str, Any]] = {}
+    provenance_state_by_data: dict[int, dict[str, Any]] = {}
     patched_brain_modules: list[dict[str, Any]] = []
     tuning_metadata_by_experiment: dict[int, dict[str, Any]] = {}
     test_invocations: set[int] = set()
@@ -928,6 +1021,35 @@ def _patch_official_components(
     def prepare_and_capture(data: Any) -> dict[str, Any]:
         loaders = original_prepare(data)
         captured_loaders[id(data)] = loaders
+        if data_mode == "full":
+            study = getattr(data, "study", None)
+            actual_timelines = getattr(study, "_timelines", None)
+            if actual_timelines is None:
+                raise RuntimeError("full-data Data.prepare did not expose study._timelines")
+            normalized = hooks._canonical_full_data_timelines(actual_timelines)
+            payload, raw = hooks._full_data_provenance_payload(
+                data_root=data_root,
+                timelines=normalized,
+            )
+            assert provenance_path is not None
+            try:
+                _replace_bytes_atomic(
+                    provenance_path,
+                    raw,
+                    remove_final_on_failure=True,
+                )
+                final_bytes = provenance_path.read_bytes()
+                provenance_digest = hooks._sha256_bytes(final_bytes)
+            except BaseException:
+                provenance_path.unlink(missing_ok=True)
+                raise
+            state = {
+                "data_mode": "full",
+                "timeline_count": payload["timeline_count"],
+                "provenance_path": str(provenance_path.resolve()),
+                "provenance_sha256": provenance_digest,
+            }
+            provenance_state_by_data[id(data)] = state
         return loaders
 
     def test_and_capture(
@@ -953,10 +1075,27 @@ def _patch_official_components(
             raise RuntimeError("strict evaluation requires an official uid folder")
         if best_model_path is None:
             raise RuntimeError("strict evaluation requires a selected checkpoint")
+        source_state = provenance_state_by_data.get(id(self.data))
+        if data_mode == "full" and source_state is None:
+            raise RuntimeError("full-data strict evaluation has no post-prepare provenance")
+        selection_manifest_path = manifest_path if data_mode == "manifest" else None
+        selection_provenance_path = (
+            Path(source_state["provenance_path"])
+            if source_state is not None
+            else manifest_path
+        )
+        selection_timeline_count = (
+            int(source_state["timeline_count"])
+            if source_state is not None
+            else len(timelines or [])
+        )
         selection_record = hooks._build_strict_selection_record(
             checkpoint_path=Path(best_model_path),
             official_config_path=uid_folder / "config.yaml",
-            manifest_path=manifest_path,
+            manifest_path=selection_manifest_path,
+            provenance_path=selection_provenance_path,
+            data_mode=data_mode,
+            timeline_count=selection_timeline_count,
             validation_history_path=epoch_metrics_path,
             selection_monitor="val/pearsonr",
             selection_mode="max",
@@ -1056,7 +1195,7 @@ def _patch_official_components(
                     ),
                 }
             )
-            (uid_folder / "run_metadata.json").write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
+            _replace_json_atomic(uid_folder / "run_metadata.json", payload)
         return result
 
     def persist_tuning_metadata(self: Any, metadata: Mapping[str, Any]) -> None:
@@ -1073,7 +1212,26 @@ def _patch_official_components(
                 raise ValueError("run_metadata.json must contain a JSON object")
             payload.update(loaded)
         payload.update(metadata)
-        path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
+        _replace_json_atomic(path, payload)
+
+    def persist_provenance_metadata(self: Any) -> None:
+        if data_mode != "full":
+            return
+        state = provenance_state_by_data.get(id(self.data))
+        if state is None:
+            raise RuntimeError("full-data experiment has no post-prepare provenance")
+        uid_folder = self.infra.uid_folder()
+        if uid_folder is None:
+            raise RuntimeError("full-data run has no official uid folder")
+        path = uid_folder / "run_metadata.json"
+        payload: dict[str, Any] = {}
+        if path.is_file():
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(loaded, Mapping):
+                raise ValueError("run_metadata.json must contain a JSON object")
+            payload.update(loaded)
+        payload.update(state)
+        _replace_json_atomic(path, payload)
 
     def prepare_with_protocol(
         self: Any,
@@ -1081,6 +1239,7 @@ def _patch_official_components(
         val_loader: Any = None,
     ) -> Any:
         result = original_prepare_pl_module(self, train_loader, val_loader)
+        persist_provenance_metadata(self)
         if head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats"}:
             brain_module = getattr(self, "_brain_module", None)
             grouped_head = None
@@ -1139,6 +1298,8 @@ def _patch_official_components(
     original_experiment_load_yaml_config = experiment_config.load_yaml_config
 
     originals = {
+        "data_mode": data_mode,
+        "patched_study_source": data_mode == "manifest",
         "iter_timelines": original_iter_timelines,
         "info": original_info,
         "prepare": original_prepare,
@@ -1167,9 +1328,11 @@ def _patch_official_components(
         return original_experiment_load_yaml_config(path, *args, **kwargs)
 
     try:
-        shirazi2024hbn.Shirazi2024Hbn.iter_timelines = iter_manifest_timelines
-        if original_info is not None:
-            shirazi2024hbn.Shirazi2024Hbn._info = original_info.model_copy(update={"num_timelines": len(timelines)})
+        if data_mode == "manifest":
+            assert timelines is not None
+            shirazi2024hbn.Shirazi2024Hbn.iter_timelines = iter_manifest_timelines
+            if original_info is not None:
+                shirazi2024hbn.Shirazi2024Hbn._info = original_info.model_copy(update={"num_timelines": len(timelines)})
         Data.prepare = prepare_and_capture
         Experiment._test = test_and_capture
         Experiment.setup_trainer = setup_with_evaluation_callbacks
@@ -1201,8 +1364,9 @@ def _restore_official_components(originals: Mapping[str, Any], *, restore_tuned:
         except BaseException as error:
             restoration_errors.append((label, error))
 
-    attempt("Shirazi2024Hbn.iter_timelines", lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "iter_timelines", originals["iter_timelines"]))
-    attempt("Shirazi2024Hbn._info", lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "_info", originals["info"]))
+    if originals.get("patched_study_source", True):
+        attempt("Shirazi2024Hbn.iter_timelines", lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "iter_timelines", originals["iter_timelines"]))
+        attempt("Shirazi2024Hbn._info", lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "_info", originals["info"]))
     attempt("Data.prepare", lambda: setattr(Data, "prepare", originals["prepare"]))
     attempt("Experiment.setup_run", lambda: setattr(Experiment, "setup_run", originals["setup_run"]))
     attempt("Experiment._test", lambda: setattr(Experiment, "_test", originals["test"]))
@@ -1221,7 +1385,7 @@ def _restore_official_components(originals: Mapping[str, Any], *, restore_tuned:
 
 def run_official_subset(
     *,
-    manifest_path: Path,
+    manifest_path: Path | None = None,
     data_root: Path,
     epoch_metrics_path: Path,
     selection_path: Path,
@@ -1231,10 +1395,13 @@ def run_official_subset(
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
+    data_mode: str = "manifest",
+    provenance_path: Path | None = None,
+    timeline_count: int | None = None,
     run_metadata: Mapping[str, Any] | None = None,
     hooks: Any,
 ) -> list[dict[str, Any]]:
-    """Run official REVE on the manifest and collect cached results."""
+    """Run official REVE on the selected source and collect cached results."""
 
     os.environ["NEURALBENCH_CONFIG"] = str(config_path)
     final_results: list[dict[str, Any]] = []
@@ -1252,6 +1419,9 @@ def run_official_subset(
             seeds=seeds,
             evaluation_protocol=evaluation_protocol,
             strict_final_test=strict_final_test,
+            data_mode=data_mode,
+            provenance_path=provenance_path,
+            timeline_count=timeline_count,
             run_metadata=run_metadata,
             final_results=final_results,
         )
@@ -1271,6 +1441,11 @@ def run_official_subset(
     finally:
         active_error = sys.exc_info()[1]
         cleanup_errors: list[BaseException] = []
+        if active_error is not None and data_mode == "full" and provenance_path is not None:
+            try:
+                provenance_path.unlink(missing_ok=True)
+            except BaseException as error:
+                cleanup_errors.append(error)
         if benchmark_aggregator is not None and original_aggregator_prepare is not None:
             try:
                 benchmark_aggregator.prepare = original_aggregator_prepare

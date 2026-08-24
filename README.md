@@ -120,11 +120,13 @@ neuralbench eeg age -m reve
 
 ## Upstream REVE head experiments
 
-`official_reve_subset.py` runs the official NeuralBench Age stack on the fixed
-manifest and changes only the downstream head. The existing `mean_linear`
-path remains the NeuralBench reference. The new `last_avg`, `last`, and `all`
-paths use the pinned upstream REVE classifier semantics; the backbone, data
-split, optimizer, early stopping, and preprocessing remain shared.
+`official_reve_subset.py` runs the official NeuralBench Age stack and changes
+only the downstream head. By default, `--manifest` selects the fixed validated
+subset used by the existing experiments. The mutually exclusive `--full-data`
+mode leaves `Shirazi2024Hbn`'s official timeline discovery intact and lets the
+NeuralBench Age task apply its own filters and splits to the complete
+`--data-root`. The reference `mean_linear` path, backbone, optimizer, early
+stopping, and preprocessing remain shared in both modes.
 
 Before an HBN run, exercise the installed official REVE/NeuralTrain interface
 without downloading HBN recordings:
@@ -142,7 +144,9 @@ runner writes `epoch_validation_metrics.jsonl` and selects the checkpoint only
 from `val/pearsonr`; training callbacks never iterate or read the test loader.
 The seed
 directory then contains an immutable `selection.json` with the checkpoint,
-configuration, manifest, validation-history, and SHA-256 provenance. A strict
+configuration, source provenance, validation-history, and SHA-256 hashes. A
+manifest run records its manifest; a full-data run records
+`full_data_provenance.json` and leaves manifest fields null. A strict
 validation-only report has `test_status: withheld` and no test metric.
 
 After the architecture and hyperparameters are frozen, a single predeclared
@@ -159,6 +163,28 @@ python official_reve_subset.py \
   --strict-final-test \
   --seeds 33 34 35
 ```
+
+To run the complete HBN root with the proposed rich-statistics residual head,
+use `--full-data` instead of `--manifest`:
+
+```bash
+python official_reve_subset.py \
+  --full-data \
+  --data-root /workspace/neurobench_data_hl2 \
+  --output-dir /workspace/hbn_subset/results/full_mean_rich_stats_residual \
+  --config /workspace/hbn_subset/results/full_mean_rich_stats_residual/config.json \
+  --head-variant mean_rich_stats_residual \
+  --evaluation-protocol strict \
+  --strict-final-test \
+  --seeds 33 34 35
+```
+
+The full-data run writes one `full_data_provenance.json` per seed. It records
+the resolved data root, the exact timeline identities returned by the official
+study iterator, their count, and the SHA-256 digest. This snapshot is audit
+metadata only; it is never fed back as a replacement iterator. Use the same
+command with `--head-variant mean_linear` to produce the full-data reference
+for comparison with the rich-statistics head.
 
 This gated run creates durable `test_started.json` and `test_completed.json`
 markers, verifies that the selected checkpoint hash did not change, and records

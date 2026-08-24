@@ -1,11 +1,13 @@
-"""Run the official NeuralBench REVE Age baseline on a fixed manifest.
+"""Run the official NeuralBench REVE Age baseline on a manifest or full root.
 
-The public NeuralBench CLI discovers every recording under ``DATA_DIR``.  This
-module keeps the official experiment unchanged, but replaces only the HBN
-study's timeline iterator with rows from the canonical 500-subject manifest.
-Strict evaluation records validation Pearson after each training epoch and
-withholds the test set until an explicit one-time finalist gate. An explicit
-legacy mode retains the historical read-only test pass for parity diagnostics.
+The public NeuralBench CLI discovers every recording under ``DATA_DIR``. This
+module keeps the official experiment unchanged: manifest mode replaces only
+the HBN study's timeline iterator with rows from the canonical subset, while
+full-data mode leaves official discovery intact and records the memoized
+timelines for audit. Strict evaluation records validation Pearson after each
+training epoch and withholds the test set until an explicit one-time finalist
+gate. An explicit legacy mode retains the historical read-only test pass for
+parity diagnostics.
 """
 
 from __future__ import annotations
@@ -19,8 +21,9 @@ import math
 import shlex
 import sys
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +38,113 @@ except ImportError:  # Keep manifest-only helpers importable without Lightning.
 # ---------------------------------------------------------------------------
 # Manifest and diagnostic metric helpers
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DataSource:
+    """Resolved input source for one official Age run."""
+
+    data_mode: str
+    data_root: Path
+    manifest_path: Path | None
+    manifest_sha256: str | None
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _resolve_data_source(
+    *,
+    manifest_path: Path | None,
+    full_data: bool,
+    data_root: Path,
+) -> DataSource:
+    """Resolve and validate the mutually exclusive manifest/full input modes."""
+
+    if (manifest_path is None) == (not full_data):
+        raise ValueError("exactly one of --manifest or --full-data is required")
+    resolved_root = data_root.resolve()
+    if full_data and not resolved_root.exists():
+        raise FileNotFoundError(f"data root does not exist: {resolved_root}")
+    if full_data and not resolved_root.is_dir():
+        raise NotADirectoryError(f"data root is not a directory: {resolved_root}")
+    if full_data:
+        return DataSource(
+            data_mode="full",
+            data_root=resolved_root,
+            manifest_path=None,
+            manifest_sha256=None,
+        )
+    assert manifest_path is not None
+    resolved_manifest = manifest_path.resolve()
+    if not resolved_manifest.is_file():
+        raise FileNotFoundError(f"manifest does not exist: {resolved_manifest}")
+    return DataSource(
+        data_mode="manifest",
+        data_root=resolved_root,
+        manifest_path=resolved_manifest,
+        manifest_sha256=manifest_sha256(resolved_manifest),
+    )
+
+
+def _canonical_full_data_timelines(
+    timelines: object,
+) -> tuple[dict[str, str | None], ...]:
+    """Normalize official study identities without applying task filters."""
+
+    if isinstance(timelines, (str, bytes)) or not isinstance(timelines, Iterable):
+        raise ValueError("full-data timelines must be an iterable of mappings")
+    required = {"release", "subject", "task"}
+    allowed = required | {"run"}
+    normalized: list[dict[str, str | None]] = []
+    seen: set[tuple[str, str, str, str | None]] = set()
+    for index, timeline in enumerate(timelines):
+        if not isinstance(timeline, Mapping):
+            raise ValueError(f"timeline {index} must be a mapping")
+        keys = set(timeline)
+        if not keys.issubset(allowed):
+            raise ValueError(f"timeline {index} has invalid keys: {sorted(keys - allowed)}")
+        missing = required - keys
+        if missing:
+            raise ValueError(f"timeline {index} is missing fields: {sorted(missing)}")
+        values: dict[str, str | None] = {}
+        for field in ("release", "subject", "task"):
+            value = timeline[field]
+            if not isinstance(value, str):
+                raise ValueError(f"timeline {index} field {field} must be a string")
+            values[field] = value
+        run = timeline.get("run")
+        if run is not None and not isinstance(run, str):
+            raise ValueError(f"timeline {index} field run must be a string or null")
+        values["run"] = run
+        identity = (values["release"], values["subject"], values["task"], values["run"])
+        if identity in seen:
+            raise ValueError(f"duplicate full-data timeline identity: {identity}")
+        seen.add(identity)
+        normalized.append(values)
+    if not normalized:
+        raise ValueError("full-data timeline iterator is empty")
+    return tuple(normalized)
+
+
+def _full_data_provenance_payload(
+    *,
+    data_root: Path,
+    timelines: Sequence[Mapping[str, str | None]],
+) -> tuple[dict[str, Any], bytes]:
+    """Build the versioned full-data audit payload and its exact bytes."""
+
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "data_mode": "full",
+        "study": "Shirazi2024Hbn",
+        "data_root": str(data_root.resolve()),
+        "timelines": [dict(timeline) for timeline in timelines],
+        "timeline_count": len(timelines),
+    }
+    raw = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    return payload, raw
 
 
 def _parse_timeline_name(path: Path) -> tuple[str, str, str | None]:
@@ -402,11 +512,14 @@ def _strict_report_fields(
         raise RuntimeError("strict selection monitor must be val/pearsonr")
     if selection.get("selection_mode") != "max":
         raise RuntimeError("strict selection mode must be max")
+    data_mode = selection.get("data_mode", "manifest")
+    if data_mode not in {"manifest", "full"}:
+        raise RuntimeError("strict selection has an invalid data_mode")
 
     required_hash_fields = (
         "checkpoint_sha256",
         "official_config_sha256",
-        "manifest_sha256",
+        "provenance_sha256",
         "validation_history_sha256",
     )
     for field in required_hash_fields:
@@ -416,7 +529,7 @@ def _strict_report_fields(
     for path_field, hash_field in (
         ("checkpoint_path", "checkpoint_sha256"),
         ("official_config_path", "official_config_sha256"),
-        ("manifest_path", "manifest_sha256"),
+        ("provenance_path", "provenance_sha256"),
         ("validation_history_path", "validation_history_sha256"),
     ):
         raw_path = selection.get(path_field)
@@ -427,6 +540,21 @@ def _strict_report_fields(
             raise RuntimeError(f"strict provenance file is missing: {path}")
         if _sha256_file(path) != selection[hash_field]:
             raise RuntimeError(f"strict provenance hash changed: {path}")
+
+    if data_mode == "full":
+        timeline_count = selection.get("timeline_count")
+        if isinstance(timeline_count, bool) or not isinstance(timeline_count, int) or timeline_count < 1:
+            raise RuntimeError("full-data strict selection has an invalid timeline_count")
+        if selection.get("manifest_path") is not None or selection.get("manifest_sha256") is not None:
+            raise RuntimeError("full-data strict selection must not bind a manifest")
+    else:
+        manifest_path = selection.get("manifest_path")
+        manifest_sha256 = selection.get("manifest_sha256")
+        if not isinstance(manifest_path, str) or not isinstance(manifest_sha256, str) or len(manifest_sha256) != 64:
+            raise RuntimeError("manifest strict selection is missing manifest provenance")
+        manifest_file = Path(manifest_path)
+        if not manifest_file.is_file() or _sha256_file(manifest_file) != manifest_sha256:
+            raise RuntimeError(f"strict manifest provenance changed: {manifest_file}")
 
     seed = selection.get("seed")
     if isinstance(seed, bool) or not isinstance(seed, int):
@@ -454,6 +582,8 @@ def _strict_report_fields(
 
     report: dict[str, Any] = {
         "evaluation_protocol": "strict",
+        "data_mode": data_mode,
+        "timeline_count": selection.get("timeline_count"),
         "strict_final_test": bool(strict_final_test),
         "selection_monitor": "val/pearsonr",
         "selection_mode": "max",
@@ -469,6 +599,8 @@ def _strict_report_fields(
             "official_config_sha256",
             "manifest_path",
             "manifest_sha256",
+            "provenance_path",
+            "provenance_sha256",
             "validation_history_path",
             "validation_history_sha256",
         )},
@@ -541,6 +673,17 @@ def _strict_summary_fields(reports: Sequence[Mapping[str, Any]]) -> dict[str, An
     if len(gates) != 1:
         raise RuntimeError("strict summary mixes validation-only and final-test reports")
     gate = gates.pop()
+    has_source_metadata = any(
+        any(field in report for field in ("data_mode", "provenance_path", "manifest_path"))
+        for report in reports
+    )
+    if has_source_metadata:
+        data_modes = {report.get("data_mode", "manifest") for report in reports}
+        if len(data_modes) != 1 or data_modes not in ({"manifest"}, {"full"}):
+            raise RuntimeError("strict summary mixes data sources")
+        data_mode = next(iter(data_modes))
+    else:
+        data_mode = "manifest"
     selected_epochs: dict[str, int] = {}
     selected_values: dict[str, float] = {}
     for report in reports:
@@ -557,6 +700,7 @@ def _strict_summary_fields(reports: Sequence[Mapping[str, Any]]) -> dict[str, An
         selected_values[str(seed)] = float(value)
     summary: dict[str, Any] = {
         "evaluation_protocol": "strict",
+        "data_mode": data_mode,
         "strict_final_test": gate,
         "test_status": "completed" if gate else "withheld",
         "completed_seed_count": len(reports),
@@ -564,6 +708,58 @@ def _strict_summary_fields(reports: Sequence[Mapping[str, Any]]) -> dict[str, An
         "selected_val_pearson_by_seed": selected_values,
         "mean_selected_val_pearson": sum(selected_values.values()) / len(selected_values),
     }
+    if has_source_metadata:
+        if data_mode == "full":
+            timeline_counts: dict[str, int] = {}
+            provenance_paths: dict[str, str] = {}
+            provenance_hashes: dict[str, str] = {}
+            for report in reports:
+                seed = report["seed"]
+                count = report.get("timeline_count")
+                path = report.get("provenance_path")
+                digest = report.get("provenance_sha256")
+                if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+                    raise RuntimeError("full-data strict summary has an invalid timeline_count")
+                if not isinstance(path, str) or not isinstance(digest, str) or len(digest) != 64:
+                    raise RuntimeError("full-data strict summary is missing provenance metadata")
+                timeline_counts[str(seed)] = count
+                provenance_paths[str(seed)] = path
+                provenance_hashes[str(seed)] = digest
+            if len(set(timeline_counts.values())) != 1:
+                raise RuntimeError("full-data strict summary mixes timeline counts")
+            summary.update(
+                {
+                    "timeline_count": next(iter(timeline_counts.values())),
+                    "timeline_count_by_seed": timeline_counts,
+                    "provenance_path": provenance_paths,
+                    "provenance_sha256": provenance_hashes,
+                    "provenance_path_by_seed": provenance_paths,
+                    "provenance_sha256_by_seed": provenance_hashes,
+                }
+            )
+        else:
+            manifest_paths = {report.get("manifest_path") for report in reports}
+            manifest_hashes = {report.get("manifest_sha256") for report in reports}
+            if len(manifest_paths) != 1 or len(manifest_hashes) != 1:
+                raise RuntimeError("manifest strict summary mixes manifest provenance")
+            timeline_counts = {
+                report.get("timeline_count")
+                for report in reports
+                if "timeline_count" in report
+            }
+            if timeline_counts:
+                if len(timeline_counts) != 1 or None in timeline_counts:
+                    raise RuntimeError("manifest strict summary mixes timeline counts")
+            summary.update(
+                {
+                    "manifest_path": next(iter(manifest_paths)),
+                    "manifest_sha256": next(iter(manifest_hashes)),
+                    "provenance_path": next(iter(manifest_paths)),
+                    "provenance_sha256": next(iter(manifest_hashes)),
+                }
+            )
+            if timeline_counts:
+                summary["timeline_count"] = next(iter(timeline_counts))
     if gate:
         test_values: dict[str, float] = {}
         for report in reports:
@@ -823,7 +1019,7 @@ def _restore_official_components(originals: Mapping[str, Any]) -> None:
 
 def run_official_subset(
     *,
-    manifest_path: Path,
+    manifest_path: Path | None = None,
     data_root: Path,
     epoch_metrics_path: Path,
     selection_path: Path,
@@ -833,6 +1029,9 @@ def run_official_subset(
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
+    data_mode: str = "manifest",
+    provenance_path: Path | None = None,
+    timeline_count: int | None = None,
     run_metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     return _runtime.run_official_subset(
@@ -846,6 +1045,9 @@ def run_official_subset(
         seeds=seeds,
         evaluation_protocol=evaluation_protocol,
         strict_final_test=strict_final_test,
+        data_mode=data_mode,
+        provenance_path=provenance_path,
+        timeline_count=timeline_count,
         run_metadata=run_metadata,
         hooks=_hooks(),
     )
@@ -855,12 +1057,25 @@ def _run_experiments_synchronously(aggregator: Any) -> None:
     return _runtime._run_experiments_synchronously(aggregator)
 
 
-def _write_config(path: Path, *, data_root: Path, output_dir: Path) -> None:
+def _write_config(
+    path: Path,
+    *,
+    data_root: Path,
+    output_dir: Path,
+    data_mode: str = "manifest",
+) -> None:
     config = {
         "USER": "root",
         "ENTITY_NAME": "root",
         "PROJECT_NAME": "neurobench_reve_age_official",
-        "CACHE_DIR": str(data_root / "neuralbench_official_cache_500"),
+        "CACHE_DIR": str(
+            data_root
+            / (
+                "neuralbench_official_cache_full"
+                if data_mode == "full"
+                else "neuralbench_official_cache_500"
+            )
+        ),
         "SAVE_DIR": str(output_dir),
         "DATA_DIR": str(data_root),
         "WANDB_HOST": "",
@@ -890,6 +1105,11 @@ def _resolved_head_metadata(run_dir: Path) -> dict[str, Any]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path)
+    parser.add_argument(
+        "--full-data",
+        action="store_true",
+        help="use the official Shirazi2024Hbn timeline discovery without a manifest",
+    )
     parser.add_argument("--data-root", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--config", type=Path)
@@ -929,7 +1149,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(run_official_stack_smoke(head_variant=args.smoke_head), indent=2))
         return 0
     required = {
-        "--manifest": args.manifest,
         "--data-root": args.data_root,
         "--output-dir": args.output_dir,
         "--config": args.config,
@@ -937,11 +1156,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     missing = [name for name, value in required.items() if value is None]
     if missing:
         parser.error("missing required arguments: " + ", ".join(missing))
+    if args.manifest is not None and args.full_data:
+        parser.error("--manifest and --full-data are mutually exclusive")
+    if args.manifest is None and not args.full_data:
+        parser.error("exactly one of --manifest or --full-data is required")
 
     resolved_seeds = validate_seeds(args.seeds)
-    digest = manifest_sha256(args.manifest)
+    try:
+        source = _resolve_data_source(
+            manifest_path=args.manifest,
+            full_data=args.full_data,
+            data_root=args.data_root,
+        )
+    except (FileNotFoundError, NotADirectoryError, ValueError) as error:
+        parser.error(str(error))
     launch_command = shlex.join([sys.executable, *sys.argv])
-    rows = len(load_manifest_timelines(args.manifest, args.data_root))
+    rows = (
+        len(load_manifest_timelines(source.manifest_path, source.data_root))
+        if source.data_mode == "manifest"
+        else None
+    )
 
     try:
         reve = _load_reve_helpers()
@@ -949,8 +1183,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         metadata = _head_metadata(
             reve,
             head_variant=args.head_variant,
-            manifest_path=args.manifest,
-            manifest_digest=digest,
+            data_mode=source.data_mode,
+            manifest_path=source.manifest_path,
+            manifest_digest=source.manifest_sha256,
+            provenance_path=source.manifest_path,
+            provenance_digest=source.manifest_sha256,
+            timeline_count=rows,
             rows=rows,
             seeds=resolved_seeds,
             launch_command=launch_command,
@@ -967,12 +1205,33 @@ def main(argv: Sequence[str] | None = None) -> int:
                 else "epoch_test_metrics.jsonl"
             )
             selection_path = run_dir / "selection.json"
-            seed_metadata = {**metadata, "seed": seed, "data_seed": 33}
+            provenance_path = (
+                run_dir / "full_data_provenance.json"
+                if source.data_mode == "full"
+                else source.manifest_path
+            )
+            seed_metadata = {
+                **metadata,
+                "seed": seed,
+                "data_seed": 33,
+                "provenance_path": (
+                    str(provenance_path)
+                    if source.data_mode == "manifest" and provenance_path is not None
+                    else None
+                ),
+                "provenance_sha256": source.manifest_sha256,
+                "timeline_count": rows,
+            }
             try:
-                _write_config(config_path, data_root=args.data_root, output_dir=run_dir)
+                _write_config(
+                    config_path,
+                    data_root=source.data_root,
+                    output_dir=run_dir,
+                    data_mode=source.data_mode,
+                )
                 results = run_official_subset(
-                    manifest_path=args.manifest,
-                    data_root=args.data_root,
+                    manifest_path=source.manifest_path,
+                    data_root=source.data_root,
                     epoch_metrics_path=epoch_metrics_path,
                     selection_path=selection_path,
                     config_path=config_path,
@@ -980,6 +1239,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     seeds=(seed,),
                     evaluation_protocol=args.evaluation_protocol,
                     strict_final_test=args.strict_final_test,
+                    data_mode=source.data_mode,
+                    provenance_path=provenance_path,
+                    timeline_count=rows,
                     run_metadata=seed_metadata,
                 )
                 tuning_metadata = (
@@ -1001,6 +1263,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                     report["head_metadata"] = resolved_head_metadata
                     if "parameter_count" in resolved_head_metadata:
                         report["head_parameter_count"] = resolved_head_metadata["parameter_count"]
+                if source.data_mode == "full":
+                    if provenance_path is None or not provenance_path.is_file():
+                        raise RuntimeError("full-data run did not produce full_data_provenance.json")
+                    provenance_payload = _load_json_object(provenance_path)
+                    if provenance_payload.get("data_mode") != "full":
+                        raise RuntimeError("full-data provenance has the wrong data_mode")
+                    actual_timeline_count = provenance_payload.get("timeline_count")
+                    if (
+                        isinstance(actual_timeline_count, bool)
+                        or not isinstance(actual_timeline_count, int)
+                        or actual_timeline_count < 1
+                    ):
+                        raise RuntimeError("full-data provenance has an invalid timeline_count")
+                    report.update(
+                        {
+                            "provenance_path": str(provenance_path.resolve()),
+                            "provenance_sha256": _sha256_file(provenance_path),
+                            "timeline_count": actual_timeline_count,
+                        }
+                    )
                 if args.evaluation_protocol == "strict":
                     report.update(
                         _strict_report_fields(
@@ -1025,6 +1307,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_dir.mkdir(parents=True, exist_ok=True)
                 (run_dir / "report.json").write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
             except Exception as error:
+                if source.data_mode == "full" and provenance_path is not None:
+                    try:
+                        provenance_path.unlink(missing_ok=True)
+                    except OSError as cleanup_error:
+                        error.add_note(
+                            f"failed to remove full-data provenance after failure: {cleanup_error!r}"
+                        )
                 write_failure_diagnostics(run_dir, error, launch_command=launch_command, metadata=seed_metadata)
                 report_path = run_dir / "report.json"
                 try:
@@ -1044,10 +1333,48 @@ def main(argv: Sequence[str] | None = None) -> int:
             "head_variant": args.head_variant,
             "seeds": list(resolved_seeds),
             "runs": reports,
+            "data_mode": source.data_mode,
+            "timeline_count": rows,
+            "manifest_path": str(source.manifest_path) if source.manifest_path is not None else None,
+            "manifest_sha256": source.manifest_sha256,
+            "provenance_path": (
+                str(source.manifest_path) if source.data_mode == "manifest" and source.manifest_path is not None else None
+            ),
+            "provenance_sha256": source.manifest_sha256,
         }
         if args.evaluation_protocol == "strict":
             summary.update(_strict_summary_fields(reports))
         else:
+            if source.data_mode == "full":
+                timeline_counts = {report.get("timeline_count") for report in reports}
+                provenance_paths = {
+                    report.get("provenance_path") for report in reports
+                }
+                provenance_hashes = {
+                    report.get("provenance_sha256") for report in reports
+                }
+                if (
+                    len(timeline_counts) != 1
+                    or None in timeline_counts
+                    or len(provenance_paths) != len(reports)
+                    or None in provenance_paths
+                    or len(provenance_hashes) != len(reports)
+                    or None in provenance_hashes
+                ):
+                    raise RuntimeError("full-data legacy summary is missing provenance metadata")
+                summary.update(
+                    {
+                        "timeline_count": next(iter(timeline_counts)),
+                        "provenance_path": {
+                            str(report["seed"]): report["provenance_path"]
+                            for report in reports
+                        },
+                        "provenance_sha256": {
+                            str(report["seed"]): report["provenance_sha256"]
+                            for report in reports
+                        },
+                    }
+                )
             summary.update(
                 {
                     "evaluation_protocol": "legacy",
