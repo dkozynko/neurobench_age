@@ -222,6 +222,38 @@ def _resolve_selected_validation(
     }
 
 
+def _freeze_provenance_snapshot(source_path: Path) -> Path:
+    """Create an immutable per-run snapshot of a mutable upstream artifact."""
+
+    if not source_path.is_file():
+        raise RuntimeError(f"strict provenance file is missing: {source_path}")
+    snapshot_path = source_path.with_name("strict_provenance_config.yaml")
+    data = source_path.read_bytes()
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    if snapshot_path.is_file():
+        if snapshot_path.read_bytes() != data:
+            raise RuntimeError(f"strict provenance snapshot differs: {snapshot_path}")
+        return snapshot_path
+
+    temporary_path = snapshot_path.with_name(
+        f".{snapshot_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    )
+    try:
+        with temporary_path.open("xb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary_path, snapshot_path)
+            _fsync_directory(snapshot_path.parent)
+        except FileExistsError as error:
+            if not snapshot_path.is_file() or snapshot_path.read_bytes() != data:
+                raise RuntimeError(f"strict provenance snapshot differs: {snapshot_path}") from error
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return snapshot_path
+
+
 def _build_strict_selection_record(
     *,
     checkpoint_path: Path,
@@ -240,7 +272,8 @@ def _build_strict_selection_record(
     if selection_monitor != "val/pearsonr" or selection_mode != "max":
         raise RuntimeError("strict selection must monitor val/pearsonr in max mode")
     selected = _resolve_selected_validation(checkpoint_path, validation_history_path, seed=seed)
-    for path in (official_config_path, manifest_path):
+    immutable_config_path = _freeze_provenance_snapshot(official_config_path)
+    for path in (immutable_config_path, manifest_path):
         if not path.is_file():
             raise RuntimeError(f"strict provenance file is missing: {path}")
     return {
@@ -253,8 +286,8 @@ def _build_strict_selection_record(
         "strict_final_test": bool(strict_final_test),
         "checkpoint_path": str(checkpoint_path.resolve()),
         "checkpoint_sha256": sha256_file(checkpoint_path),
-        "official_config_path": str(official_config_path.resolve()),
-        "official_config_sha256": sha256_file(official_config_path),
+        "official_config_path": str(immutable_config_path.resolve()),
+        "official_config_sha256": sha256_file(immutable_config_path),
         "manifest_path": str(manifest_path.resolve()),
         "manifest_sha256": sha256_file(manifest_path),
         "validation_history_path": str(validation_history_path.resolve()),
@@ -468,13 +501,14 @@ def _head_metadata(
         "mean_attention_gated": "train_dummy_final_token_mean",
         "global_stats_residual": "not_applicable",
         "mean_rich_stats_residual": "not_applicable",
+        "grouped_rich_stats_shrinkage": "not_applicable",
         "last_avg": "upstream_random_unused",
         "last_tuned": "train_dummy_final_token_mean",
         "last": "upstream_random",
         "all": "upstream_random",
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
-    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual"}
+    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage"}
     metadata: dict[str, Any] = {
         "head_variant": head_variant,
         "head_source": (
@@ -512,6 +546,8 @@ def _head_metadata(
             if head_variant == "global_stats_residual"
             else "local_mean_rich_stats_residual"
             if head_variant == "mean_rich_stats_residual"
+            else "local_grouped_rich_stats_shrinkage"
+            if head_variant == "grouped_rich_stats_shrinkage"
             else "local_mean_linear_copy"
             if is_local_head
             else "upstream_reve"
@@ -708,6 +744,24 @@ def _head_metadata(
                 "query_initialization": "not_applicable",
                 "correction_initialization": "zero",
                 "correction_features": "per_feature_std_range_mad_and_mean_abs",
+                "correction_scale": 0.5,
+                "correction_backbone_gradient": "enabled",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "grouped_rich_stats_shrinkage":
+        metadata.update(
+            {
+                "head_architecture": "mean_grouped_rich_stats_zero_gate_shrinkage",
+                "query_initialization": "not_applicable",
+                "statistic_groups": ["std", "range", "mad", "mean_abs"],
+                "gate_parameterization": "direct_scalar",
+                "gate_initialization": 0.0,
+                "projection_initialization": (
+                    "linspace(-1,1,D)_roll_group_plus_row_alternating_sign_l2_normalized"
+                ),
+                "projection_shape": "D_to_D",
+                "parameter_count_formula": "D*n_outputs+n_outputs+4*(D*D+D)+4",
                 "correction_scale": 0.5,
                 "correction_backbone_gradient": "enabled",
                 "normalization": "none",

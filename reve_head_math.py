@@ -538,6 +538,83 @@ class MeanRichStatsResidualHead(nn.Module):
         return self.linear(mean) + self.correction_scale * self.correction(self.pool_tokens(tokens))
 
 
+class GroupedRichStatsShrinkageHead(nn.Module):
+    """Mean-linear baseline with one zero-start gate per rich-stat group."""
+
+    statistic_names = ("std", "range", "mad", "mean_abs")
+    projection_initialization = (
+        "linspace(-1,1,D)_roll_group_plus_row_alternating_sign_l2_normalized"
+    )
+
+    def __init__(self, *, embed_dim: int, n_outputs: int):
+        super().__init__()
+        if embed_dim <= 0 or n_outputs <= 0:
+            raise ValueError("embed_dim and n_outputs must be positive")
+        self.embed_dim = embed_dim
+        self.n_outputs = n_outputs
+        self.correction_scale = 0.5
+        # Construct the baseline first to preserve MeanLinearCopyHead's RNG
+        # order and exact baseline parameters at initialization.
+        self.linear = nn.Linear(embed_dim, n_outputs)
+        self.projections = nn.ModuleList(
+            nn.Linear(embed_dim, embed_dim, bias=True)
+            for _ in self.statistic_names
+        )
+        for group_index, projection in enumerate(self.projections):
+            rows = []
+            for row_index in range(embed_dim):
+                pattern = torch.linspace(-1.0, 1.0, embed_dim)
+                if embed_dim == 1:
+                    pattern = torch.ones(1)
+                else:
+                    offset = (group_index + row_index) % embed_dim
+                    pattern = torch.roll(pattern, shifts=offset, dims=0)
+                    if (group_index + row_index) % 2:
+                        pattern = -pattern
+                rows.append(pattern / pattern.norm(p=2))
+            weight = torch.stack(rows, dim=0)
+            with torch.no_grad():
+                projection.weight.copy_(weight)
+                projection.bias.zero_()
+        self.gates = nn.Parameter(torch.zeros(len(self.statistic_names)))
+
+    def pool_tokens(self, tokens: Any) -> torch.Tensor:
+        """Return four per-feature statistics concatenated by group."""
+
+        tokens = _validate_final_tokens(tokens, embed_dim=self.embed_dim)
+        mean = tokens.mean(dim=1, keepdim=True)
+        standard_deviation = tokens.std(dim=1, unbiased=False)
+        value_range = tokens.amax(dim=1) - tokens.amin(dim=1)
+        mean_absolute_deviation = (tokens - mean).abs().mean(dim=1)
+        mean_absolute_value = tokens.abs().mean(dim=1)
+        return torch.cat(
+            (standard_deviation, value_range, mean_absolute_deviation, mean_absolute_value),
+            dim=-1,
+        )
+
+    def metadata(self) -> dict[str, Any]:
+        """Return stable, JSON-serializable architecture metadata."""
+
+        return {
+            "statistic_groups": list(self.statistic_names),
+            "correction_scale": self.correction_scale,
+            "gate_parameterization": "direct_scalar",
+            "gate_initialization": 0.0,
+            "projection_initialization": self.projection_initialization,
+            "parameter_count": sum(parameter.numel() for parameter in self.parameters()),
+        }
+
+    def forward(self, tokens: Any) -> torch.Tensor:
+        tokens = _validate_final_tokens(tokens, embed_dim=self.embed_dim)
+        mean = tokens.mean(dim=1)
+        grouped_statistics = self.pool_tokens(tokens).chunk(len(self.statistic_names), dim=-1)
+        correction = sum(
+            gate * projection(statistic)
+            for gate, projection, statistic in zip(self.gates, self.projections, grouped_statistics)
+        )
+        return self.linear(mean + self.correction_scale * correction)
+
+
 class MeanStatsAttentionResidualHead(nn.Module):
     """Mean-linear baseline with zero-start attention and statistics corrections."""
 
@@ -1010,7 +1087,7 @@ class UpstreamReveHeadModel(nn.Module):
         query_initialization_metadata: Mapping[str, Any] | None = None,
     ):
         super().__init__()
-        if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual"}:
+        if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage"}:
             validate_local_head_variant(variant)
         elif variant == "last_tuned":
             validate_last_tuned_protocol(variant)
@@ -1065,6 +1142,8 @@ class UpstreamReveHeadModel(nn.Module):
             self.head = GlobalStatsResidualHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "mean_rich_stats_residual":
             self.head = MeanRichStatsResidualHead(embed_dim=embed_dim, n_outputs=n_outputs)
+        elif variant == "grouped_rich_stats_shrinkage":
+            self.head = GroupedRichStatsShrinkageHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "mean_stats_residual_detached":
             self.head = MeanStatsResidualDetachedHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "mean_stats_residual_gradient_scaled":
@@ -1101,7 +1180,7 @@ class UpstreamReveHeadModel(nn.Module):
         self, eeg: torch.Tensor, channel_positions: torch.Tensor | None
     ) -> Any:
         del channel_positions
-        if self.variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual"}:
+        if self.variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage"}:
             # The official NtReve wrapper keeps its resolved REVE positions
             # internally and does not receive per-batch channel positions.
             return self.encoder(eeg)
@@ -1137,7 +1216,7 @@ def make_upstream_reve_wrapper(
 ) -> Any:
     """Create a concrete official NeuralBench wrapper config lazily."""
 
-    if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual"}:
+    if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage"}:
         validate_local_head_variant(variant)
     elif variant == "last_tuned":
         validate_last_tuned_protocol(variant)
@@ -1186,7 +1265,7 @@ def make_upstream_reve_wrapper(
             if sample is None:
                 raise AdapterContractError("dummy batch contains no EEG tensor")
 
-            if self.head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual"}:
+            if self.head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage"}:
                 # Match DownstreamWrapper.build: run the already-built model
                 # once before constructing its linear probe.
                 with torch.no_grad():
