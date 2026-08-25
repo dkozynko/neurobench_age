@@ -15,10 +15,51 @@ import uuid
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+import torch
+from torch import nn
+
 _CONFIGURE_OPTIMIZERS_ABSENT = object()
 _TRAINING_STEP_ABSENT = object()
 H6_GATE_STABILITY_LAMBDA = 0.001
 H6_NOISE_SCALE = 0.01
+
+
+class CorrelationAuxiliaryLoss(nn.Module):
+    """Keep MSE primary while adding a bounded batch Pearson objective."""
+
+    def __init__(self, base_loss: nn.Module, *, coefficient: float = 0.02) -> None:
+        super().__init__()
+        if not isinstance(base_loss, nn.Module):
+            raise TypeError("correlation auxiliary loss requires an nn.Module base loss")
+        if not math.isfinite(float(coefficient)) or float(coefficient) < 0.0:
+            raise ValueError("correlation coefficient must be finite and non-negative")
+        self.base_loss = base_loss
+        self.coefficient = float(coefficient)
+
+    def forward(self, prediction: torch.Tensor, target: torch.Tensor) -> dict[str, torch.Tensor]:
+        mse = self.base_loss(prediction, target)
+        prediction_values = prediction.reshape(prediction.shape[0], -1).mean(dim=1)
+        target_values = target.reshape(target.shape[0], -1).mean(dim=1)
+        if prediction_values.shape[0] < 2:
+            auxiliary = prediction.new_zeros(())
+        else:
+            prediction_centered = prediction_values - prediction_values.mean()
+            target_centered = target_values - target_values.mean()
+            denominator = torch.sqrt(
+                prediction_centered.square().sum() * target_centered.square().sum()
+            )
+            if not torch.isfinite(denominator) or float(denominator.detach()) <= 1e-8:
+                auxiliary = prediction.new_zeros(())
+            else:
+                correlation = (
+                    prediction_centered * target_centered
+                ).sum() / denominator
+                auxiliary = float(self.coefficient) * (1.0 - correlation.clamp(-1.0, 1.0))
+        return {
+            "total": mse + auxiliary,
+            "mse": mse,
+            "pearson_aux": auxiliary,
+        }
 
 
 def _h6_noise_seed(*, run_seed: int, epoch: int, batch_idx: int) -> int:
@@ -283,6 +324,32 @@ def _install_selective_eeglab_mat_reader() -> dict[str, Any]:
 
     eeglab._readmat = readmat
     return {"module": eeglab, "readmat": original_readmat}
+
+
+def _find_nested_study(step: Any, study_class: type[Any]) -> Any | None:
+    """Find one concrete study inside a NeuralSet Chain-like pipeline."""
+
+    seen: set[int] = set()
+
+    def visit(node: Any) -> Any | None:
+        if isinstance(node, study_class):
+            return node
+        node_id = id(node)
+        if node_id in seen:
+            return None
+        seen.add(node_id)
+        children = getattr(node, "steps", None)
+        if isinstance(children, Mapping):
+            children = list(children.values())
+        if not isinstance(children, (list, tuple)):
+            return None
+        for child in children:
+            found = visit(child)
+            if found is not None:
+                return found
+        return None
+
+    return visit(step)
 
 
 def _last_tuned_report_metadata(
@@ -1251,6 +1318,7 @@ def _append_evaluation_callback(
     head_variant: str = "mean_linear",
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
+    swa_window: int = 0,
 ) -> None:
     """Attach exactly one training-time metric callback for the protocol."""
 
@@ -1284,6 +1352,17 @@ def _append_evaluation_callback(
                     correction_gradient_scale=correction_gradient_scale,
                 )
             )
+        if swa_window:
+            if head_variant != "mean_rich_stats_residual":
+                raise ValueError("SWA screen requires the accepted mean_rich_stats_residual head")
+            trainer.callbacks.append(
+                hooks.SWAValidationCheckpoint(
+                    epoch_metrics_path,
+                    loaders["val"],
+                    seed=seed,
+                    window_size=swa_window,
+                )
+            )
         return
     if evaluation_protocol != "legacy":
         raise ValueError(f"unsupported evaluation protocol: {evaluation_protocol!r}")
@@ -1309,6 +1388,7 @@ def _patch_official_components(
     head_dropout: float = 0.0,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
+    swa_window: int = 0,
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
@@ -1344,6 +1424,10 @@ def _patch_official_components(
     ):
         if not math.isfinite(float(value)) or not 0.0 <= float(value) <= 2.0:
             raise ValueError(f"{name} must be finite and in [0, 2]")
+    if isinstance(swa_window, bool) or not isinstance(swa_window, int) or swa_window not in {0, 3, 5}:
+        raise ValueError("swa_window must be one of 0, 3, or 5")
+    if swa_window and (head_variant != "mean_rich_stats_residual" or evaluation_protocol != "strict"):
+        raise ValueError("SWA requires strict evaluation of mean_rich_stats_residual")
     resolved_seeds = hooks.validate_seeds(seeds)
     if head_variant == "mean_reliability_stable" and evaluation_protocol != "strict":
         raise ValueError("mean_reliability_stable requires strict evaluation")
@@ -1421,13 +1505,33 @@ def _patch_official_components(
     test_invocations: set[int] = set()
 
     def prepare_and_capture(data: Any) -> dict[str, Any]:
+        source_study = None
+        if data_mode in {"full", "selective_task"}:
+            study = getattr(data, "study", None)
+            source_study = _find_nested_study(
+                study,
+                shirazi2024hbn.Shirazi2024Hbn,
+            )
+            if source_study is None and isinstance(
+                study,
+                shirazi2024hbn.Shirazi2024Hbn,
+            ):
+                source_study = study
         loaders = original_prepare(data)
         captured_loaders[id(data)] = loaders
         if data_mode in {"full", "selective_task"}:
-            study = getattr(data, "study", None)
-            actual_timelines = getattr(study, "_timelines", None)
+            if source_study is not None:
+                actual_timelines = getattr(source_study, "_timelines", None)
+                if actual_timelines is None:
+                    all_timelines = getattr(source_study, "_all_timelines", None)
+                    actual_timelines = all_timelines() if callable(all_timelines) else None
+            else:
+                study = getattr(data, "study", None)
+                actual_timelines = getattr(study, "_timelines", None)
             if actual_timelines is None:
-                raise RuntimeError("full-data Data.prepare did not expose study._timelines")
+                raise RuntimeError(
+                    "full-data Data.prepare did not expose the source study timelines"
+                )
             normalized = hooks._canonical_full_data_timelines(
                 actual_timelines,
                 expected_task="task-RestingState" if data_mode == "selective_task" else None,
@@ -1571,6 +1675,7 @@ def _patch_official_components(
                 head_variant=head_variant,
                 mean_gradient_scale=mean_gradient_scale,
                 correction_gradient_scale=correction_gradient_scale,
+                swa_window=swa_window,
                 hooks=hooks,
             )
         return trainer
@@ -1865,6 +1970,7 @@ def run_official_subset(
     head_dropout: float = 0.0,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
+    swa_window: int = 0,
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
@@ -1893,6 +1999,7 @@ def run_official_subset(
             head_dropout=head_dropout,
             mean_gradient_scale=mean_gradient_scale,
             correction_gradient_scale=correction_gradient_scale,
+            swa_window=swa_window,
             seeds=seeds,
             evaluation_protocol=evaluation_protocol,
             strict_final_test=strict_final_test,

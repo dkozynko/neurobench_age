@@ -20,6 +20,7 @@ import logging
 import math
 import os
 import shlex
+import shutil
 import sys
 import traceback
 import uuid
@@ -65,6 +66,14 @@ class DataSource:
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _replace_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
+    """Write a small run artifact atomically."""
+
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 def _resolve_data_source(
@@ -398,6 +407,230 @@ class EpochValidationMetrics(LightningCallback):
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         with self.output_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def _select_swa_window(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    window_size: int,
+) -> list[dict[str, Any]]:
+    """Return the declared late validation window without test access."""
+
+    if isinstance(window_size, bool) or not isinstance(window_size, int) or window_size < 2:
+        raise ValueError("SWA window_size must be an integer >= 2")
+    if len(records) < window_size:
+        raise ValueError(
+            f"SWA requires at least {window_size} validation checkpoints; got {len(records)}"
+        )
+    selected = [dict(record) for record in records[-window_size:]]
+    epochs = [record.get("epoch") for record in selected]
+    if any(isinstance(epoch, bool) or not isinstance(epoch, int) for epoch in epochs):
+        raise ValueError("SWA validation records must contain integer epochs")
+    if epochs != list(range(epochs[0], epochs[0] + window_size)):
+        raise ValueError("SWA validation window must contain consecutive epochs")
+    return selected
+
+
+def _average_state_dicts(
+    state_dicts: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Average floating tensors and retain the final value of discrete buffers."""
+
+    if not state_dicts:
+        raise ValueError("SWA requires at least one state dict")
+    keys = tuple(state_dicts[0].keys())
+    if any(tuple(state.keys()) != keys for state in state_dicts[1:]):
+        raise ValueError("SWA state dicts must have identical keys")
+    averaged: dict[str, Any] = {}
+    import torch
+
+    for key in keys:
+        values = [state[key] for state in state_dicts]
+        first = values[0]
+        if not isinstance(first, torch.Tensor):
+            if any(value != first for value in values[1:]):
+                raise ValueError(f"SWA encountered a non-tensor state mismatch for {key!r}")
+            averaged[key] = first
+        elif torch.is_floating_point(first) or torch.is_complex(first):
+            averaged[key] = torch.stack([value.detach().cpu() for value in values]).mean(dim=0)
+        else:
+            averaged[key] = values[-1].detach().cpu().clone()
+    return averaged
+
+
+def _resolve_swa_raw_checkpoint(trainer: Any, output_path: Path) -> Path:
+    """Resolve NeuralBench's official best checkpoint, including nested runs."""
+
+    checkpoint_callback = getattr(trainer, "checkpoint_callback", None)
+    callback_path = getattr(checkpoint_callback, "best_model_path", None)
+    if callback_path:
+        candidate = Path(str(callback_path))
+        if candidate.name == "best.ckpt" and candidate.is_file():
+            return candidate
+
+    candidates = sorted(
+        {
+            path.resolve()
+            for path in output_path.parent.rglob("best.ckpt")
+            if path.is_file()
+        }
+    )
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        raise RuntimeError(
+            "SWA requires the official best checkpoint; NeuralBench did not expose one"
+        )
+    raise RuntimeError(
+        "SWA found multiple official best checkpoints and cannot choose one safely: "
+        + ", ".join(str(path) for path in candidates)
+    )
+
+
+class SWAValidationCheckpoint(LightningCallback):
+    """Average the final validation checkpoints using validation only."""
+
+    def __init__(
+        self,
+        output_path: Path,
+        validation_loader: Any,
+        *,
+        seed: int | None,
+        window_size: int = 3,
+    ):
+        self.output_path = output_path
+        self.validation_loader = validation_loader
+        self.seed = seed
+        self.window_size = window_size
+        self.training_started = False
+        self._records: list[dict[str, Any]] = []
+        self._snapshot_paths: list[Path] = []
+
+    def on_train_start(self, trainer: Any, pl_module: Any) -> None:
+        del trainer, pl_module
+        self.training_started = True
+
+    def on_validation_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+        if not self.training_started or getattr(trainer, "sanity_checking", False):
+            return
+        import torch
+
+        value = getattr(trainer, "callback_metrics", {}).get("val/pearsonr")
+        if value is None:
+            raise RuntimeError("SWA validation did not expose val/pearsonr")
+        pearson = float(torch.as_tensor(value).detach().cpu())
+        if not math.isfinite(pearson):
+            raise RuntimeError("SWA validation produced non-finite val/pearsonr")
+        epoch = int(trainer.current_epoch + 1)
+        snapshot_dir = self.output_path.parent / ".swa_snapshots"
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_path = snapshot_dir / f"epoch-{epoch:04d}.pt"
+        state = {
+            key: value.detach().cpu().clone()
+            if isinstance(value, torch.Tensor)
+            else value
+            for key, value in pl_module.state_dict().items()
+        }
+        torch.save({"epoch": epoch, "val/pearsonr": pearson, "state_dict": state}, snapshot_path)
+        self._snapshot_paths.append(snapshot_path)
+        self._records.append({"epoch": epoch, "val/pearsonr": pearson})
+        while len(self._snapshot_paths) > self.window_size:
+            self._snapshot_paths.pop(0).unlink(missing_ok=True)
+
+    def _evaluate_validation(self, trainer: Any, pl_module: Any) -> float:
+        import torch
+        from torchmetrics.regression import PearsonCorrCoef
+
+        metric = PearsonCorrCoef()
+        was_training = bool(pl_module.training)
+        pl_module.eval()
+        try:
+            with torch.inference_mode():
+                for batch in self.validation_loader:
+                    batch = trainer.strategy.batch_to_device(
+                        batch,
+                        pl_module.device,
+                        dataloader_idx=0,
+                    )
+                    prediction = pl_module.model_forward(batch)
+                    target = batch.data["target"]
+                    if pl_module.target_scaler is not None:
+                        target = pl_module.target_scaler.transform(target)
+                    if target.ndim == 3 and target.shape[1] == 1:
+                        target = target.squeeze(1)
+                    metric.update(prediction.detach().cpu(), target.detach().cpu())
+            score = float(metric.compute().detach().cpu())
+        finally:
+            if was_training:
+                pl_module.train()
+        if not math.isfinite(score):
+            raise RuntimeError("SWA validation produced a non-finite averaged Pearson")
+        return score
+
+    def on_train_end(self, trainer: Any, pl_module: Any) -> None:
+        if not self.training_started:
+            return
+        import torch
+
+        selected_records = _select_swa_window(self._records, window_size=self.window_size)
+        selected_epochs = [int(record["epoch"]) for record in selected_records]
+        snapshots = []
+        for path in self._snapshot_paths:
+            payload = torch.load(path, map_location="cpu", weights_only=False)
+            snapshots.append(payload)
+        snapshots_by_epoch = {int(payload["epoch"]): payload for payload in snapshots}
+        if set(selected_epochs) != set(snapshots_by_epoch):
+            raise RuntimeError("SWA snapshot window does not match validation window")
+        averaged_state = _average_state_dicts(
+            [snapshots_by_epoch[epoch]["state_dict"] for epoch in selected_epochs]
+        )
+        pl_module.load_state_dict(averaged_state, strict=True)
+        averaged_score = self._evaluate_validation(trainer, pl_module)
+        synthetic_epoch = max(int(record["epoch"]) for record in self._records) + 1
+        history_record = {
+            "seed": self.seed,
+            "epoch": synthetic_epoch,
+            "val/pearsonr": averaged_score,
+            "checkpoint_kind": "swa_weight_average",
+            "source_epochs": selected_epochs,
+        }
+        with self.output_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(history_record, sort_keys=True) + "\n")
+
+        raw_checkpoint = _resolve_swa_raw_checkpoint(trainer, self.output_path)
+        raw_copy = self.output_path.parent / "best_raw.ckpt"
+        if not raw_copy.exists():
+            shutil.copyfile(raw_checkpoint, raw_copy)
+        checkpoint = torch.load(raw_copy, map_location="cpu", weights_only=False)
+        if not isinstance(checkpoint, Mapping):
+            raise RuntimeError("SWA official checkpoint payload is not a mapping")
+        checkpoint = dict(checkpoint)
+        checkpoint["state_dict"] = averaged_state
+        checkpoint["epoch"] = synthetic_epoch - 1
+        checkpoint["swa_source_epochs"] = selected_epochs
+        temporary = raw_checkpoint.with_name(".best.ckpt.swa.tmp")
+        torch.save(checkpoint, temporary)
+        temporary.replace(raw_checkpoint)
+        metadata = {
+            "schema_version": 1,
+            "method": "weight_average",
+            "window_size": self.window_size,
+            "seed": self.seed,
+            "source_epochs": selected_epochs,
+            "source_validation_pearson": [record["val/pearsonr"] for record in selected_records],
+            "selected_epoch": synthetic_epoch,
+            "selected_val_pearsonr": averaged_score,
+            "checkpoint_path": str(raw_checkpoint.resolve()),
+            "raw_checkpoint_path": str(raw_copy.resolve()),
+            "test_data_accessed": False,
+        }
+        _replace_json_atomic(self.output_path.parent / "averaged_checkpoint_metadata.json", metadata)
+        for path in self._snapshot_paths:
+            path.unlink(missing_ok=True)
+        try:
+            (self.output_path.parent / ".swa_snapshots").rmdir()
+        except OSError:
+            pass
 
 
 class H7GradientRouteAudit(LightningCallback):
@@ -1616,6 +1849,7 @@ def run_official_subset(
     head_dropout: float = 0.0,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
+    swa_window: int = 0,
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
@@ -1636,6 +1870,7 @@ def run_official_subset(
         head_dropout=head_dropout,
         mean_gradient_scale=mean_gradient_scale,
         correction_gradient_scale=correction_gradient_scale,
+        swa_window=swa_window,
         seeds=seeds,
         evaluation_protocol=evaluation_protocol,
         strict_final_test=strict_final_test,
@@ -1662,6 +1897,7 @@ def _write_config(
     head_variant: str | None = None,
     mean_gradient_scale: float | None = None,
     correction_gradient_scale: float | None = None,
+    swa_window: int = 0,
 ) -> None:
     cache_namespace = {
         "full": "neuralbench_official_cache_full",
@@ -1688,6 +1924,7 @@ def _write_config(
                 "H7_HEAD_VARIANT": head_variant,
                 "H7_MEAN_GRADIENT_SCALE": mean_gradient_scale,
                 "H7_CORRECTION_GRADIENT_SCALE": correction_gradient_scale,
+                "SWA_WINDOW": swa_window,
             }
         )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1706,6 +1943,19 @@ def _resolved_head_metadata(run_dir: Path) -> dict[str, Any]:
         if isinstance(metadata, Mapping):
             return dict(metadata)
     return {}
+
+
+def _resolved_swa_metadata(run_dir: Path) -> dict[str, Any]:
+    """Read the checkpoint-averaging evidence written after training."""
+
+    path = run_dir / "averaged_checkpoint_metadata.json"
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1758,6 +2008,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=1.0,
         help="H7 correction-route encoder-gradient scale (finite value in [0, 2])",
     )
+    parser.add_argument(
+        "--swa-window",
+        type=int,
+        choices=(0, 3, 5),
+        default=0,
+        help="average the final 3 or 5 validation checkpoints (strict rich-stats screen only)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -1767,6 +2024,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except ValueError as error:
         parser.error(str(error))
+    if args.swa_window and (
+        args.evaluation_protocol != "strict" or args.head_variant != "mean_rich_stats_residual"
+    ):
+        parser.error("--swa-window requires strict mean_rich_stats_residual evaluation")
 
     if args.smoke_head is not None:
         print(json.dumps(run_official_stack_smoke(head_variant=args.smoke_head), indent=2))
@@ -1858,6 +2119,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "timeline_count": rows,
                 "mean_gradient_scale": args.mean_gradient_scale,
                 "correction_gradient_scale": args.correction_gradient_scale,
+                "swa_window": args.swa_window,
             }
             try:
                 if source.data_mode == "selective_task":
@@ -1879,6 +2141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     head_variant=args.head_variant,
                     mean_gradient_scale=args.mean_gradient_scale,
                     correction_gradient_scale=args.correction_gradient_scale,
+                    swa_window=args.swa_window,
                 )
                 results = run_official_subset(
                     manifest_path=source.manifest_path,
@@ -1889,6 +2152,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     head_variant=args.head_variant,
                     mean_gradient_scale=args.mean_gradient_scale,
                     correction_gradient_scale=args.correction_gradient_scale,
+                    swa_window=args.swa_window,
                     seeds=(seed,),
                     evaluation_protocol=args.evaluation_protocol,
                     strict_final_test=args.strict_final_test,
@@ -1978,6 +2242,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                             strict_final_test=args.strict_final_test,
                         )
                     )
+                    swa_metadata = _resolved_swa_metadata(run_dir)
+                    if swa_metadata:
+                        report["checkpoint_averaging"] = swa_metadata
                 else:
                     report.update(
                         {
