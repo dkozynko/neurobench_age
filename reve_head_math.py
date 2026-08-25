@@ -538,6 +538,66 @@ class MeanRichStatsResidualHead(nn.Module):
         return self.linear(mean) + self.correction_scale * self.correction(self.pool_tokens(tokens))
 
 
+class MeanRichStatsGradientRoutesHead(MeanRichStatsResidualHead):
+    """Rich-statistics head with independently scaled encoder gradients."""
+
+    def __init__(
+        self,
+        *,
+        embed_dim: int,
+        n_outputs: int,
+        mean_gradient_scale: float = 0.5,
+        correction_gradient_scale: float = 1.0,
+    ):
+        super().__init__(embed_dim=embed_dim, n_outputs=n_outputs)
+        for name, value in (
+            ("mean_gradient_scale", mean_gradient_scale),
+            ("correction_gradient_scale", correction_gradient_scale),
+        ):
+            if not math.isfinite(float(value)) or not 0.0 <= float(value) <= 2.0:
+                raise ValueError(f"{name} must be finite and in [0, 2]")
+        self.mean_gradient_scale = float(mean_gradient_scale)
+        self.correction_gradient_scale = float(correction_gradient_scale)
+
+    @staticmethod
+    def _scale_gradient(value: torch.Tensor, scale: float) -> torch.Tensor:
+        """Keep a tensor's value while multiplying its backward derivative."""
+
+        return value.detach() + float(scale) * (value - value.detach())
+
+    def metadata(self) -> dict[str, Any]:
+        """Return stable metadata for the strict route audit."""
+
+        return {
+            "matched_baseline": "mean_rich_stats_residual",
+            "gradient_target": "encoder_routes_only",
+            "mean_gradient_scale": self.mean_gradient_scale,
+            "correction_gradient_scale": self.correction_gradient_scale,
+            "correction_scale": self.correction_scale,
+            "parameter_count": sum(parameter.numel() for parameter in self.parameters()),
+        }
+
+    def forward(self, tokens: Any) -> torch.Tensor:
+        tokens = _validate_final_tokens(tokens, embed_dim=self.embed_dim)
+        mean = tokens.mean(dim=1)
+        statistics = self.pool_tokens(tokens)
+        mean_route = self._scale_gradient(mean, self.mean_gradient_scale)
+        correction_route = self._scale_gradient(statistics, self.correction_gradient_scale)
+        # Expose route tensors only for H7's optional training diagnostic.
+        # This does not change the forward value or parameterization.
+        if torch.is_grad_enabled():
+            for value in (mean, statistics, mean_route, correction_route):
+                if value.requires_grad:
+                    value.retain_grad()
+            self._last_gradient_route_tensors = {
+                "mean": mean,
+                "statistics": statistics,
+                "mean_route": mean_route,
+                "correction_route": correction_route,
+            }
+        return self.linear(mean_route) + self.correction_scale * self.correction(correction_route)
+
+
 class MeanAnchorEnsembleHead(nn.Module):
     """Blend mean-linear predictions with a rich-statistics expert.
 
@@ -584,6 +644,215 @@ class MeanAnchorEnsembleHead(nn.Module):
         expert_prediction = self.expert(tokens)
         gate = 2.0 * torch.sigmoid(self.gate_logit) - 1.0
         return baseline_prediction + gate * (expert_prediction - baseline_prediction)
+
+
+class MeanReliabilityShrinkageHead(nn.Module):
+    """Mean-linear probe with a train-only, input-conditioned shrinkage gate.
+
+    The correction is built from rich per-feature token statistics.  A small
+    gate reads only dispersion, token norm, and finite-token fraction, so each
+    recording can receive a different correction strength without using age or
+    split-specific information.
+    """
+
+    reliability_feature_names = (
+        "log1p_dispersion",
+        "log1p_mean_token_norm",
+        "active_token_fraction",
+    )
+
+    def __init__(self, *, embed_dim: int, n_outputs: int, alpha_max: float = 0.5):
+        super().__init__()
+        if embed_dim <= 0 or n_outputs <= 0:
+            raise ValueError("embed_dim and n_outputs must be positive")
+        if not 0.0 < alpha_max <= 1.0:
+            raise ValueError("alpha_max must be in (0, 1]")
+        self.embed_dim = embed_dim
+        self.n_outputs = n_outputs
+        self.alpha_max = float(alpha_max)
+        self.correction_scale = 1.0
+        # Construct the baseline first so its initialization is identical to
+        # MeanLinearCopyHead.  The correction starts at zero, preserving exact
+        # mean_linear predictions while the gate is already well-defined.
+        self.linear = nn.Linear(embed_dim, n_outputs)
+        self.correction = nn.Linear(4 * embed_dim, n_outputs, bias=False)
+        nn.init.zeros_(self.correction.weight)
+        self.gate = nn.Linear(len(self.reliability_feature_names), 1)
+        nn.init.zeros_(self.gate.weight)
+        nn.init.constant_(self.gate.bias, -4.0)
+        # A detached CPU snapshot lets the strict validation callback audit
+        # the gate without retaining a computation graph or touching test data.
+        self._last_gate_values: torch.Tensor | None = None
+
+    def _safe_tokens(self, tokens: Any) -> tuple[torch.Tensor, torch.Tensor]:
+        tokens = _validate_final_tokens(tokens, embed_dim=self.embed_dim)
+        safe = torch.nan_to_num(tokens, nan=0.0, posinf=0.0, neginf=0.0)
+        active = torch.isfinite(tokens).all(dim=-1) & (safe.norm(dim=-1) > 1e-6)
+        return safe, active
+
+    def reliability_features(self, tokens: Any) -> torch.Tensor:
+        """Return finite diagnostics available from the current recording only."""
+
+        safe, valid = self._safe_tokens(tokens)
+        mean = safe.mean(dim=1, keepdim=True)
+        dispersion = (safe - mean).abs().mean(dim=(1, 2))
+        mean_token_norm = safe.norm(dim=-1).mean(dim=1)
+        active_token_fraction = valid.to(dtype=safe.dtype).mean(dim=1)
+        return torch.stack(
+            (
+                torch.log1p(dispersion),
+                torch.log1p(mean_token_norm),
+                active_token_fraction,
+            ),
+            dim=-1,
+        )
+
+    def gate_values(self, tokens: Any) -> torch.Tensor:
+        """Return one bounded correction strength per recording."""
+
+        features = self.reliability_features(tokens)
+        values = self.alpha_max * torch.sigmoid(self.gate(features)).squeeze(-1)
+        self._last_gate_values = values.detach().cpu()
+        return values
+
+    def rich_statistics(self, tokens: Any) -> torch.Tensor:
+        """Return four per-feature statistics used by the correction branch."""
+
+        safe, _ = self._safe_tokens(tokens)
+        mean = safe.mean(dim=1, keepdim=True)
+        standard_deviation = safe.std(dim=1, unbiased=False)
+        value_range = safe.amax(dim=1) - safe.amin(dim=1)
+        mean_absolute_deviation = (safe - mean).abs().mean(dim=1)
+        mean_absolute_value = safe.abs().mean(dim=1)
+        return torch.cat(
+            (standard_deviation, value_range, mean_absolute_deviation, mean_absolute_value),
+            dim=-1,
+        )
+
+    def metadata(self) -> dict[str, Any]:
+        """Return stable, JSON-serializable architecture metadata."""
+
+        return {
+            "reliability_features": list(self.reliability_feature_names),
+            "alpha_max": self.alpha_max,
+            "gate_parameterization": "input_conditioned_sigmoid",
+            "gate_initialization": -4.0,
+            "correction_initialization": "zero",
+            "correction_statistics": ["std", "range", "mad", "mean_abs"],
+            "parameter_count": sum(parameter.numel() for parameter in self.parameters()),
+        }
+
+    def pool_tokens(self, tokens: Any) -> torch.Tensor:
+        """Return the mean representation used by the baseline branch."""
+
+        return _validate_final_tokens(tokens, embed_dim=self.embed_dim).mean(dim=1)
+
+    def forward(self, tokens: Any) -> torch.Tensor:
+        tokens = _validate_final_tokens(tokens, embed_dim=self.embed_dim)
+        mean = tokens.mean(dim=1)
+        correction = self.correction(self.rich_statistics(tokens))
+        alpha = self.gate_values(tokens).unsqueeze(-1)
+        return self.linear(mean) + self.correction_scale * alpha * correction
+
+
+def audit_reliability_gates(
+    gate_values: Any,
+    subject_ids: Any = None,
+    *,
+    alpha_max: float = 0.5,
+    saturation_epsilon: float = 1e-3,
+) -> dict[str, Any]:
+    """Summarize gate health and an optional training-only identity proxy.
+
+    ``subject_ids`` are deliberately optional: validation loaders may not
+    expose identifiers.  When present, singleton and missing groups are
+    excluded from the between-subject variance calculation; no labels are
+    consumed.  The result is JSON-serializable and safe for epoch artifacts.
+    """
+
+    if not 0.0 < float(alpha_max) <= 1.0:
+        raise ValueError("alpha_max must be in (0, 1]")
+    if float(saturation_epsilon) < 0.0:
+        raise ValueError("saturation_epsilon must be non-negative")
+    values = torch.as_tensor(gate_values, dtype=torch.float64).reshape(-1)
+    finite_mask = torch.isfinite(values)
+    nonfinite_count = int((~finite_mask).sum().item())
+    finite_values = values[finite_mask]
+    if finite_values.numel() == 0:
+        raise ValueError("gate_values must contain at least one finite value")
+    low_cutoff = float(saturation_epsilon)
+    high_cutoff = float(alpha_max) - low_cutoff
+    summary: dict[str, Any] = {
+        "sample_count": int(finite_values.numel()),
+        "raw_sample_count": int(values.numel()),
+        "nonfinite_count": nonfinite_count,
+        "audit_valid": nonfinite_count == 0,
+        "gate_mean": float(finite_values.mean().item()),
+        "gate_std": float(finite_values.std(unbiased=False).item()),
+        "low_saturation_fraction": float((finite_values <= low_cutoff).double().mean().item()),
+        "high_saturation_fraction": float((finite_values >= high_cutoff).double().mean().item()),
+        "combined_saturation_fraction": float(
+            ((finite_values <= low_cutoff) | (finite_values >= high_cutoff)).double().mean().item()
+        ),
+        "alpha_max": float(alpha_max),
+        "saturation_epsilon": float(saturation_epsilon),
+        "eta_squared": 0.0,
+        "eta_group_count": 0,
+        "eta_sample_count": 0,
+        "eta_valid": False,
+        "eta_reason": "subject_ids_unavailable",
+    }
+    if subject_ids is None:
+        return summary
+
+    if isinstance(subject_ids, torch.Tensor):
+        raw_ids = subject_ids.reshape(-1).tolist()
+    else:
+        raw_ids = list(subject_ids)
+    if len(raw_ids) != len(values):
+        raise ValueError("subject_ids must have the same number of entries as gate_values")
+
+    def _normalise_id(value: Any) -> Any:
+        if isinstance(value, torch.Tensor):
+            value = value.item()
+        if value is None:
+            return None
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    groups: dict[Any, list[float]] = {}
+    for value, raw_id in zip(values.tolist(), raw_ids):
+        if not math.isfinite(float(value)):
+            continue
+        key = _normalise_id(raw_id)
+        if key is None:
+            continue
+        groups.setdefault(key, []).append(float(value))
+    usable = [group for group in groups.values() if len(group) >= 2]
+    if len(usable) < 2 or sum(len(group) for group in usable) < 4:
+        summary["eta_reason"] = "insufficient_repeated_subject_groups"
+        return summary
+    pooled = [value for group in usable for value in group]
+    pooled_mean = sum(pooled) / len(pooled)
+    total_ss = sum((value - pooled_mean) ** 2 for value in pooled)
+    if total_ss <= 1e-12:
+        eta_squared = 0.0
+    else:
+        between_ss = sum(len(group) * ((sum(group) / len(group)) - pooled_mean) ** 2 for group in usable)
+        eta_squared = max(0.0, min(1.0, between_ss / total_ss))
+    summary.update(
+        {
+            "eta_squared": float(eta_squared),
+            "eta_group_count": len(usable),
+            "eta_sample_count": len(pooled),
+            "eta_valid": True,
+            "eta_reason": None,
+        }
+    )
+    return summary
 
 
 def _build_deterministic_statistic_projections(
@@ -1364,9 +1633,11 @@ class UpstreamReveHeadModel(nn.Module):
         dropout: float = DEFAULT_UPSTREAM_DROPOUT,
         query_token: torch.Tensor | None = None,
         query_initialization_metadata: Mapping[str, Any] | None = None,
+        mean_gradient_scale: float = 0.5,
+        correction_gradient_scale: float = 1.0,
     ):
         super().__init__()
-        if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_anchor_ensemble", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
+        if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
             validate_local_head_variant(variant)
         elif variant == "last_tuned":
             validate_last_tuned_protocol(variant)
@@ -1421,8 +1692,17 @@ class UpstreamReveHeadModel(nn.Module):
             self.head = GlobalStatsResidualHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "mean_rich_stats_residual":
             self.head = MeanRichStatsResidualHead(embed_dim=embed_dim, n_outputs=n_outputs)
+        elif variant == "mean_rich_stats_gradient_routes":
+            self.head = MeanRichStatsGradientRoutesHead(
+                embed_dim=embed_dim,
+                n_outputs=n_outputs,
+                mean_gradient_scale=mean_gradient_scale,
+                correction_gradient_scale=correction_gradient_scale,
+            )
         elif variant == "mean_anchor_ensemble":
             self.head = MeanAnchorEnsembleHead(embed_dim=embed_dim, n_outputs=n_outputs)
+        elif variant in {"mean_reliability_shrinkage", "mean_reliability_stable"}:
+            self.head = MeanReliabilityShrinkageHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "grouped_rich_stats_shrinkage":
             self.head = GroupedRichStatsShrinkageHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "grouped_stats_shared_gate":
@@ -1467,7 +1747,7 @@ class UpstreamReveHeadModel(nn.Module):
         self, eeg: torch.Tensor, channel_positions: torch.Tensor | None
     ) -> Any:
         del channel_positions
-        if self.variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_anchor_ensemble", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
+        if self.variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
             # The official NtReve wrapper keeps its resolved REVE positions
             # internally and does not receive per-batch channel positions.
             return self.encoder(eeg)
@@ -1500,10 +1780,12 @@ def make_upstream_reve_wrapper(
     *,
     variant: str,
     dropout: float = DEFAULT_UPSTREAM_DROPOUT,
+    mean_gradient_scale: float = 0.5,
+    correction_gradient_scale: float = 1.0,
 ) -> Any:
     """Create a concrete official NeuralBench wrapper config lazily."""
 
-    if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_anchor_ensemble", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
+    if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
         validate_local_head_variant(variant)
     elif variant == "last_tuned":
         validate_last_tuned_protocol(variant)
@@ -1517,6 +1799,8 @@ def make_upstream_reve_wrapper(
     class UpstreamReveHeadWrapper(DownstreamWrapper):
         head_variant: str = variant
         head_dropout: float = float(dropout)
+        head_mean_gradient_scale: float = float(mean_gradient_scale)
+        head_correction_gradient_scale: float = float(correction_gradient_scale)
 
         def build(
             self,
@@ -1552,7 +1836,7 @@ def make_upstream_reve_wrapper(
             if sample is None:
                 raise AdapterContractError("dummy batch contains no EEG tensor")
 
-            if self.head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_anchor_ensemble", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
+            if self.head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
                 # Match DownstreamWrapper.build: run the already-built model
                 # once before constructing its linear probe.
                 with torch.no_grad():
@@ -1567,6 +1851,8 @@ def make_upstream_reve_wrapper(
                 dropout=self.head_dropout,
                 query_token=query_token,
                 query_initialization_metadata=query_metadata,
+                mean_gradient_scale=self.head_mean_gradient_scale,
+                correction_gradient_scale=self.head_correction_gradient_scale,
             )
             with torch.no_grad():
                 head_model.eval()

@@ -49,11 +49,22 @@ except ImportError:
     import reve_head_math as _head_math
 
 
-def make_upstream_reve_wrapper(*, variant: str, dropout: float = DEFAULT_UPSTREAM_DROPOUT) -> Any:
+def make_upstream_reve_wrapper(
+    *,
+    variant: str,
+    dropout: float = DEFAULT_UPSTREAM_DROPOUT,
+    mean_gradient_scale: float = 0.5,
+    correction_gradient_scale: float = 1.0,
+) -> Any:
     """Build the adapter while preserving the historical monkeypatch seam."""
 
     _head_math.initialize_last_tuned_query = initialize_last_tuned_query
-    return _head_math.make_upstream_reve_wrapper(variant=variant, dropout=dropout)
+    return _head_math.make_upstream_reve_wrapper(
+        variant=variant,
+        dropout=dropout,
+        mean_gradient_scale=mean_gradient_scale,
+        correction_gradient_scale=correction_gradient_scale,
+    )
 
 
 __all__ = [
@@ -90,7 +101,10 @@ __all__ = [
     "MeanStatsResidualHead",
     "GlobalStatsResidualHead",
     "MeanRichStatsResidualHead",
+    "MeanRichStatsGradientRoutesHead",
     "MeanAnchorEnsembleHead",
+    "MeanReliabilityShrinkageHead",
+    "audit_reliability_gates",
     "GroupedRichStatsShrinkageHead",
     "GroupedStatsSharedGateHead",
     "TemporalPyramidStatsResidualHead",

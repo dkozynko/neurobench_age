@@ -400,6 +400,410 @@ class EpochValidationMetrics(LightningCallback):
             handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
+class H7GradientRouteAudit(LightningCallback):
+    """Record route gradients without changing the training computation."""
+
+    def __init__(
+        self,
+        output_path: Path,
+        *,
+        seed: int | None,
+        mean_gradient_scale: float,
+        correction_gradient_scale: float,
+        max_records_per_epoch: int = 4,
+    ):
+        self.output_path = output_path
+        self.seed = seed
+        self.mean_gradient_scale = float(mean_gradient_scale)
+        self.correction_gradient_scale = float(correction_gradient_scale)
+        self.max_records_per_epoch = int(max_records_per_epoch)
+        self.training_started = False
+        self._records: list[dict[str, Any]] = []
+        self._batch_count = 0
+
+    @staticmethod
+    def _find_head(pl_module: Any) -> Any:
+        for module in pl_module.modules():
+            if module.__class__.__name__ == "MeanRichStatsGradientRoutesHead":
+                return module
+        raise RuntimeError("H7 model did not expose MeanRichStatsGradientRoutesHead")
+
+    @staticmethod
+    def _norm(value: Any) -> float:
+        import torch
+
+        if value is None:
+            return 0.0
+        tensor = torch.as_tensor(value).detach()
+        if not torch.isfinite(tensor).all():
+            raise RuntimeError("H7 gradient audit saw a non-finite gradient")
+        return float(torch.linalg.vector_norm(tensor).cpu())
+
+    def on_train_start(self, trainer: Any, pl_module: Any) -> None:
+        del trainer, pl_module
+        self.training_started = True
+
+    def on_train_epoch_start(self, trainer: Any, pl_module: Any) -> None:
+        del trainer, pl_module
+        self._records.clear()
+        self._batch_count = 0
+
+    def on_after_backward(self, trainer: Any, pl_module: Any) -> None:
+        if not self.training_started or len(self._records) >= self.max_records_per_epoch:
+            return
+        head = self._find_head(pl_module)
+        route_tensors = getattr(head, "_last_gradient_route_tensors", None)
+        if not isinstance(route_tensors, Mapping):
+            raise RuntimeError("H7 head did not expose gradient route tensors")
+        mean_grad = self._norm(route_tensors["mean"].grad)
+        correction_grad = self._norm(route_tensors["statistics"].grad)
+        mean_route_grad = self._norm(route_tensors["mean_route"].grad)
+        correction_route_grad = self._norm(route_tensors["correction_route"].grad)
+        head_gradients = {
+            name: self._norm(parameter.grad)
+            for name, parameter in head.named_parameters()
+            if parameter.grad is not None
+        }
+        model = getattr(pl_module, "model", None)
+        encoder = getattr(model, "encoder", None)
+        encoder_norms = (
+            [self._norm(parameter.grad) for parameter in encoder.parameters() if parameter.grad is not None]
+            if encoder is not None
+            else []
+        )
+        self._records.append(
+            {
+                "epoch": int(getattr(trainer, "current_epoch", 0)) + 1,
+                "batch_idx": self._batch_count,
+                "mean_route_gradient_norm": mean_grad,
+                "correction_route_gradient_norm": correction_grad,
+                "mean_route_tensor_gradient_norm": mean_route_grad,
+                "correction_route_tensor_gradient_norm": correction_route_grad,
+                "head_gradient_norms": head_gradients,
+                "encoder_gradient_norm": math.sqrt(sum(value * value for value in encoder_norms)),
+                "finite": True,
+            }
+        )
+        self._batch_count += 1
+
+    def on_train_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+        del pl_module
+        if not self.training_started or getattr(trainer, "sanity_checking", False):
+            return
+        history: list[dict[str, Any]] = []
+        if self.output_path.is_file():
+            try:
+                loaded = json.loads(self.output_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, Mapping) and isinstance(loaded.get("records"), list):
+                    history = [dict(item) for item in loaded["records"] if isinstance(item, Mapping)]
+            except (OSError, json.JSONDecodeError):
+                history = []
+        history.extend(self._records)
+        payload = {
+            "schema_version": 1,
+            "measurement_point": "on_after_backward_before_optimizer_step",
+            "batch_provenance": "official_training_batch_only",
+            "seed": self.seed,
+            "mean_gradient_scale": self.mean_gradient_scale,
+            "correction_gradient_scale": self.correction_gradient_scale,
+            "expected_route_gradient_ratios": {
+                "mean": self.mean_gradient_scale,
+                "correction": self.correction_gradient_scale,
+            },
+            "records": history,
+            "finite": all(bool(item.get("finite", False)) for item in history),
+        }
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.output_path.with_suffix(self.output_path.suffix + ".tmp")
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        temporary.replace(self.output_path)
+
+
+class ReliabilityGateAudit(LightningCallback):
+    """Record H2 gate health from training and validation forwards only."""
+
+    def __init__(self, output_path: Path, seed: int | None = None, *, alpha_max: float = 0.5):
+        self.output_path = output_path
+        self.seed = seed
+        self.alpha_max = float(alpha_max)
+        self.training_started = False
+        self._training_values: list[float] = []
+        self._training_subject_ids: list[Any] = []
+        self._audit_batches: list[Any] = []
+        self._validation_values: list[float] = []
+
+    def on_train_start(self, trainer: Any, pl_module: Any) -> None:
+        self.training_started = True
+
+    def on_train_epoch_start(self, trainer: Any, pl_module: Any) -> None:
+        self._training_values.clear()
+        self._training_subject_ids.clear()
+        self._audit_batches.clear()
+        self._validation_values.clear()
+
+    @staticmethod
+    def _gate_snapshot(pl_module: Any) -> Any:
+        for module in pl_module.modules():
+            values = getattr(module, "_last_gate_values", None)
+            if values is not None:
+                return values
+        return None
+
+    @staticmethod
+    def _batch_subject_ids(batch: Any, count: int) -> list[Any]:
+        data = getattr(batch, "data", batch)
+        if not isinstance(data, Mapping):
+            return [None] * count
+        values = next(
+            (data.get(key) for key in ("subject_ids", "subject_id", "subject", "participant_id") if key in data),
+            None,
+        )
+        if values is None:
+            return [None] * count
+        if hasattr(values, "detach"):
+            values = values.detach().cpu().reshape(-1).tolist()
+        else:
+            values = list(values)
+        if len(values) != count:
+            return [None] * count
+        return values
+
+    def on_train_batch_end(
+        self,
+        trainer: Any,
+        pl_module: Any,
+        outputs: Any,
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
+        del outputs, batch_idx
+        if not self.training_started or getattr(trainer, "sanity_checking", False):
+            return
+        values = self._gate_snapshot(pl_module)
+        if values is None:
+            return
+        values = values.detach().cpu().reshape(-1)
+        self._training_values.extend(float(value) for value in values.tolist())
+        self._training_subject_ids.extend(self._batch_subject_ids(batch, len(values)))
+        if len(self._audit_batches) < 8:
+            data = getattr(batch, "data", None)
+            if isinstance(data, Mapping):
+                import copy
+                from types import SimpleNamespace
+
+                snapshot = {}
+                for key, value in data.items():
+                    snapshot[key] = value.detach().cpu().clone() if hasattr(value, "detach") else copy.deepcopy(value)
+                self._audit_batches.append(SimpleNamespace(data=snapshot))
+
+    def on_validation_batch_end(
+        self,
+        trainer: Any,
+        pl_module: Any,
+        outputs: Any,
+        batch: Any,
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> None:
+        del outputs, batch, batch_idx, dataloader_idx
+        if not self.training_started or getattr(trainer, "sanity_checking", False):
+            return
+        values = self._gate_snapshot(pl_module)
+        if values is not None:
+            self._validation_values.extend(float(value) for value in values.detach().cpu().reshape(-1).tolist())
+
+    def on_validation_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+        if not self.training_started or getattr(trainer, "sanity_checking", False):
+            return
+        if not self._validation_values:
+            raise RuntimeError("reliability gate audit saw no validation gate values")
+        from reve_upstream_heads import audit_reliability_gates
+
+        validation = audit_reliability_gates(self._validation_values, alpha_max=self.alpha_max)
+        if validation["nonfinite_count"]:
+            raise RuntimeError("reliability gate audit saw non-finite validation gate values")
+        # Re-evaluate a bounded, training-only cache after validation while the
+        # current epoch's parameters are fixed.  This gives the identity proxy
+        # a stable model state without starting another multi-worker loader.
+        fixed_training_values: list[float] = []
+        fixed_training_subject_ids: list[Any] = []
+        if self._audit_batches and hasattr(pl_module, "model_forward"):
+            import torch
+
+            was_training = bool(pl_module.training)
+            pl_module.eval()
+            try:
+                with torch.inference_mode():
+                    for batch in self._audit_batches:
+                        from types import SimpleNamespace
+
+                        batch_data = getattr(batch, "data", batch)
+                        batch = SimpleNamespace(
+                            data={
+                                key: value.to(pl_module.device)
+                                if hasattr(value, "to")
+                                else value
+                                for key, value in batch_data.items()
+                            }
+                        )
+                        pl_module.model_forward(batch)
+                        values = self._gate_snapshot(pl_module)
+                        if values is None:
+                            continue
+                        values = values.detach().cpu().reshape(-1)
+                        fixed_training_values.extend(float(value) for value in values.tolist())
+                        fixed_training_subject_ids.extend(
+                            self._batch_subject_ids(batch, len(values))
+                        )
+            finally:
+                if was_training:
+                    pl_module.train()
+        if fixed_training_values:
+            training = audit_reliability_gates(
+                fixed_training_values,
+                fixed_training_subject_ids,
+                alpha_max=self.alpha_max,
+            )
+        else:
+            training = {
+                "sample_count": 0,
+                "raw_sample_count": 0,
+                "nonfinite_count": 0,
+                "audit_valid": False,
+                "gate_mean": None,
+                "gate_std": None,
+                "low_saturation_fraction": None,
+                "high_saturation_fraction": None,
+                "combined_saturation_fraction": None,
+                "alpha_max": self.alpha_max,
+                "saturation_epsilon": 1e-3,
+                "eta_squared": 0.0,
+                "eta_group_count": 0,
+                "eta_sample_count": 0,
+                "eta_valid": False,
+                "eta_reason": "fixed_state_replay_unavailable",
+            }
+        record = {
+            "seed": self.seed,
+            "epoch": int(trainer.current_epoch + 1),
+            "validation": validation,
+            "training": training,
+            "validation_gate_mean": validation["gate_mean"],
+            "validation_gate_std": validation["gate_std"],
+            "validation_low_saturation_fraction": validation["low_saturation_fraction"],
+            "validation_high_saturation_fraction": validation["high_saturation_fraction"],
+            "validation_combined_saturation_fraction": validation["combined_saturation_fraction"],
+            "training_eta_squared": training["eta_squared"] if training is not None else None,
+            "training_eta_valid": training["eta_valid"] if training is not None else False,
+            "training_fixed_state_replay": bool(fixed_training_values),
+        }
+        early_stop_reasons = []
+        if validation["nonfinite_count"]:
+            early_stop_reasons.append("nonfinite_validation_gate")
+        if validation["gate_std"] < 1e-3:
+            early_stop_reasons.append("validation_gate_std_below_floor")
+        if validation["combined_saturation_fraction"] > 0.95:
+            early_stop_reasons.append("validation_gate_saturation_above_threshold")
+        if training["eta_valid"] and training["eta_squared"] > 0.50:
+            early_stop_reasons.append("training_identity_proxy_above_threshold")
+        record["early_stop_reasons"] = early_stop_reasons
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.output_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+        if early_stop_reasons:
+            trainer.should_stop = True
+
+
+class H6GateConsistencyMetrics(LightningCallback):
+    """Persist H6's training-only gate consistency without new forwards."""
+
+    def __init__(
+        self,
+        output_path: Path,
+        seed: int | None = None,
+        *,
+        lambda_gate: float,
+        noise_scale: float,
+    ):
+        self.output_path = output_path
+        self.seed = seed
+        self.lambda_gate = float(lambda_gate)
+        self.noise_scale = float(noise_scale)
+        self.training_started = False
+        self._values: list[float] = []
+        self._sample_count = 0
+        self._batch_count = 0
+
+    def on_train_start(self, trainer: Any, pl_module: Any) -> None:
+        del trainer, pl_module
+        self.training_started = True
+
+    def on_train_epoch_start(self, trainer: Any, pl_module: Any) -> None:
+        del trainer, pl_module
+        self._values.clear()
+        self._sample_count = 0
+        self._batch_count = 0
+
+    def on_train_batch_end(
+        self,
+        trainer: Any,
+        pl_module: Any,
+        outputs: Any,
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
+        del trainer, outputs, batch_idx
+        if not self.training_started:
+            return
+        value = getattr(pl_module, "_h6_last_gate_consistency", None)
+        if value is None:
+            return
+        import torch
+
+        value = float(torch.as_tensor(value).detach().cpu())
+        if not math.isfinite(value):
+            raise RuntimeError("H6 gate consistency metric is non-finite")
+        self._values.append(value)
+        data = getattr(batch, "data", batch)
+        if isinstance(data, Mapping) and hasattr(data.get("target"), "shape"):
+            self._sample_count += int(data["target"].shape[0])
+        else:
+            self._sample_count += 1
+        self._batch_count += 1
+
+    def on_validation_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+        del pl_module
+        if not self.training_started or getattr(trainer, "sanity_checking", False):
+            return
+        if not self._values:
+            raise RuntimeError("H6 produced no training gate consistency values")
+        record = {
+            "seed": self.seed,
+            "epoch": int(trainer.current_epoch + 1),
+            "lambda_gate": self.lambda_gate,
+            "noise_scale": self.noise_scale,
+            "augmentation": "identity_plus_bounded_gaussian_noise",
+            "batch_count": self._batch_count,
+            "sample_count": self._sample_count,
+            "gate_consistency": float(sum(self._values) / len(self._values)),
+            "weighted_gate_consistency": float(
+                self.lambda_gate * sum(self._values) / len(self._values)
+            ),
+            "finite": True,
+        }
+        history: list[dict[str, Any]] = []
+        if self.output_path.is_file():
+            loaded = json.loads(self.output_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, Mapping) and isinstance(loaded.get("history"), list):
+                history = [dict(item) for item in loaded["history"] if isinstance(item, Mapping)]
+        history.append(record)
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.output_path.write_text(
+            json.dumps({"history": history}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+
 class EpochTestPearson(LightningCallback):
     """Lightning callback that reports test Pearson after each train epoch."""
 
@@ -539,6 +943,7 @@ def collect_run_artifacts(output_dir: Path) -> list[dict[str, Any]]:
     """Describe resolved configs, checkpoints, and raw test predictions."""
 
     records: list[dict[str, Any]] = []
+    gate_audit = output_dir / "gate_validation_audit.jsonl"
     for config_path in sorted(output_dir.rglob("config.yaml")):
         run_dir = config_path.parent
         checkpoints = sorted(run_dir.glob("*.ckpt"))
@@ -565,6 +970,14 @@ def collect_run_artifacts(output_dir: Path) -> list[dict[str, Any]]:
                     else None
                 ),
                 "raw_test_predictions": prediction_files,
+                "reliability_gate_audit": (
+                    {
+                        "path": str(gate_audit),
+                        "sha256": _sha256_file(gate_audit),
+                    }
+                    if gate_audit.is_file()
+                    else None
+                ),
                 "run_metadata": str(run_dir / "run_metadata.json")
                 if (run_dir / "run_metadata.json").is_file()
                 else None,
@@ -966,7 +1379,7 @@ def run_official_stack_smoke(
 
     if head_variant == "last_tuned":
         reve.validate_last_tuned_protocol(head_variant)
-    elif head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_anchor_ensemble", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
+    elif head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
         reve.validate_local_head_variant(head_variant)
     else:
         reve.validate_upstream_head_variant(head_variant)
@@ -1084,13 +1497,13 @@ def run_official_stack_smoke(
                 "prediction_finite": bool(torch.isfinite(prediction).all().item()),
             }
         )
-    elif head_variant == "mean_rich_stats_residual":
+    elif head_variant in {"mean_rich_stats_residual", "mean_rich_stats_gradient_routes"}:
         output.update(
             {
                 "prediction_finite": bool(torch.isfinite(prediction).all().item()),
             }
         )
-    elif head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "mean_anchor_ensemble"}:
+    elif head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable"}:
         output.update(
             {
                 "prediction_finite": bool(torch.isfinite(prediction).all().item()),
@@ -1201,6 +1614,8 @@ def run_official_subset(
     config_path: Path,
     head_variant: str = "mean_linear",
     head_dropout: float = 0.0,
+    mean_gradient_scale: float = 0.5,
+    correction_gradient_scale: float = 1.0,
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
@@ -1219,6 +1634,8 @@ def run_official_subset(
         config_path=config_path,
         head_variant=head_variant,
         head_dropout=head_dropout,
+        mean_gradient_scale=mean_gradient_scale,
+        correction_gradient_scale=correction_gradient_scale,
         seeds=seeds,
         evaluation_protocol=evaluation_protocol,
         strict_final_test=strict_final_test,
@@ -1242,18 +1659,20 @@ def _write_config(
     data_root: Path,
     output_dir: Path,
     data_mode: str = "manifest",
+    head_variant: str | None = None,
+    mean_gradient_scale: float | None = None,
+    correction_gradient_scale: float | None = None,
 ) -> None:
+    cache_namespace = {
+        "full": "neuralbench_official_cache_full",
+        "selective_task": "neuralbench_official_cache_selective_task",
+    }.get(data_mode, "neuralbench_official_cache_500")
     config = {
         "USER": "root",
         "ENTITY_NAME": "root",
         "PROJECT_NAME": "neurobench_reve_age_official",
         "CACHE_DIR": str(
-            data_root
-            / (
-                "neuralbench_official_cache_full"
-                if data_mode == "full"
-                else "neuralbench_official_cache_500"
-            )
+            data_root / cache_namespace
         ),
         "SAVE_DIR": str(output_dir),
         "DATA_DIR": str(data_root),
@@ -1263,6 +1682,14 @@ def _write_config(
         "N_CPUS": 2,
         "CLUSTER": None,
     }
+    if head_variant is not None:
+        config.update(
+            {
+                "H7_HEAD_VARIANT": head_variant,
+                "H7_MEAN_GRADIENT_SCALE": mean_gradient_scale,
+                "H7_CORRECTION_GRADIENT_SCALE": correction_gradient_scale,
+            }
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
@@ -1299,12 +1726,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument(
         "--smoke-head",
-        choices=("mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_anchor_ensemble", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "last_avg", "last", "all", "last_tuned"),
         help="run a data-free smoke test using the installed official stack",
     )
     parser.add_argument(
         "--head-variant",
-        choices=("mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_anchor_ensemble", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "last_avg", "last", "all", "last_tuned"),
         default="mean_linear",
     )
     parser.add_argument(
@@ -1319,6 +1746,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="consume the single predeclared strict test pass after validation selection",
     )
     parser.add_argument("--seeds", type=int, nargs="+", default=[33])
+    parser.add_argument(
+        "--mean-gradient-scale",
+        type=float,
+        default=0.5,
+        help="H7 mean-route encoder-gradient scale (finite value in [0, 2])",
+    )
+    parser.add_argument(
+        "--correction-gradient-scale",
+        type=float,
+        default=1.0,
+        help="H7 correction-route encoder-gradient scale (finite value in [0, 2])",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -1345,6 +1784,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("exactly one of --manifest, --full-data, or --selective-task is required")
 
     resolved_seeds = validate_seeds(args.seeds)
+    for name, value in (
+        ("--mean-gradient-scale", args.mean_gradient_scale),
+        ("--correction-gradient-scale", args.correction_gradient_scale),
+    ):
+        if not math.isfinite(float(value)) or not 0.0 <= float(value) <= 2.0:
+            parser.error(f"{name} must be finite and in [0, 2]")
     try:
         source = _resolve_data_source(
             manifest_path=args.manifest,
@@ -1367,6 +1812,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         metadata = _head_metadata(
             reve,
             head_variant=args.head_variant,
+            mean_gradient_scale=args.mean_gradient_scale,
+            correction_gradient_scale=args.correction_gradient_scale,
             data_mode=source.data_mode,
             manifest_path=source.manifest_path,
             manifest_digest=source.manifest_sha256,
@@ -1409,6 +1856,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "acquisition_provenance_path": None,
                 "acquisition_provenance_sha256": None,
                 "timeline_count": rows,
+                "mean_gradient_scale": args.mean_gradient_scale,
+                "correction_gradient_scale": args.correction_gradient_scale,
             }
             try:
                 if source.data_mode == "selective_task":
@@ -1427,6 +1876,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     data_root=source.data_root,
                     output_dir=run_dir,
                     data_mode=source.data_mode,
+                    head_variant=args.head_variant,
+                    mean_gradient_scale=args.mean_gradient_scale,
+                    correction_gradient_scale=args.correction_gradient_scale,
                 )
                 results = run_official_subset(
                     manifest_path=source.manifest_path,
@@ -1435,6 +1887,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     selection_path=selection_path,
                     config_path=config_path,
                     head_variant=args.head_variant,
+                    mean_gradient_scale=args.mean_gradient_scale,
+                    correction_gradient_scale=args.correction_gradient_scale,
                     seeds=(seed,),
                     evaluation_protocol=args.evaluation_protocol,
                     strict_final_test=args.strict_final_test,

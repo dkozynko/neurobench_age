@@ -154,7 +154,8 @@ python selective_hbn_download.py \
 ```
 
 The root provenance reports `complete=true` only after all R1–R11 releases
-pass the file and `.set`/`.fdt` companion audit. A one-release or otherwise
+pass the file audit: each recording must be either an external `.set`/`.fdt`
+pair or a valid embedded-data `.set`. A one-release or otherwise
 partial acquisition is useful for validating the downloader but is rejected
 by the benchmark runner. Existing downloaded files are preserved on provider,
 audit, or serialization failures; the root JSON/sidecar is a mutable current

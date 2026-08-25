@@ -16,6 +16,172 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 _CONFIGURE_OPTIMIZERS_ABSENT = object()
+_TRAINING_STEP_ABSENT = object()
+H6_GATE_STABILITY_LAMBDA = 0.001
+H6_NOISE_SCALE = 0.01
+
+
+def _h6_noise_seed(*, run_seed: int, epoch: int, batch_idx: int) -> int:
+    """Derive a stable, private seed for one training-only paired view."""
+
+    return int(run_seed) + 1009 * int(epoch) + int(batch_idx)
+
+
+def make_h6_training_view(
+    neuro: Any,
+    *,
+    run_seed: int,
+    epoch: int,
+    batch_idx: int,
+    noise_scale: float = H6_NOISE_SCALE,
+) -> Any:
+    """Create the bounded-noise H6 view without touching global RNG state."""
+
+    import torch
+
+    if not isinstance(neuro, torch.Tensor) or neuro.ndim < 2:
+        raise TypeError("H6 expects a tensor with batch and time dimensions")
+    if not math.isfinite(float(noise_scale)) or noise_scale < 0.0:
+        raise ValueError("H6 noise_scale must be finite and non-negative")
+    generator = torch.Generator(device=neuro.device)
+    generator.manual_seed(_h6_noise_seed(run_seed=run_seed, epoch=epoch, batch_idx=batch_idx))
+    noise = torch.randn(
+        neuro.shape,
+        generator=generator,
+        device=neuro.device,
+        dtype=neuro.dtype,
+    ).clamp(-3.0, 3.0)
+    scale = torch.nan_to_num(
+        neuro.detach().std(dim=-1, keepdim=True, unbiased=False),
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    ).clamp_min(1e-6)
+    return neuro + float(noise_scale) * scale * noise
+
+
+def h6_gate_consistency_loss(
+    alpha_one: Any,
+    alpha_two: Any,
+    *,
+    lambda_gate: float = H6_GATE_STABILITY_LAMBDA,
+) -> Any:
+    """Return the training-only weighted squared gate disagreement."""
+
+    import torch
+
+    if not isinstance(alpha_one, torch.Tensor) or not isinstance(alpha_two, torch.Tensor):
+        raise TypeError("H6 gate values must be tensors")
+    if alpha_one.shape != alpha_two.shape:
+        raise ValueError("H6 gate views must have identical shapes")
+    if not math.isfinite(float(lambda_gate)) or lambda_gate < 0.0:
+        raise ValueError("H6 lambda_gate must be finite and non-negative")
+    if not torch.isfinite(alpha_one).all() or not torch.isfinite(alpha_two).all():
+        raise RuntimeError("H6 gate consistency received non-finite values")
+    return float(lambda_gate) * (alpha_one - alpha_two).pow(2).mean()
+
+
+def _find_reliability_head(brain_module: Any) -> Any:
+    """Find the shared H2/H6 head inside a prepared BrainModule."""
+
+    for module in brain_module.modules():
+        if module.__class__.__name__ == "MeanReliabilityShrinkageHead":
+            return module
+    raise RuntimeError("H6 model did not expose MeanReliabilityShrinkageHead")
+
+
+def _patch_h6_training_step(
+    brain_module: Any,
+    *,
+    run_seed: int,
+    patched_modules: list[dict[str, Any]],
+) -> None:
+    """Add H6's paired-view loss to one BrainModule instance."""
+
+    if brain_module is None or not isinstance(patched_modules, list):
+        raise TypeError("H6 requires a BrainModule and a patch record list")
+    if any(record["module"] is brain_module for record in patched_modules):
+        raise RuntimeError("H6 BrainModule was already patched in this run")
+    attributes = getattr(brain_module, "__dict__", None)
+    if not isinstance(attributes, dict):
+        raise TypeError("H6 BrainModule must expose instance attributes")
+    previous = attributes.get("training_step", _TRAINING_STEP_ABSENT)
+    original = brain_module.training_step
+    record = {"module": brain_module, "previous": previous}
+    patched_modules.append(record)
+
+    def training_step(module: Any, batch: Any, batch_idx: int) -> Any:
+        import torch
+        from types import SimpleNamespace
+
+        base_loss = original(batch, batch_idx)
+        head = _find_reliability_head(module)
+        alpha_one = getattr(head, "_last_gate_values", None)
+        if not isinstance(alpha_one, torch.Tensor):
+            raise RuntimeError("H6 original training view did not produce gate values")
+        alpha_one_for_audit = alpha_one.detach().clone()
+        data = getattr(batch, "data", None)
+        if not isinstance(data, Mapping) or "neuro" not in data:
+            raise RuntimeError("H6 training batch does not expose data['neuro']")
+        paired_data = dict(data)
+        paired_data["neuro"] = make_h6_training_view(
+            data["neuro"],
+            run_seed=run_seed,
+            epoch=int(getattr(module, "current_epoch", 0)) + 1,
+            batch_idx=batch_idx,
+        )
+        module.model_forward(SimpleNamespace(data=paired_data))
+        alpha_two = getattr(head, "_last_gate_values", None)
+        if not isinstance(alpha_two, torch.Tensor):
+            raise RuntimeError("H6 paired training view did not produce gate values")
+        consistency_loss = h6_gate_consistency_loss(alpha_one, alpha_two)
+        raw_consistency = (alpha_one - alpha_two).pow(2).mean()
+        if not torch.isfinite(raw_consistency):
+            raise RuntimeError("H6 gate consistency is non-finite")
+        module._h6_last_gate_consistency = raw_consistency.detach()
+        module.log(
+            "train/gate_consistency",
+            raw_consistency,
+            on_step=False,
+            on_epoch=True,
+            logger=True,
+            prog_bar=False,
+            batch_size=alpha_one.shape[0],
+            sync_dist=getattr(module.trainer, "world_size", 1) > 1,
+        )
+        # ReliabilityGateAudit must observe the unperturbed first view.
+        head._last_gate_values = alpha_one_for_audit
+        return base_loss + consistency_loss
+
+    try:
+        brain_module.training_step = types.MethodType(training_step, brain_module)
+    except BaseException:
+        patched_modules.pop()
+        raise
+
+
+def _restore_h6_training_steps(patched_modules: list[dict[str, Any]]) -> None:
+    """Restore all instance-level H6 training-step patches."""
+
+    errors: list[BaseException] = []
+    while patched_modules:
+        record = patched_modules.pop()
+        module = record["module"]
+        previous = record["previous"]
+        try:
+            if previous is _TRAINING_STEP_ABSENT:
+                attributes = getattr(module, "__dict__", {})
+                if "training_step" in attributes:
+                    delattr(module, "training_step")
+            else:
+                module.training_step = previous
+        except BaseException as error:
+            errors.append(error)
+    if errors:
+        error = RuntimeError("failed to restore one or more H6 training-step patches")
+        for restoration_error in errors:
+            error.add_note(repr(restoration_error))
+        raise error
 
 
 def _last_tuned_configure_optimizers(brain_module: Any, *, hooks: Any) -> dict[str, Any]:
@@ -84,6 +250,39 @@ def _restore_last_tuned_configure_optimizers(
         for restoration_error in restoration_errors:
             error.add_note(repr(restoration_error))
         raise error
+
+
+def _install_selective_eeglab_mat_reader() -> dict[str, Any]:
+    """Use SciPy's cell simplifier for task-only EEGLAB acquisition.
+
+    Some HBN ``.set`` files contain nested MATLAB cell structures that MNE's
+    default recursive converter compares as arrays, which raises an ambiguous
+    truth-value error.  ``simplify_cells=True`` produces the same logical
+    MATLAB content in a form MNE can consume.  Keep this process-local and
+    scoped to one selective benchmark run.
+    """
+
+    import scipy.io
+    import mne.io.eeglab.eeglab as eeglab
+
+    original_readmat = eeglab._readmat
+
+    def readmat(
+        fname: Any,
+        uint16_codec: str | None = None,
+        *,
+        preload: bool = False,
+    ) -> Any:
+        return scipy.io.loadmat(
+            fname,
+            struct_as_record=False,
+            squeeze_me=True,
+            simplify_cells=True,
+            uint16_codec=uint16_codec,
+        )
+
+    eeglab._readmat = readmat
+    return {"module": eeglab, "readmat": original_readmat}
 
 
 def _last_tuned_report_metadata(
@@ -559,6 +758,8 @@ def _head_metadata(
     reve: Any,
     *,
     head_variant: str,
+    mean_gradient_scale: float = 0.5,
+    correction_gradient_scale: float = 1.0,
     data_mode: str = "manifest",
     manifest_path: Path | None = None,
     manifest_digest: str | None = None,
@@ -570,6 +771,13 @@ def _head_metadata(
     launch_command: str,
 ) -> dict[str, Any]:
     """Build stable run metadata shared by every head variant."""
+
+    for name, value in (
+        ("mean_gradient_scale", mean_gradient_scale),
+        ("correction_gradient_scale", correction_gradient_scale),
+    ):
+        if not math.isfinite(float(value)) or not 0.0 <= float(value) <= 2.0:
+            raise ValueError(f"{name} must be finite and in [0, 2]")
 
     query_initialization = {
         "mean_linear": "neuralbench_default",
@@ -590,7 +798,10 @@ def _head_metadata(
         "mean_attention_gated": "train_dummy_final_token_mean",
         "global_stats_residual": "not_applicable",
         "mean_rich_stats_residual": "not_applicable",
+        "mean_rich_stats_gradient_routes": "not_applicable",
         "mean_anchor_ensemble": "not_applicable",
+        "mean_reliability_shrinkage": "not_applicable",
+        "mean_reliability_stable": "not_applicable",
         "grouped_rich_stats_shrinkage": "not_applicable",
         "grouped_stats_shared_gate": "not_applicable",
         "temporal_pyramid_stats": "not_applicable",
@@ -601,7 +812,7 @@ def _head_metadata(
         "all": "upstream_random",
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
-    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_anchor_ensemble", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}
+    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}
     if data_mode not in {"manifest", "full", "selective_task"}:
         raise ValueError(f"unsupported data mode: {data_mode!r}")
     if data_mode == "manifest" and manifest_path is not None and provenance_path is None:
@@ -644,8 +855,14 @@ def _head_metadata(
             if head_variant == "global_stats_residual"
             else "local_mean_rich_stats_residual"
             if head_variant == "mean_rich_stats_residual"
+            else "local_mean_rich_stats_gradient_routes"
+            if head_variant == "mean_rich_stats_gradient_routes"
             else "local_mean_anchor_ensemble"
             if head_variant == "mean_anchor_ensemble"
+            else "local_mean_reliability_stable"
+            if head_variant == "mean_reliability_stable"
+            else "local_mean_reliability_shrinkage"
+            if head_variant == "mean_reliability_shrinkage"
             else "local_grouped_rich_stats_shrinkage"
             if head_variant == "grouped_rich_stats_shrinkage"
             else "local_grouped_stats_shared_gate"
@@ -873,6 +1090,42 @@ def _head_metadata(
                 "normalization": "none",
             }
         )
+    if head_variant in {"mean_reliability_shrinkage", "mean_reliability_stable"}:
+        metadata.update(
+            {
+                "head_architecture": (
+                    "mean_linear_input_conditioned_reliability_shrinkage"
+                    if head_variant == "mean_reliability_shrinkage"
+                    else "mean_linear_input_conditioned_reliability_shrinkage_with_gate_stability_regularizer"
+                ),
+                "query_initialization": "not_applicable",
+                "reliability_features": [
+                    "log1p_dispersion",
+                    "log1p_mean_token_norm",
+                    "active_token_fraction",
+                ],
+                "alpha_max": 0.5,
+                "gate_parameterization": "input_conditioned_sigmoid",
+                "gate_initialization": -4.0,
+                "correction_initialization": "zero",
+                "correction_features": "per_feature_std_range_mad_and_mean_abs",
+                "correction_scale": 1.0,
+                "baseline_fallback": "mean_linear_exact_at_zero_correction",
+                "normalization": "none",
+            }
+        )
+        if head_variant == "mean_reliability_stable":
+            metadata.update(
+                {
+                    "matched_control": "mean_reliability_shrinkage",
+                    "regularizer": "gate_consistency",
+                    "lambda_gate": H6_GATE_STABILITY_LAMBDA,
+                    "augmentation": "identity_plus_bounded_gaussian_noise",
+                    "noise_scale": H6_NOISE_SCALE,
+                    "noise_seed_rule": "run_seed+1009*one_based_epoch+batch_idx",
+                    "validation_test_augmentation": False,
+                }
+            )
     if head_variant == "grouped_rich_stats_shrinkage":
         metadata.update(
             {
@@ -943,6 +1196,20 @@ def _head_metadata(
                 "normalization": "none",
             }
         )
+    if head_variant == "mean_rich_stats_gradient_routes":
+        metadata.update(
+            {
+                "head_architecture": "mean_rich_stats_gradient_routes",
+                "query_initialization": "not_applicable",
+                "correction_initialization": "zero",
+                "correction_features": "per_feature_std_range_mad_mean_abs",
+                "correction_scale": 0.5,
+                "gradient_target": "encoder_routes_only",
+                "mean_gradient_scale": float(mean_gradient_scale),
+                "correction_gradient_scale": float(correction_gradient_scale),
+                "normalization": "none",
+            }
+        )
     if head_variant == "last_tuned":
         metadata.update(
             {
@@ -981,6 +1248,9 @@ def _append_evaluation_callback(
     seed: int | None,
     loaders: Mapping[str, Any],
     hooks: Any,
+    head_variant: str = "mean_linear",
+    mean_gradient_scale: float = 0.5,
+    correction_gradient_scale: float = 1.0,
 ) -> None:
     """Attach exactly one training-time metric callback for the protocol."""
 
@@ -988,6 +1258,32 @@ def _append_evaluation_callback(
         trainer.callbacks.append(
             hooks.EpochValidationMetrics(epoch_metrics_path, seed=seed)
         )
+        if head_variant in {"mean_reliability_shrinkage", "mean_reliability_stable"}:
+            trainer.callbacks.append(
+                hooks.ReliabilityGateAudit(
+                    epoch_metrics_path.parent / "gate_validation_audit.jsonl",
+                    seed=seed,
+                    alpha_max=0.5,
+                )
+            )
+        if head_variant == "mean_reliability_stable":
+            trainer.callbacks.append(
+                hooks.H6GateConsistencyMetrics(
+                    epoch_metrics_path.parent / "gate_consistency.json",
+                    seed=seed,
+                    lambda_gate=H6_GATE_STABILITY_LAMBDA,
+                    noise_scale=H6_NOISE_SCALE,
+                )
+                )
+        if head_variant == "mean_rich_stats_gradient_routes":
+            trainer.callbacks.append(
+                hooks.H7GradientRouteAudit(
+                    epoch_metrics_path.parent / "gradient_norms.json",
+                    seed=seed,
+                    mean_gradient_scale=mean_gradient_scale,
+                    correction_gradient_scale=correction_gradient_scale,
+                )
+            )
         return
     if evaluation_protocol != "legacy":
         raise ValueError(f"unsupported evaluation protocol: {evaluation_protocol!r}")
@@ -1011,6 +1307,8 @@ def _patch_official_components(
     *,
     head_variant: str = "mean_linear",
     head_dropout: float = 0.0,
+    mean_gradient_scale: float = 0.5,
+    correction_gradient_scale: float = 1.0,
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
@@ -1040,7 +1338,15 @@ def _patch_official_components(
     reve.validate_head_variant(head_variant)
     if head_dropout != 0.0:
         raise ValueError(f"the upstream REVE comparison fixes head dropout at 0.0; got {head_dropout}")
+    for name, value in (
+        ("mean_gradient_scale", mean_gradient_scale),
+        ("correction_gradient_scale", correction_gradient_scale),
+    ):
+        if not math.isfinite(float(value)) or not 0.0 <= float(value) <= 2.0:
+            raise ValueError(f"{name} must be finite and in [0, 2]")
     resolved_seeds = hooks.validate_seeds(seeds)
+    if head_variant == "mean_reliability_stable" and evaluation_protocol != "strict":
+        raise ValueError("mean_reliability_stable requires strict evaluation")
     if data_mode not in {"manifest", "full", "selective_task"}:
         raise ValueError(f"unsupported data mode: {data_mode!r}")
     if data_mode == "manifest" and manifest_path is None:
@@ -1061,6 +1367,14 @@ def _patch_official_components(
     from neuralbench.main import Experiment
     from neuralfetch.studies import shirazi2024hbn
 
+    neuralset_study = None
+    original_study_all_timelines = None
+    selective_eeglab_reader: dict[str, Any] | None = None
+    if data_mode == "selective_task":
+        from neuralset.events import study as neuralset_study
+
+        original_study_all_timelines = neuralset_study.Study._all_timelines
+
     timelines: list[dict[str, Any]] | None = None
     if data_mode == "manifest":
         assert manifest_path is not None
@@ -1078,9 +1392,31 @@ def _patch_official_components(
         assert timelines is not None
         return iter(timelines)
 
+    def selective_all_timelines(study_instance: Any) -> list[dict[str, Any]]:
+        """Allow the official study iterator to describe a task-only tree.
+
+        NeuralFetch's static ``_info.num_timelines`` describes all HBN tasks,
+        while selective acquisition intentionally contains only RestingState.
+        Keep the iterator and ``_info`` unchanged outside this temporary call,
+        but bypass that full-dataset cardinality assertion for the selective
+        study so the actual discovered timelines can be audited downstream.
+        """
+
+        assert original_study_all_timelines is not None
+        if not isinstance(study_instance, shirazi2024hbn.Shirazi2024Hbn):
+            return original_study_all_timelines(study_instance)
+        study_class = study_instance.__class__
+        original_info = study_class._info
+        try:
+            study_class._info = None
+            return original_study_all_timelines(study_instance)
+        finally:
+            study_class._info = original_info
+
     captured_loaders: dict[int, dict[str, Any]] = {}
     provenance_state_by_data: dict[int, dict[str, Any]] = {}
     patched_brain_modules: list[dict[str, Any]] = []
+    patched_h6_training_steps: list[dict[str, Any]] = []
     tuning_metadata_by_experiment: dict[int, dict[str, Any]] = {}
     test_invocations: set[int] = set()
 
@@ -1232,6 +1568,9 @@ def _patch_official_components(
                 epoch_metrics_path=epoch_metrics_path,
                 seed=getattr(self, "seed", None),
                 loaders=loaders,
+                head_variant=head_variant,
+                mean_gradient_scale=mean_gradient_scale,
+                correction_gradient_scale=correction_gradient_scale,
                 hooks=hooks,
             )
         return trainer
@@ -1244,7 +1583,12 @@ def _patch_official_components(
             hooks._set_frozen_experiment_field(
                 self,
                 "downstream_model_wrapper",
-                reve.make_upstream_reve_wrapper(variant=head_variant, dropout=head_dropout),
+                reve.make_upstream_reve_wrapper(
+                    variant=head_variant,
+                    dropout=head_dropout,
+                    mean_gradient_scale=mean_gradient_scale,
+                    correction_gradient_scale=correction_gradient_scale,
+                ),
             )
         if head_variant == "last_tuned":
             # NeuralBench expresses the actual checkpoint criterion through
@@ -1331,7 +1675,7 @@ def _patch_official_components(
     ) -> Any:
         result = original_prepare_pl_module(self, train_loader, val_loader)
         persist_provenance_metadata(self)
-        if head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "mean_anchor_ensemble"}:
+        if head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable"}:
             brain_module = getattr(self, "_brain_module", None)
             grouped_head = None
             expected_class_name = {
@@ -1340,6 +1684,8 @@ def _patch_official_components(
                 "temporal_pyramid_stats": "TemporalPyramidStatsResidualHead",
                 "mean_covariance_residual": "MeanCovarianceResidualHead",
                 "mean_anchor_ensemble": "MeanAnchorEnsembleHead",
+                "mean_reliability_shrinkage": "MeanReliabilityShrinkageHead",
+                "mean_reliability_stable": "MeanReliabilityShrinkageHead",
             }[head_variant]
             if brain_module is not None and hasattr(brain_module, "modules"):
                 grouped_head = next(
@@ -1363,6 +1709,12 @@ def _patch_official_components(
                     "head_parameter_count": head_metadata["parameter_count"],
                 },
             )
+            if head_variant == "mean_reliability_stable":
+                _patch_h6_training_step(
+                    brain_module,
+                    run_seed=int(getattr(self, "seed", 0)),
+                    patched_modules=patched_h6_training_steps,
+                )
         if head_variant == "last_tuned":
             brain_module = getattr(self, "_brain_module", None)
             model = getattr(brain_module, "model", None)
@@ -1393,6 +1745,10 @@ def _patch_official_components(
     originals = {
         "data_mode": data_mode,
         "patched_study_source": data_mode == "manifest",
+        "patched_selective_info_compat": data_mode == "selective_task",
+        "study_class": neuralset_study.Study if neuralset_study is not None else None,
+        "study_all_timelines": original_study_all_timelines,
+        "selective_eeglab_reader": selective_eeglab_reader,
         "iter_timelines": original_iter_timelines,
         "info": original_info,
         "prepare": original_prepare,
@@ -1400,6 +1756,7 @@ def _patch_official_components(
         "setup_run": original_setup_run,
         "prepare_pl_module": original_prepare_pl_module,
         "patched_brain_modules": patched_brain_modules,
+        "patched_h6_training_steps": patched_h6_training_steps,
         "setup_trainer": original_setup_trainer,
         "cli_loader": (cli, original_cli_load_yaml_config),
         "experiment_loader": (
@@ -1421,11 +1778,16 @@ def _patch_official_components(
         return original_experiment_load_yaml_config(path, *args, **kwargs)
 
     try:
+        if data_mode == "selective_task":
+            originals["selective_eeglab_reader"] = _install_selective_eeglab_mat_reader()
         if data_mode == "manifest":
             assert timelines is not None
             shirazi2024hbn.Shirazi2024Hbn.iter_timelines = iter_manifest_timelines
             if original_info is not None:
                 shirazi2024hbn.Shirazi2024Hbn._info = original_info.model_copy(update={"num_timelines": len(timelines)})
+        if data_mode == "selective_task":
+            assert neuralset_study is not None
+            neuralset_study.Study._all_timelines = selective_all_timelines
         Data.prepare = prepare_and_capture
         Experiment._test = test_and_capture
         Experiment.setup_trainer = setup_with_evaluation_callbacks
@@ -1460,6 +1822,21 @@ def _restore_official_components(originals: Mapping[str, Any], *, restore_tuned:
     if originals.get("patched_study_source", True):
         attempt("Shirazi2024Hbn.iter_timelines", lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "iter_timelines", originals["iter_timelines"]))
         attempt("Shirazi2024Hbn._info", lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "_info", originals["info"]))
+    if originals.get("patched_selective_info_compat", False):
+        reader = originals.get("selective_eeglab_reader")
+        if reader is not None:
+            attempt(
+                "mne.io.eeglab.eeglab._readmat",
+                lambda: setattr(reader["module"], "_readmat", reader["readmat"]),
+            )
+        attempt(
+            "neuralset.Study._all_timelines",
+            lambda: setattr(
+                originals["study_class"],
+                "_all_timelines",
+                originals["study_all_timelines"],
+            ),
+        )
     attempt("Data.prepare", lambda: setattr(Data, "prepare", originals["prepare"]))
     attempt("Experiment.setup_run", lambda: setattr(Experiment, "setup_run", originals["setup_run"]))
     attempt("Experiment._test", lambda: setattr(Experiment, "_test", originals["test"]))
@@ -1468,6 +1845,7 @@ def _restore_official_components(originals: Mapping[str, Any], *, restore_tuned:
     attempt("neuralbench.cli.load_yaml_config", lambda: setattr(cli, "load_yaml_config", original_cli_loader))
     attempt("neuralbench.experiment_config.load_yaml_config", lambda: setattr(experiment_config, "load_yaml_config", original_experiment_loader))
     attempt("last_tuned.configure_optimizers", lambda: restore_tuned(originals.get("patched_brain_modules", [])))
+    attempt("h6.training_step", lambda: _restore_h6_training_steps(originals.get("patched_h6_training_steps", [])))
 
     if restoration_errors:
         error = RuntimeError("official component restoration failed")
@@ -1485,6 +1863,8 @@ def run_official_subset(
     config_path: Path,
     head_variant: str = "mean_linear",
     head_dropout: float = 0.0,
+    mean_gradient_scale: float = 0.5,
+    correction_gradient_scale: float = 1.0,
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
@@ -1511,6 +1891,8 @@ def run_official_subset(
             selection_path,
             head_variant=head_variant,
             head_dropout=head_dropout,
+            mean_gradient_scale=mean_gradient_scale,
+            correction_gradient_scale=correction_gradient_scale,
             seeds=seeds,
             evaluation_protocol=evaluation_protocol,
             strict_final_test=strict_final_test,
