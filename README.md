@@ -128,6 +128,24 @@ NeuralBench Age task apply its own filters and splits to the complete
 `--data-root`. The reference `mean_linear` path, backbone, optimizer, early
 stopping, and preprocessing remain shared in both modes.
 
+### Data regime and improvement claims
+
+The fixed 500-subject manifest is a **screening** regime. Its results can rank
+candidate heads within that subset, but they must not be described as official
+full-data improvements. Before promoting a head, run a matched `mean_linear`
+baseline with the same data mode, timeline/subject selection, split,
+preprocessing, channel positions, source/config hashes, protocol, and seeds.
+Report the per-seed deltas, sample standard deviation, and worst seed; one
+strong seed cannot promote a head. Keep the final test sealed until the
+candidate and all training choices are frozen.
+
+The current matched selective full-data comparison is the authoritative head
+decision: `mean_linear` scores `0.732363780339559`, while
+`mean_rich_stats_residual` scores `0.7290825843811035` (delta
+`-0.0032811959584554`, or `-0.448028%`). Therefore `mean_linear` remains the
+official winner. The historical 500-subject rich-statistics gain is retained
+as a promising screening result only.
+
 ### Selective HBN task acquisition
 
 For the Age experiment, the full HBN root is not required. The standalone
