@@ -146,6 +146,53 @@ decision: `mean_linear` scores `0.732363780339559`, while
 official winner. The historical 500-subject rich-statistics gain is retained
 as a promising screening result only.
 
+### 1000-subject nested screening setup
+
+The repository includes [`screening_1000_manifest.py`](screening_1000_manifest.py)
+to build a deterministic 1000-subject manifest from the existing 500-subject
+manifest. It preserves all 500 base rows, adds 50 new eligible recordings per
+existing release, inherits the release-to-split mapping, and writes a manifest
+SHA-256 plus an audit report. The generator fails closed on duplicate subjects
+or recording paths, malformed release/path pairs, excluded subjects,
+non-finite or short recordings, mixed release splits, insufficient eligible
+recordings, or an existing output file.
+
+Run it on the host containing the HBN recordings:
+
+```bash
+python screening_1000_manifest.py \
+  --base-manifest /workspace/hbn_subset/age_medium_500_resting_manifest.csv \
+  --data-root /workspace/neurobench_data_hl2 \
+  --output-manifest /workspace/hbn_subset/manifests/age_medium_1000_nested_20260825.csv \
+  --report /workspace/hbn_subset/manifests/age_medium_1000_nested_20260825.json \
+  --target-subjects 1000
+```
+
+The prepared [`supervisor_screening_1000_mean_linear_20260825.conf`](supervisor_screening_1000_mean_linear_20260825.conf)
+generates the manifest first and then runs the matched `mean_linear` control on
+seeds 33/34/35 with strict validation-only evaluation. It intentionally omits
+`--strict-final-test`; test data remain withheld. Candidate heads must reuse the
+same generated manifest and output a separate directory under
+`reve_head_experiments_screening_1000_nested_20260825/`.
+
+For a candidate screen, reuse the same manifest with a fresh output directory
+and validation-only seed 33:
+
+```bash
+python official_reve_subset.py \
+  --manifest /workspace/hbn_subset/manifests/age_medium_1000_nested_20260825.csv \
+  --data-root /workspace/neurobench_data_hl2 \
+  --output-dir /workspace/hbn_subset/results/reve_head_experiments_screening_1000_nested_20260825 \
+  --config /workspace/hbn_subset/results/reve_head_experiments_screening_1000_nested_20260825/HEAD_VARIANT_config.json \
+  --head-variant HEAD_VARIANT \
+  --evaluation-protocol strict \
+  --seeds 33
+```
+
+Only after a candidate passes the declared validation gate should the same
+frozen command be repeated for seeds 34/35. No candidate screen should add
+`--strict-final-test`.
+
 ### Selective HBN task acquisition
 
 For the Age experiment, the full HBN root is not required. The standalone
