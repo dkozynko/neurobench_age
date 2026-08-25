@@ -780,6 +780,72 @@ class TemporalPyramidStatsResidualHead(nn.Module):
         return self.linear(mean + self.correction_scale * correction)
 
 
+class MeanCovarianceResidualHead(nn.Module):
+    """Mean-linear baseline plus a zero-start diagonal covariance correction.
+
+    The covariance contract is intentionally diagonal: each feature contributes
+    its sample variance across final tokens.  A small ``down``/``up`` factor-
+    ization maps those D variance values back into the embedding dimension.
+    ``up`` starts at zero, so initialization is exactly mean-linear.
+    """
+
+    covariance_mode = "diagonal"
+
+    def __init__(
+        self,
+        *,
+        embed_dim: int,
+        n_outputs: int,
+        projection_rank: int = 4,
+    ):
+        super().__init__()
+        if embed_dim <= 0 or n_outputs <= 0:
+            raise ValueError("embed_dim and n_outputs must be positive")
+        if projection_rank <= 0:
+            raise ValueError("projection_rank must be positive")
+        self.embed_dim = embed_dim
+        self.n_outputs = n_outputs
+        self.projection_rank = int(projection_rank)
+        self.correction_scale = 0.5
+
+        # Construct the baseline first so its initialization matches the
+        # mean-linear control.  Zeroing ``up`` preserves exact parity.
+        self.linear = nn.Linear(embed_dim, n_outputs)
+        self.down = nn.Linear(embed_dim, self.projection_rank, bias=False)
+        self.up = nn.Linear(self.projection_rank, embed_dim, bias=False)
+        nn.init.zeros_(self.up.weight)
+
+    def pool_tokens(self, tokens: Any) -> torch.Tensor:
+        """Return the diagonal sample covariance for final tokens."""
+
+        tokens = _validate_final_tokens(tokens, embed_dim=self.embed_dim)
+        if tokens.shape[1] < 2:
+            raise AdapterContractError(
+                "mean covariance requires at least two tokens for sample variance"
+            )
+        return tokens.var(dim=1, unbiased=True)
+
+    def metadata(self) -> dict[str, Any]:
+        """Return stable, JSON-serializable architecture metadata."""
+
+        return {
+            "covariance_mode": self.covariance_mode,
+            "covariance_features": "diagonal_sample_variance",
+            "projection_rank": self.projection_rank,
+            "correction_scale": self.correction_scale,
+            "low_rank_parameterization": "down_then_up",
+            "up_initialization": "zero",
+            "parameter_count": sum(parameter.numel() for parameter in self.parameters()),
+        }
+
+    def forward(self, tokens: Any) -> torch.Tensor:
+        tokens = _validate_final_tokens(tokens, embed_dim=self.embed_dim)
+        mean = tokens.mean(dim=1)
+        covariance_diagonal = self.pool_tokens(tokens)
+        correction = self.up(self.down(covariance_diagonal))
+        return self.linear(mean + self.correction_scale * correction)
+
+
 class MeanStatsAttentionResidualHead(nn.Module):
     """Mean-linear baseline with zero-start attention and statistics corrections."""
 
@@ -1252,7 +1318,7 @@ class UpstreamReveHeadModel(nn.Module):
         query_initialization_metadata: Mapping[str, Any] | None = None,
     ):
         super().__init__()
-        if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats"}:
+        if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
             validate_local_head_variant(variant)
         elif variant == "last_tuned":
             validate_last_tuned_protocol(variant)
@@ -1313,6 +1379,8 @@ class UpstreamReveHeadModel(nn.Module):
             self.head = GroupedStatsSharedGateHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "temporal_pyramid_stats":
             self.head = TemporalPyramidStatsResidualHead(embed_dim=embed_dim, n_outputs=n_outputs)
+        elif variant == "mean_covariance_residual":
+            self.head = MeanCovarianceResidualHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "mean_stats_residual_detached":
             self.head = MeanStatsResidualDetachedHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "mean_stats_residual_gradient_scaled":
@@ -1349,7 +1417,7 @@ class UpstreamReveHeadModel(nn.Module):
         self, eeg: torch.Tensor, channel_positions: torch.Tensor | None
     ) -> Any:
         del channel_positions
-        if self.variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats"}:
+        if self.variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
             # The official NtReve wrapper keeps its resolved REVE positions
             # internally and does not receive per-batch channel positions.
             return self.encoder(eeg)
@@ -1385,7 +1453,7 @@ def make_upstream_reve_wrapper(
 ) -> Any:
     """Create a concrete official NeuralBench wrapper config lazily."""
 
-    if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats"}:
+    if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
         validate_local_head_variant(variant)
     elif variant == "last_tuned":
         validate_last_tuned_protocol(variant)
@@ -1434,7 +1502,7 @@ def make_upstream_reve_wrapper(
             if sample is None:
                 raise AdapterContractError("dummy batch contains no EEG tensor")
 
-            if self.head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats"}:
+            if self.head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
                 # Match DownstreamWrapper.build: run the already-built model
                 # once before constructing its linear probe.
                 with torch.no_grad():

@@ -568,13 +568,14 @@ def _head_metadata(
         "grouped_rich_stats_shrinkage": "not_applicable",
         "grouped_stats_shared_gate": "not_applicable",
         "temporal_pyramid_stats": "not_applicable",
+        "mean_covariance_residual": "not_applicable",
         "last_avg": "upstream_random_unused",
         "last_tuned": "train_dummy_final_token_mean",
         "last": "upstream_random",
         "all": "upstream_random",
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
-    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats"}
+    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}
     if data_mode not in {"manifest", "full"}:
         raise ValueError(f"unsupported data mode: {data_mode!r}")
     if data_mode == "manifest" and manifest_path is not None and provenance_path is None:
@@ -623,6 +624,8 @@ def _head_metadata(
             if head_variant == "grouped_stats_shared_gate"
             else "local_temporal_pyramid_stats"
             if head_variant == "temporal_pyramid_stats"
+            else "local_mean_covariance_residual"
+            if head_variant == "mean_covariance_residual"
             else "local_mean_linear_copy"
             if is_local_head
             else "upstream_reve"
@@ -880,6 +883,22 @@ def _head_metadata(
                 "correction_scale": 0.5,
                 "correction_backbone_gradient": "enabled",
                 "token_order_contract": "contiguous_ordered_segments",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_covariance_residual":
+        metadata.update(
+            {
+                "head_architecture": "mean_diagonal_covariance_low_rank_residual",
+                "query_initialization": "not_applicable",
+                "correction_initialization": "zero_via_up_factor",
+                "covariance_mode": "diagonal",
+                "covariance_features": "diagonal_sample_variance",
+                "projection_rank": 4,
+                "low_rank_parameterization": "down_then_up",
+                "parameter_count_formula": "D*n_outputs+n_outputs+2*D*4",
+                "correction_scale": 0.5,
+                "correction_backbone_gradient": "enabled",
                 "normalization": "none",
             }
         )
@@ -1240,13 +1259,14 @@ def _patch_official_components(
     ) -> Any:
         result = original_prepare_pl_module(self, train_loader, val_loader)
         persist_provenance_metadata(self)
-        if head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats"}:
+        if head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
             brain_module = getattr(self, "_brain_module", None)
             grouped_head = None
             expected_class_name = {
                 "grouped_rich_stats_shrinkage": "GroupedRichStatsShrinkageHead",
                 "grouped_stats_shared_gate": "GroupedStatsSharedGateHead",
                 "temporal_pyramid_stats": "TemporalPyramidStatsResidualHead",
+                "mean_covariance_residual": "MeanCovarianceResidualHead",
             }[head_variant]
             if brain_module is not None and hasattr(brain_module, "modules"):
                 grouped_head = next(
