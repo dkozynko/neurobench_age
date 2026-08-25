@@ -260,6 +260,8 @@ def _build_strict_selection_record(
     official_config_path: Path,
     manifest_path: Path | None = None,
     provenance_path: Path | None = None,
+    acquisition_provenance_path: Path | None = None,
+    acquisition_provenance_sha256: str | None = None,
     data_mode: str = "manifest",
     timeline_count: int | None = None,
     validation_history_path: Path,
@@ -274,7 +276,7 @@ def _build_strict_selection_record(
 
     if selection_monitor != "val/pearsonr" or selection_mode != "max":
         raise RuntimeError("strict selection must monitor val/pearsonr in max mode")
-    if data_mode not in {"manifest", "full"}:
+    if data_mode not in {"manifest", "full", "selective_task"}:
         raise RuntimeError(f"unsupported strict data mode: {data_mode!r}")
     selected = _resolve_selected_validation(checkpoint_path, validation_history_path, seed=seed)
     immutable_config_path = _freeze_provenance_snapshot(official_config_path)
@@ -290,11 +292,24 @@ def _build_strict_selection_record(
             raise RuntimeError(f"strict provenance file is missing: {manifest_path}")
     else:
         if manifest_path is not None:
-            raise RuntimeError("full-data strict selection must not include manifest_path")
+            raise RuntimeError("non-manifest strict selection must not include manifest_path")
         if provenance_path is None:
-            raise RuntimeError("full-data strict selection requires provenance_path")
+            raise RuntimeError("non-manifest strict selection requires provenance_path")
         if isinstance(timeline_count, bool) or not isinstance(timeline_count, int) or timeline_count < 1:
-            raise RuntimeError("full-data strict selection requires a positive timeline_count")
+            raise RuntimeError("non-manifest strict selection requires a positive timeline_count")
+        if data_mode == "selective_task":
+            if acquisition_provenance_path is None or acquisition_provenance_sha256 is None:
+                raise RuntimeError("selective strict selection requires acquisition provenance")
+            if not acquisition_provenance_path.is_file():
+                raise RuntimeError(
+                    f"selective acquisition provenance is missing: {acquisition_provenance_path}"
+                )
+            actual_acquisition_digest = sha256_file(acquisition_provenance_path)
+            if actual_acquisition_digest != acquisition_provenance_sha256:
+                raise RuntimeError("selective acquisition provenance hash changed")
+            sidecar = acquisition_provenance_path.with_suffix(".sha256")
+            if not sidecar.is_file() or sidecar.read_text(encoding="ascii").strip() != actual_acquisition_digest:
+                raise RuntimeError("selective acquisition provenance sidecar mismatch")
     if not provenance_path.is_file():
         raise RuntimeError(f"strict provenance file is missing: {provenance_path}")
 
@@ -317,6 +332,16 @@ def _build_strict_selection_record(
         "manifest_sha256": manifest_sha256,
         "provenance_path": str(provenance_path.resolve()),
         "provenance_sha256": sha256_file(provenance_path),
+        "acquisition_provenance_path": (
+            str(acquisition_provenance_path.resolve())
+            if acquisition_provenance_path is not None
+            else None
+        ),
+        "acquisition_provenance_sha256": (
+            sha256_file(acquisition_provenance_path)
+            if acquisition_provenance_path is not None
+            else None
+        ),
         "validation_history_path": str(validation_history_path.resolve()),
         "validation_history_sha256": sha256_file(validation_history_path),
         "test_status": "sealed" if strict_final_test else "withheld",
@@ -576,7 +601,7 @@ def _head_metadata(
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
     is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}
-    if data_mode not in {"manifest", "full"}:
+    if data_mode not in {"manifest", "full", "selective_task"}:
         raise ValueError(f"unsupported data mode: {data_mode!r}")
     if data_mode == "manifest" and manifest_path is not None and provenance_path is None:
         provenance_path = manifest_path
@@ -975,6 +1000,8 @@ def _patch_official_components(
     strict_final_test: bool = False,
     data_mode: str = "manifest",
     provenance_path: Path | None = None,
+    acquisition_provenance_path: Path | None = None,
+    acquisition_provenance_sha256: str | None = None,
     timeline_count: int | None = None,
     run_metadata: Mapping[str, Any] | None = None,
     final_results: list[dict[str, Any]] | None = None,
@@ -998,15 +1025,19 @@ def _patch_official_components(
     if head_dropout != 0.0:
         raise ValueError(f"the upstream REVE comparison fixes head dropout at 0.0; got {head_dropout}")
     resolved_seeds = hooks.validate_seeds(seeds)
-    if data_mode not in {"manifest", "full"}:
+    if data_mode not in {"manifest", "full", "selective_task"}:
         raise ValueError(f"unsupported data mode: {data_mode!r}")
     if data_mode == "manifest" and manifest_path is None:
         raise ValueError("manifest data mode requires manifest_path")
-    if data_mode == "full" and manifest_path is not None:
-        raise ValueError("full data mode must not receive manifest_path")
-    if data_mode == "full" and provenance_path is None:
-        raise ValueError("full data mode requires provenance_path")
-    if data_mode == "full":
+    if data_mode in {"full", "selective_task"} and manifest_path is not None:
+        raise ValueError("non-manifest data mode must not receive manifest_path")
+    if data_mode in {"full", "selective_task"} and provenance_path is None:
+        raise ValueError("non-manifest data mode requires provenance_path")
+    if data_mode == "selective_task" and (
+        acquisition_provenance_path is None or acquisition_provenance_sha256 is None
+    ):
+        raise ValueError("selective task mode requires acquisition provenance")
+    if data_mode in {"full", "selective_task"}:
         assert provenance_path is not None
         provenance_path.unlink(missing_ok=True)
 
@@ -1040,15 +1071,19 @@ def _patch_official_components(
     def prepare_and_capture(data: Any) -> dict[str, Any]:
         loaders = original_prepare(data)
         captured_loaders[id(data)] = loaders
-        if data_mode == "full":
+        if data_mode in {"full", "selective_task"}:
             study = getattr(data, "study", None)
             actual_timelines = getattr(study, "_timelines", None)
             if actual_timelines is None:
                 raise RuntimeError("full-data Data.prepare did not expose study._timelines")
-            normalized = hooks._canonical_full_data_timelines(actual_timelines)
+            normalized = hooks._canonical_full_data_timelines(
+                actual_timelines,
+                expected_task="task-RestingState" if data_mode == "selective_task" else None,
+            )
             payload, raw = hooks._full_data_provenance_payload(
                 data_root=data_root,
                 timelines=normalized,
+                data_mode=data_mode,
             )
             assert provenance_path is not None
             try:
@@ -1063,11 +1098,22 @@ def _patch_official_components(
                 provenance_path.unlink(missing_ok=True)
                 raise
             state = {
-                "data_mode": "full",
+                "data_mode": data_mode,
                 "timeline_count": payload["timeline_count"],
                 "provenance_path": str(provenance_path.resolve()),
                 "provenance_sha256": provenance_digest,
             }
+            if data_mode == "selective_task":
+                assert acquisition_provenance_path is not None
+                assert acquisition_provenance_sha256 is not None
+                state.update(
+                    {
+                        "acquisition_provenance_path": str(
+                            acquisition_provenance_path.resolve()
+                        ),
+                        "acquisition_provenance_sha256": acquisition_provenance_sha256,
+                    }
+                )
             provenance_state_by_data[id(data)] = state
         return loaders
 
@@ -1095,8 +1141,8 @@ def _patch_official_components(
         if best_model_path is None:
             raise RuntimeError("strict evaluation requires a selected checkpoint")
         source_state = provenance_state_by_data.get(id(self.data))
-        if data_mode == "full" and source_state is None:
-            raise RuntimeError("full-data strict evaluation has no post-prepare provenance")
+        if data_mode in {"full", "selective_task"} and source_state is None:
+            raise RuntimeError("non-manifest strict evaluation has no post-prepare provenance")
         selection_manifest_path = manifest_path if data_mode == "manifest" else None
         selection_provenance_path = (
             Path(source_state["provenance_path"])
@@ -1113,6 +1159,16 @@ def _patch_official_components(
             official_config_path=uid_folder / "config.yaml",
             manifest_path=selection_manifest_path,
             provenance_path=selection_provenance_path,
+            acquisition_provenance_path=(
+                Path(source_state["acquisition_provenance_path"])
+                if data_mode == "selective_task" and source_state is not None
+                else None
+            ),
+            acquisition_provenance_sha256=(
+                str(source_state["acquisition_provenance_sha256"])
+                if data_mode == "selective_task" and source_state is not None
+                else None
+            ),
             data_mode=data_mode,
             timeline_count=selection_timeline_count,
             validation_history_path=epoch_metrics_path,
@@ -1234,14 +1290,14 @@ def _patch_official_components(
         _replace_json_atomic(path, payload)
 
     def persist_provenance_metadata(self: Any) -> None:
-        if data_mode != "full":
+        if data_mode not in {"full", "selective_task"}:
             return
         state = provenance_state_by_data.get(id(self.data))
         if state is None:
-            raise RuntimeError("full-data experiment has no post-prepare provenance")
+            raise RuntimeError("non-manifest experiment has no post-prepare provenance")
         uid_folder = self.infra.uid_folder()
         if uid_folder is None:
-            raise RuntimeError("full-data run has no official uid folder")
+            raise RuntimeError("non-manifest run has no official uid folder")
         path = uid_folder / "run_metadata.json"
         payload: dict[str, Any] = {}
         if path.is_file():
@@ -1417,6 +1473,8 @@ def run_official_subset(
     strict_final_test: bool = False,
     data_mode: str = "manifest",
     provenance_path: Path | None = None,
+    acquisition_provenance_path: Path | None = None,
+    acquisition_provenance_sha256: str | None = None,
     timeline_count: int | None = None,
     run_metadata: Mapping[str, Any] | None = None,
     hooks: Any,
@@ -1441,6 +1499,8 @@ def run_official_subset(
             strict_final_test=strict_final_test,
             data_mode=data_mode,
             provenance_path=provenance_path,
+            acquisition_provenance_path=acquisition_provenance_path,
+            acquisition_provenance_sha256=acquisition_provenance_sha256,
             timeline_count=timeline_count,
             run_metadata=run_metadata,
             final_results=final_results,
@@ -1461,7 +1521,7 @@ def run_official_subset(
     finally:
         active_error = sys.exc_info()[1]
         cleanup_errors: list[BaseException] = []
-        if active_error is not None and data_mode == "full" and provenance_path is not None:
+        if active_error is not None and data_mode in {"full", "selective_task"} and provenance_path is not None:
             try:
                 provenance_path.unlink(missing_ok=True)
             except BaseException as error:

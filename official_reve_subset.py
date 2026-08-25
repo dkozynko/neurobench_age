@@ -18,12 +18,23 @@ import hashlib
 import json
 import logging
 import math
+import os
 import shlex
 import sys
 import traceback
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+
+from selective_hbn_download import (
+    INCLUDE_PATTERNS,
+    RELEASES as SELECTIVE_RELEASES,
+    SELECTIVE_TASK,
+    _audit_release,
+    _build_provenance_payload,
+    _current_provenance_paths,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,6 +59,8 @@ class DataSource:
     data_root: Path
     manifest_path: Path | None
     manifest_sha256: str | None
+    acquisition_provenance_path: Path | None = None
+    acquisition_provenance_sha256: str | None = None
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -58,17 +71,29 @@ def _resolve_data_source(
     *,
     manifest_path: Path | None,
     full_data: bool,
+    selective_task: bool = False,
     data_root: Path,
 ) -> DataSource:
     """Resolve and validate the mutually exclusive manifest/full input modes."""
 
-    if (manifest_path is None) == (not full_data):
+    source_modes = int(manifest_path is not None) + int(full_data) + int(selective_task)
+    if source_modes != 1:
         raise ValueError("exactly one of --manifest or --full-data is required")
     resolved_root = data_root.resolve()
-    if full_data and not resolved_root.exists():
+    if (full_data or selective_task) and not resolved_root.exists():
         raise FileNotFoundError(f"data root does not exist: {resolved_root}")
-    if full_data and not resolved_root.is_dir():
+    if (full_data or selective_task) and not resolved_root.is_dir():
         raise NotADirectoryError(f"data root is not a directory: {resolved_root}")
+    if selective_task:
+        acquisition_path, acquisition_digest = _validate_selective_acquisition(resolved_root)
+        return DataSource(
+            data_mode="selective_task",
+            data_root=resolved_root,
+            manifest_path=None,
+            manifest_sha256=None,
+            acquisition_provenance_path=acquisition_path,
+            acquisition_provenance_sha256=acquisition_digest,
+        )
     if full_data:
         return DataSource(
             data_mode="full",
@@ -88,8 +113,104 @@ def _resolve_data_source(
     )
 
 
+def _validate_selective_acquisition(data_root: Path) -> tuple[Path, str]:
+    """Validate current selective provenance and reconcile it with disk."""
+
+    provenance_path, digest_path = _current_provenance_paths(data_root)
+    if not provenance_path.is_file() or not digest_path.is_file():
+        raise FileNotFoundError(
+            f"selective acquisition provenance is incomplete: {provenance_path}"
+        )
+    raw = provenance_path.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    recorded_digest = digest_path.read_text(encoding="ascii").strip()
+    if recorded_digest != digest:
+        raise ValueError("selective acquisition provenance digest mismatch")
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("selective acquisition provenance is not valid UTF-8 JSON") from error
+    if not isinstance(payload, Mapping):
+        raise ValueError("selective acquisition provenance must be an object")
+    if payload.get("schema_version") != 1:
+        raise ValueError("selective acquisition provenance has an unsupported schema")
+    if payload.get("data_mode") != "selective_task":
+        raise ValueError("selective acquisition provenance has the wrong data_mode")
+    if payload.get("task") != SELECTIVE_TASK:
+        raise ValueError("selective acquisition provenance has the wrong task")
+    if payload.get("study") != "Shirazi2024Hbn":
+        raise ValueError("selective acquisition provenance has the wrong study")
+    if payload.get("data_root") != str(data_root.resolve()):
+        raise ValueError("selective acquisition provenance has the wrong data root")
+    if payload.get("expected_releases") != list(SELECTIVE_RELEASES):
+        raise ValueError("selective acquisition provenance has the wrong release set")
+    if payload.get("include_patterns") != list(INCLUDE_PATTERNS):
+        raise ValueError("selective acquisition provenance has the wrong include patterns")
+    if payload.get("complete") is not True:
+        raise ValueError("selective acquisition provenance is not complete")
+    requested = payload.get("requested_releases")
+    if not isinstance(requested, list) or tuple(requested) != SELECTIVE_RELEASES:
+        raise ValueError("complete selective acquisition must request all releases")
+
+    audits = tuple(_audit_release(data_root, release) for release in SELECTIVE_RELEASES)
+    expected_payload, expected_raw = _build_provenance_payload(
+        data_root=data_root,
+        requested_releases=requested,
+        audits=audits,
+    )
+    if raw != expected_raw or payload != expected_payload:
+        raise ValueError("selective acquisition provenance does not match current files")
+    return provenance_path.resolve(), digest
+
+
+def _copy_create_only(path: Path, data: bytes) -> None:
+    """Create one immutable snapshot file, or verify an existing identical file."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file():
+        if path.read_bytes() != data:
+            raise RuntimeError(f"selective acquisition snapshot differs: {path}")
+        return
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("xb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            if not path.is_file() or path.read_bytes() != data:
+                raise RuntimeError(f"selective acquisition snapshot differs: {path}")
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _copy_selective_acquisition_snapshot(
+    source: DataSource,
+    run_dir: Path,
+) -> tuple[Path, str]:
+    """Copy root acquisition evidence into a create-only per-run snapshot."""
+
+    source_path = source.acquisition_provenance_path
+    source_digest = source.acquisition_provenance_sha256
+    if source_path is None or source_digest is None:
+        raise RuntimeError("selective source is missing acquisition provenance")
+    raw = source_path.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != source_digest:
+        raise RuntimeError("selective acquisition provenance changed after validation")
+    destination = run_dir / "selective_task_provenance.json"
+    digest_destination = run_dir / "selective_task_provenance.sha256"
+    _copy_create_only(destination, raw)
+    _copy_create_only(digest_destination, (digest + "\n").encode("ascii"))
+    return destination.resolve(), digest
+
+
 def _canonical_full_data_timelines(
     timelines: object,
+    *,
+    expected_task: str | None = None,
 ) -> tuple[dict[str, str | None], ...]:
     """Normalize official study identities without applying task filters."""
 
@@ -114,6 +235,10 @@ def _canonical_full_data_timelines(
             if not isinstance(value, str):
                 raise ValueError(f"timeline {index} field {field} must be a string")
             values[field] = value
+        if expected_task is not None and values["task"] != expected_task:
+            raise ValueError(
+                f"timeline {index} task does not match expected task {expected_task!r}"
+            )
         run = timeline.get("run")
         if run is not None and not isinstance(run, str):
             raise ValueError(f"timeline {index} field run must be a string or null")
@@ -132,17 +257,20 @@ def _full_data_provenance_payload(
     *,
     data_root: Path,
     timelines: Sequence[Mapping[str, str | None]],
+    data_mode: str = "full",
 ) -> tuple[dict[str, Any], bytes]:
     """Build the versioned full-data audit payload and its exact bytes."""
 
     payload: dict[str, Any] = {
         "schema_version": 1,
-        "data_mode": "full",
+        "data_mode": data_mode,
         "study": "Shirazi2024Hbn",
         "data_root": str(data_root.resolve()),
         "timelines": [dict(timeline) for timeline in timelines],
         "timeline_count": len(timelines),
     }
+    if data_mode == "selective_task":
+        payload["task"] = SELECTIVE_TASK
     raw = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
     return payload, raw
 
@@ -1110,6 +1238,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="use the official Shirazi2024Hbn timeline discovery without a manifest",
     )
+    parser.add_argument(
+        "--selective-task",
+        action="store_true",
+        help="use a complete selective task-RestingState HBN acquisition",
+    )
     parser.add_argument("--data-root", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--config", type=Path)
@@ -1156,16 +1289,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     missing = [name for name, value in required.items() if value is None]
     if missing:
         parser.error("missing required arguments: " + ", ".join(missing))
-    if args.manifest is not None and args.full_data:
-        parser.error("--manifest and --full-data are mutually exclusive")
-    if args.manifest is None and not args.full_data:
-        parser.error("exactly one of --manifest or --full-data is required")
+    source_modes = int(args.manifest is not None) + int(args.full_data) + int(args.selective_task)
+    if source_modes != 1:
+        parser.error("exactly one of --manifest, --full-data, or --selective-task is required")
 
     resolved_seeds = validate_seeds(args.seeds)
     try:
         source = _resolve_data_source(
             manifest_path=args.manifest,
             full_data=args.full_data,
+            selective_task=args.selective_task,
             data_root=args.data_root,
         )
     except (FileNotFoundError, NotADirectoryError, ValueError) as error:
@@ -1208,6 +1341,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             provenance_path = (
                 run_dir / "full_data_provenance.json"
                 if source.data_mode == "full"
+                else run_dir / "selective_task_timeline_provenance.json"
+                if source.data_mode == "selective_task"
                 else source.manifest_path
             )
             seed_metadata = {
@@ -1220,9 +1355,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                     else None
                 ),
                 "provenance_sha256": source.manifest_sha256,
+                "acquisition_provenance_path": None,
+                "acquisition_provenance_sha256": None,
                 "timeline_count": rows,
             }
             try:
+                if source.data_mode == "selective_task":
+                    acquisition_path, acquisition_digest = _copy_selective_acquisition_snapshot(
+                        source,
+                        run_dir,
+                    )
+                    seed_metadata.update(
+                        {
+                            "acquisition_provenance_path": str(acquisition_path),
+                            "acquisition_provenance_sha256": acquisition_digest,
+                        }
+                    )
                 _write_config(
                     config_path,
                     data_root=source.data_root,
