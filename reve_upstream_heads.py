@@ -102,6 +102,7 @@ __all__ = [
     "GlobalStatsResidualHead",
     "MeanRichStatsResidualHead",
     "MeanRichStatsGradientRoutesHead",
+    "MultiQueryRichStatsResidualHead",
     "MeanAnchorEnsembleHead",
     "MeanReliabilityShrinkageHead",
     "audit_reliability_gates",

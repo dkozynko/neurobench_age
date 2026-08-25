@@ -378,9 +378,17 @@ def validate_evaluation_options(
 class EpochValidationMetrics(LightningCallback):
     """Persist validation Pearson without retaining or touching test data."""
 
-    def __init__(self, output_path: Path, seed: int | None = None):
+    def __init__(
+        self,
+        output_path: Path,
+        seed: int | None = None,
+        validation_loader: Any | None = None,
+        inverse_transform_targets: bool = False,
+    ):
         self.output_path = output_path
         self.seed = seed
+        self.validation_loader = validation_loader
+        self.inverse_transform_targets = bool(inverse_transform_targets)
         self.training_started = False
 
     def on_train_start(self, trainer: Any, pl_module: Any) -> None:
@@ -396,6 +404,30 @@ class EpochValidationMetrics(LightningCallback):
         if value is None:
             raise RuntimeError("strict validation did not expose val/pearsonr")
         pearson = float(torch.as_tensor(value).detach().cpu())
+        if self.inverse_transform_targets:
+            if self.validation_loader is None:
+                raise RuntimeError("original-unit validation requires a validation loader")
+            from torchmetrics.regression import PearsonCorrCoef
+
+            scaler = getattr(pl_module, "target_scaler", None)
+            if scaler is None or not callable(getattr(scaler, "inverse_transform", None)):
+                raise RuntimeError("original-unit validation requires a fitted target scaler")
+            metric = PearsonCorrCoef()
+            was_training = bool(pl_module.training)
+            pl_module.eval()
+            try:
+                with torch.inference_mode():
+                    for batch in self.validation_loader:
+                        batch = trainer.strategy.batch_to_device(batch, pl_module.device, dataloader_idx=0)
+                        prediction = scaler.inverse_transform(pl_module.model_forward(batch))
+                        target = scaler.inverse_transform(batch.data["target"])
+                        if target.ndim == 3 and target.shape[1] == 1:
+                            target = target.squeeze(1)
+                        metric.update(prediction.detach().cpu(), target.detach().cpu())
+                pearson = float(metric.compute().detach().cpu())
+            finally:
+                if was_training:
+                    pl_module.train()
         if not math.isfinite(pearson):
             raise RuntimeError("strict validation produced non-finite val/pearsonr")
 
@@ -1612,7 +1644,7 @@ def run_official_stack_smoke(
 
     if head_variant == "last_tuned":
         reve.validate_last_tuned_protocol(head_variant)
-    elif head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
+    elif head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats"}:
         reve.validate_local_head_variant(head_variant)
     else:
         reve.validate_upstream_head_variant(head_variant)
@@ -1736,6 +1768,13 @@ def run_official_stack_smoke(
                 "prediction_finite": bool(torch.isfinite(prediction).all().item()),
             }
         )
+    elif head_variant == "multi_query_rich_stats":
+        output.update(
+            {
+                "prediction_finite": bool(torch.isfinite(prediction).all().item()),
+                "head_metadata": adapter.head.metadata(),
+            }
+        )
     elif head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable"}:
         output.update(
             {
@@ -1850,6 +1889,9 @@ def run_official_subset(
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
     swa_window: int = 0,
+    correlation_loss_lambda: float = 0.0,
+    robust_loss: str = "mse",
+    target_scaler_mode: str = "none",
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
@@ -1871,6 +1913,9 @@ def run_official_subset(
         mean_gradient_scale=mean_gradient_scale,
         correction_gradient_scale=correction_gradient_scale,
         swa_window=swa_window,
+        correlation_loss_lambda=correlation_loss_lambda,
+        robust_loss=robust_loss,
+        target_scaler_mode=target_scaler_mode,
         seeds=seeds,
         evaluation_protocol=evaluation_protocol,
         strict_final_test=strict_final_test,
@@ -1898,6 +1943,9 @@ def _write_config(
     mean_gradient_scale: float | None = None,
     correction_gradient_scale: float | None = None,
     swa_window: int = 0,
+    correlation_loss_lambda: float = 0.0,
+    robust_loss: str = "mse",
+    target_scaler_mode: str = "none",
 ) -> None:
     cache_namespace = {
         "full": "neuralbench_official_cache_full",
@@ -1925,6 +1973,12 @@ def _write_config(
                 "H7_MEAN_GRADIENT_SCALE": mean_gradient_scale,
                 "H7_CORRECTION_GRADIENT_SCALE": correction_gradient_scale,
                 "SWA_WINDOW": swa_window,
+                "CORRELATION_LOSS_LAMBDA": float(correlation_loss_lambda),
+                "CORRELATION_LOSS_OBJECTIVE": (
+                    "batch_pearson" if correlation_loss_lambda else None
+                ),
+                "ROBUST_LOSS": robust_loss,
+                "TARGET_SCALER_MODE": target_scaler_mode,
             }
         )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1976,12 +2030,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument(
         "--smoke-head",
-        choices=("mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "last_avg", "last", "all", "last_tuned"),
         help="run a data-free smoke test using the installed official stack",
     )
     parser.add_argument(
         "--head-variant",
-        choices=("mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "last_avg", "last", "all", "last_tuned"),
         default="mean_linear",
     )
     parser.add_argument(
@@ -2015,6 +2069,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=0,
         help="average the final 3 or 5 validation checkpoints (strict rich-stats screen only)",
     )
+    parser.add_argument(
+        "--correlation-loss-lambda",
+        type=float,
+        choices=(0.0, 0.02, 0.05),
+        default=0.0,
+        help="add lambda * (1 - batch Pearson) to MSE (strict rich-stats screen only)",
+    )
+    parser.add_argument(
+        "--robust-loss",
+        choices=("mse", "smooth_l1"),
+        default="mse",
+        help="training loss (strict rich-stats screen only)",
+    )
+    parser.add_argument(
+        "--target-scaler",
+        choices=("none", "zscore"),
+        default="none",
+        help="fit a training-only target z-score scaler (strict rich-stats screen only)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -2028,6 +2101,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.evaluation_protocol != "strict" or args.head_variant != "mean_rich_stats_residual"
     ):
         parser.error("--swa-window requires strict mean_rich_stats_residual evaluation")
+    if args.correlation_loss_lambda and (
+        args.evaluation_protocol != "strict" or args.head_variant != "mean_rich_stats_residual"
+    ):
+        parser.error(
+            "--correlation-loss-lambda requires strict mean_rich_stats_residual evaluation"
+        )
+    if args.robust_loss != "mse" and (
+        args.evaluation_protocol != "strict" or args.head_variant != "mean_rich_stats_residual"
+    ):
+        parser.error("--robust-loss smooth_l1 requires strict mean_rich_stats_residual evaluation")
+    if args.target_scaler != "none" and (
+        args.evaluation_protocol != "strict" or args.head_variant != "mean_rich_stats_residual"
+    ):
+        parser.error("--target-scaler zscore requires strict mean_rich_stats_residual evaluation")
 
     if args.smoke_head is not None:
         print(json.dumps(run_official_stack_smoke(head_variant=args.smoke_head), indent=2))
@@ -2051,6 +2138,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     ):
         if not math.isfinite(float(value)) or not 0.0 <= float(value) <= 2.0:
             parser.error(f"{name} must be finite and in [0, 2]")
+    if not math.isfinite(float(args.correlation_loss_lambda)) or not 0.0 <= float(args.correlation_loss_lambda) <= 0.1:
+        parser.error("--correlation-loss-lambda must be finite and in [0, 0.1]")
     try:
         source = _resolve_data_source(
             manifest_path=args.manifest,
@@ -2075,6 +2164,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             head_variant=args.head_variant,
             mean_gradient_scale=args.mean_gradient_scale,
             correction_gradient_scale=args.correction_gradient_scale,
+            correlation_loss_lambda=args.correlation_loss_lambda,
+            robust_loss=args.robust_loss,
+            target_scaler_mode=args.target_scaler,
             data_mode=source.data_mode,
             manifest_path=source.manifest_path,
             manifest_digest=source.manifest_sha256,
@@ -2120,6 +2212,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "mean_gradient_scale": args.mean_gradient_scale,
                 "correction_gradient_scale": args.correction_gradient_scale,
                 "swa_window": args.swa_window,
+                "correlation_loss_lambda": args.correlation_loss_lambda,
+                "correlation_loss_objective": (
+                    "batch_pearson" if args.correlation_loss_lambda else None
+                ),
+                "robust_loss": args.robust_loss,
+                "target_scaler_mode": args.target_scaler,
             }
             try:
                 if source.data_mode == "selective_task":
@@ -2142,6 +2240,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     mean_gradient_scale=args.mean_gradient_scale,
                     correction_gradient_scale=args.correction_gradient_scale,
                     swa_window=args.swa_window,
+                    correlation_loss_lambda=args.correlation_loss_lambda,
+                    robust_loss=args.robust_loss,
+                    target_scaler_mode=args.target_scaler,
                 )
                 results = run_official_subset(
                     manifest_path=source.manifest_path,
@@ -2153,6 +2254,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     mean_gradient_scale=args.mean_gradient_scale,
                     correction_gradient_scale=args.correction_gradient_scale,
                     swa_window=args.swa_window,
+                    correlation_loss_lambda=args.correlation_loss_lambda,
+                    robust_loss=args.robust_loss,
+                    target_scaler_mode=args.target_scaler,
                     seeds=(seed,),
                     evaluation_protocol=args.evaluation_protocol,
                     strict_final_test=args.strict_final_test,

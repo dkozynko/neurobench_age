@@ -45,6 +45,7 @@ LOCAL_HEAD_VARIANTS = (
     "grouped_stats_shared_gate",
     "temporal_pyramid_stats",
     "mean_covariance_residual",
+    "multi_query_rich_stats",
 )
 LAST_TUNED_PROTOCOL_VARIANTS = ("last_tuned",)
 HEAD_VARIANTS = OFFICIAL_HEAD_VARIANTS + LOCAL_HEAD_VARIANTS + LAST_TUNED_PROTOCOL_VARIANTS
@@ -323,6 +324,7 @@ def validate_official_protocol(
     loaders: Mapping[str, Any] | None = None,
     n_total_params: int | None = None,
     n_trainable_params: int | None = None,
+    allow_target_scaler: bool = False,
 ) -> None:
     """Fail before fit if the resolved NeuralBench protocol is not canonical."""
 
@@ -365,6 +367,10 @@ def validate_official_protocol(
     mismatches: list[str] = []
     for path, expected in checks.items():
         actual = _get_path(experiment, path)
+        if path == "target_scaler" and allow_target_scaler:
+            if actual is _MISSING or actual is None:
+                mismatches.append("target_scaler: expected fitted training-only StandardScaler")
+            continue
         if actual is _MISSING or not _same(actual, expected):
             mismatches.append(f"{path}: expected {expected!r}, got {actual!r}")
 

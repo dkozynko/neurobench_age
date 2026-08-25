@@ -7,6 +7,7 @@ the hooks object so tests and callers can keep replacing the public seams.
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import os
 import sys
@@ -36,7 +37,7 @@ class CorrelationAuxiliaryLoss(nn.Module):
         self.base_loss = base_loss
         self.coefficient = float(coefficient)
 
-    def forward(self, prediction: torch.Tensor, target: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         mse = self.base_loss(prediction, target)
         prediction_values = prediction.reshape(prediction.shape[0], -1).mean(dim=1)
         target_values = target.reshape(target.shape[0], -1).mean(dim=1)
@@ -55,11 +56,97 @@ class CorrelationAuxiliaryLoss(nn.Module):
                     prediction_centered * target_centered
                 ).sum() / denominator
                 auxiliary = float(self.coefficient) * (1.0 - correlation.clamp(-1.0, 1.0))
-        return {
-            "total": mse + auxiliary,
-            "mse": mse,
-            "pearson_aux": auxiliary,
-        }
+        # NeuralBench expects its configured loss callable to return one scalar
+        # tensor.  Keep the components as attributes for optional diagnostics,
+        # while returning the scalar consumed by Lightning's training step.
+        self.last_mse = mse.detach()
+        self.last_pearson_aux = auxiliary.detach()
+        return mse + auxiliary
+
+
+class TrainingOnlyTargetZScore:
+    """Small scaler fitted exclusively through training batches."""
+
+    def __init__(self) -> None:
+        self._mean: torch.Tensor | None = None
+        self._scale: torch.Tensor | None = None
+        self._n_samples_seen = 0
+
+    def partial_fit(self, values: torch.Tensor, *, split: str = "train") -> "TrainingOnlyTargetZScore":
+        if split != "train":
+            raise ValueError("target z-score accepts training targets only")
+        values = torch.as_tensor(values).detach()
+        flat = values.reshape(-1, 1).float()
+        if flat.numel() == 0:
+            raise ValueError("target z-score cannot fit an empty batch")
+        count = flat.shape[0]
+        batch_mean = flat.mean(dim=0)
+        batch_var = flat.var(dim=0, unbiased=False)
+        if self._mean is None:
+            self._mean = batch_mean
+            self._scale = batch_var.sqrt().clamp_min(1e-6)
+            self._n_samples_seen = count
+            return self
+        previous_count = self._n_samples_seen
+        previous_mean = self._mean
+        previous_var = self._scale.square()
+        total = previous_count + count
+        mean = (previous_count * previous_mean + count * batch_mean) / total
+        var = (
+            previous_count * previous_var
+            + count * batch_var
+            + previous_count * count / total * (previous_mean - batch_mean).square()
+        ) / total
+        self._mean = mean
+        self._scale = var.sqrt().clamp_min(1e-6)
+        self._n_samples_seen = total
+        return self
+
+    def transform(self, values: torch.Tensor) -> torch.Tensor:
+        if self._mean is None or self._scale is None:
+            raise RuntimeError("target z-score is not fitted")
+        return (values - self._mean.to(values.device, values.dtype)) / self._scale.to(values.device, values.dtype)
+
+    def inverse_transform(self, values: torch.Tensor) -> torch.Tensor:
+        if self._mean is None or self._scale is None:
+            raise RuntimeError("target z-score is not fitted")
+        return values * self._scale.to(values.device, values.dtype) + self._mean.to(values.device, values.dtype)
+
+    def statistics_hash(self) -> str:
+        if self._mean is None or self._scale is None:
+            return hashlib.sha256(b"unfitted").hexdigest()
+        payload = self._mean.detach().cpu().contiguous().numpy().tobytes() + self._scale.detach().cpu().contiguous().numpy().tobytes()
+        return hashlib.sha256(payload).hexdigest()
+
+
+def target_scaler_metadata(
+    *,
+    scaler: TrainingOnlyTargetZScore,
+    train_subject_ids: Sequence[str],
+    train_timeline_ids: Sequence[str],
+) -> dict[str, Any]:
+    return {
+        "type": "zscore",
+        "fit_split": "train",
+        "n_samples_seen": int(scaler._n_samples_seen),
+        "mean": None if scaler._mean is None else float(scaler._mean.flatten()[0]),
+        "scale": None if scaler._scale is None else float(scaler._scale.flatten()[0]),
+        "statistics_sha256": scaler.statistics_hash(),
+        "train_subject_ids": sorted(set(str(item) for item in train_subject_ids)),
+        "train_timeline_ids": sorted(set(str(item) for item in train_timeline_ids)),
+        "validation_subject_ids": [],
+        "validation_timeline_ids": [],
+        "test_subject_ids": [],
+        "test_timeline_ids": [],
+    }
+
+
+def build_training_loss(robust_loss: str = "mse") -> nn.Module:
+    if robust_loss == "mse":
+        return nn.MSELoss()
+    if robust_loss == "smooth_l1":
+        return nn.SmoothL1Loss(beta=1.0)
+    raise ValueError("robust_loss must be 'mse' or 'smooth_l1'")
 
 
 def _h6_noise_seed(*, run_seed: int, epoch: int, batch_idx: int) -> int:
@@ -827,6 +914,9 @@ def _head_metadata(
     head_variant: str,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
+    correlation_loss_lambda: float = 0.0,
+    robust_loss: str = "mse",
+    target_scaler_mode: str = "none",
     data_mode: str = "manifest",
     manifest_path: Path | None = None,
     manifest_digest: str | None = None,
@@ -845,6 +935,8 @@ def _head_metadata(
     ):
         if not math.isfinite(float(value)) or not 0.0 <= float(value) <= 2.0:
             raise ValueError(f"{name} must be finite and in [0, 2]")
+    if not math.isfinite(float(correlation_loss_lambda)) or not 0.0 <= float(correlation_loss_lambda) <= 0.1:
+        raise ValueError("correlation_loss_lambda must be finite and in [0, 0.1]")
 
     query_initialization = {
         "mean_linear": "neuralbench_default",
@@ -873,13 +965,14 @@ def _head_metadata(
         "grouped_stats_shared_gate": "not_applicable",
         "temporal_pyramid_stats": "not_applicable",
         "mean_covariance_residual": "not_applicable",
+        "multi_query_rich_stats": "signed_basis_pm_e0",
         "last_avg": "upstream_random_unused",
         "last_tuned": "train_dummy_final_token_mean",
         "last": "upstream_random",
         "all": "upstream_random",
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
-    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}
+    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats"}
     if data_mode not in {"manifest", "full", "selective_task"}:
         raise ValueError(f"unsupported data mode: {data_mode!r}")
     if data_mode == "manifest" and manifest_path is not None and provenance_path is None:
@@ -943,6 +1036,10 @@ def _head_metadata(
             else "upstream_reve"
         ),
         "head_dropout": 0.0,
+        "correlation_loss_lambda": float(correlation_loss_lambda),
+        "correlation_loss_objective": "batch_pearson" if correlation_loss_lambda else None,
+        "robust_loss": robust_loss,
+        "target_scaler_mode": target_scaler_mode,
         "head_query_initialization": query_initialization,
         "head_linear_initialization": (
             "neuralbench_default"
@@ -1144,6 +1241,20 @@ def _head_metadata(
                 "normalization": "none",
             }
         )
+    if head_variant == "multi_query_rich_stats":
+        metadata.update(
+            {
+                "head_architecture": "multi_query_rich_stats_zero_correction",
+                "query_initialization": "signed_basis_pm_e0",
+                "query_count": 2,
+                "temperature": 1.0,
+                "correction_initialization": "zero",
+                "correction_features": "two_query_weighted_mean_std_range_mad_mean_abs",
+                "correction_scale": 0.5,
+                "query_collapse_threshold": 1e-4,
+                "normalization": "none",
+            }
+        )
     if head_variant == "mean_anchor_ensemble":
         metadata.update(
             {
@@ -1319,12 +1430,18 @@ def _append_evaluation_callback(
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
     swa_window: int = 0,
+    target_scaler_mode: str = "none",
 ) -> None:
     """Attach exactly one training-time metric callback for the protocol."""
 
     if evaluation_protocol == "strict":
         trainer.callbacks.append(
-            hooks.EpochValidationMetrics(epoch_metrics_path, seed=seed)
+            hooks.EpochValidationMetrics(
+                epoch_metrics_path,
+                seed=seed,
+                validation_loader=loaders.get("val"),
+                inverse_transform_targets=target_scaler_mode == "zscore",
+            )
         )
         if head_variant in {"mean_reliability_shrinkage", "mean_reliability_stable"}:
             trainer.callbacks.append(
@@ -1389,6 +1506,9 @@ def _patch_official_components(
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
     swa_window: int = 0,
+    correlation_loss_lambda: float = 0.0,
+    robust_loss: str = "mse",
+    target_scaler_mode: str = "none",
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
@@ -1428,6 +1548,24 @@ def _patch_official_components(
         raise ValueError("swa_window must be one of 0, 3, or 5")
     if swa_window and (head_variant != "mean_rich_stats_residual" or evaluation_protocol != "strict"):
         raise ValueError("SWA requires strict evaluation of mean_rich_stats_residual")
+    if not math.isfinite(float(correlation_loss_lambda)) or not 0.0 <= float(correlation_loss_lambda) <= 0.1:
+        raise ValueError("correlation_loss_lambda must be finite and in [0, 0.1]")
+    if correlation_loss_lambda and (
+        head_variant != "mean_rich_stats_residual" or evaluation_protocol != "strict"
+    ):
+        raise ValueError("correlation loss requires strict evaluation of mean_rich_stats_residual")
+    if robust_loss not in {"mse", "smooth_l1"}:
+        raise ValueError("robust_loss must be 'mse' or 'smooth_l1'")
+    if robust_loss != "mse" and (
+        head_variant != "mean_rich_stats_residual" or evaluation_protocol != "strict"
+    ):
+        raise ValueError("smooth_l1 requires strict evaluation of mean_rich_stats_residual")
+    if target_scaler_mode not in {"none", "zscore"}:
+        raise ValueError("target_scaler_mode must be 'none' or 'zscore'")
+    if target_scaler_mode == "zscore" and (
+        head_variant != "mean_rich_stats_residual" or evaluation_protocol != "strict"
+    ):
+        raise ValueError("target z-score requires strict evaluation of mean_rich_stats_residual")
     resolved_seeds = hooks.validate_seeds(seeds)
     if head_variant == "mean_reliability_stable" and evaluation_protocol != "strict":
         raise ValueError("mean_reliability_stable requires strict evaluation")
@@ -1676,6 +1814,7 @@ def _patch_official_components(
                 mean_gradient_scale=mean_gradient_scale,
                 correction_gradient_scale=correction_gradient_scale,
                 swa_window=swa_window,
+                target_scaler_mode=target_scaler_mode,
                 hooks=hooks,
             )
         return trainer
@@ -1713,6 +1852,8 @@ def _patch_official_components(
         # Keep the selected checkpoint and raw prediction cache available for
         # post-run hashing/export. This does not affect training or selection.
         hooks._set_frozen_experiment_field(self, "delete_checkpoints_on_exit", False)
+        if target_scaler_mode == "zscore":
+            hooks._set_frozen_experiment_field(self, "target_scaler", TrainingOnlyTargetZScore())
         result = original_setup_run(self)
         uid_folder = self.infra.uid_folder()
         if uid_folder is not None:
@@ -1726,6 +1867,12 @@ def _patch_official_components(
                     "protocol": reve.PROTOCOL_CONTRACT,
                     "evaluation_protocol": evaluation_protocol,
                     "strict_final_test": bool(strict_final_test),
+                    "correlation_loss_lambda": float(correlation_loss_lambda),
+                    "correlation_loss_objective": (
+                        "batch_pearson" if correlation_loss_lambda else None
+                    ),
+                    "robust_loss": robust_loss,
+                    "target_scaler_mode": target_scaler_mode,
                     "test_access_policy": (
                         "single_use_predeclared"
                         if strict_final_test
@@ -1835,7 +1982,57 @@ def _patch_official_components(
             persist_tuning_metadata(self, tuning_metadata)
         else:
             loaders = captured_loaders.get(id(self.data))
-            reve.validate_official_protocol(self, loaders=loaders, n_total_params=self._n_total_params, n_trainable_params=self._n_trainable_params)
+            reve.validate_official_protocol(
+                self,
+                loaders=loaders,
+                n_total_params=self._n_total_params,
+                n_trainable_params=self._n_trainable_params,
+                allow_target_scaler=target_scaler_mode == "zscore",
+            )
+        brain_module = getattr(self, "_brain_module", None)
+        if robust_loss != "mse":
+            if brain_module is None or not isinstance(getattr(brain_module, "loss", None), nn.Module):
+                raise RuntimeError("robust loss requires the prepared BrainModule loss")
+            brain_module.loss = build_training_loss(robust_loss)
+            persist_tuning_metadata(self, {"robust_loss": robust_loss, "smooth_l1_beta": 1.0})
+        if target_scaler_mode == "zscore":
+            scaler = getattr(brain_module, "target_scaler", None)
+            if not isinstance(scaler, TrainingOnlyTargetZScore) or scaler._mean is None:
+                raise RuntimeError("target z-score scaler was not fitted on training targets")
+            train_subject_ids: list[str] = []
+            train_timeline_ids: list[str] = []
+            if manifest_path is not None:
+                import csv
+                with manifest_path.open(newline="", encoding="utf-8") as handle:
+                    for row in csv.DictReader(handle):
+                        if row.get("split") == "train":
+                            train_subject_ids.append(str(row.get("subject", "")))
+                            train_timeline_ids.append(str(row.get("recording_relpath", "")))
+            persist_tuning_metadata(
+                self,
+                {
+                    "target_scaler": target_scaler_metadata(
+                        scaler=scaler,
+                        train_subject_ids=train_subject_ids,
+                        train_timeline_ids=train_timeline_ids,
+                    )
+                },
+            )
+        if correlation_loss_lambda:
+            brain_module = getattr(self, "_brain_module", None)
+            if brain_module is None or not isinstance(getattr(brain_module, "loss", None), nn.Module):
+                raise RuntimeError("correlation loss requires the prepared BrainModule loss")
+            brain_module.loss = CorrelationAuxiliaryLoss(
+                brain_module.loss,
+                coefficient=correlation_loss_lambda,
+            )
+            persist_tuning_metadata(
+                self,
+                {
+                    "correlation_loss_lambda": float(correlation_loss_lambda),
+                    "correlation_loss_objective": "batch_pearson",
+                },
+            )
         return result
 
     # NeuralBench's CLI and experiment_config modules each keep a local alias
@@ -1971,6 +2168,9 @@ def run_official_subset(
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
     swa_window: int = 0,
+    correlation_loss_lambda: float = 0.0,
+    robust_loss: str = "mse",
+    target_scaler_mode: str = "none",
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
@@ -2000,6 +2200,9 @@ def run_official_subset(
             mean_gradient_scale=mean_gradient_scale,
             correction_gradient_scale=correction_gradient_scale,
             swa_window=swa_window,
+            correlation_loss_lambda=correlation_loss_lambda,
+            robust_loss=robust_loss,
+            target_scaler_mode=target_scaler_mode,
             seeds=seeds,
             evaluation_protocol=evaluation_protocol,
             strict_final_test=strict_final_test,
