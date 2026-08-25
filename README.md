@@ -244,7 +244,10 @@ This gated run creates durable `test_started.json` and `test_completed.json`
 markers, verifies that the selected checkpoint hash did not change, and records
 the exact official result key `test/pearsonr` as the report's
 `test_pearsonr`. A second test invocation in the same seed directory fails
-closed. Use `--evaluation-protocol legacy` only for historical parity; it
+closed. Each strict seed directory must also be empty before training; any
+stale report, failure record, marker, config, or checkpoint makes the new
+attempt fail closed instead of mixing evidence. Use
+`--evaluation-protocol legacy` only for historical parity; it
 explicitly enables `epoch_test_metrics.jsonl`, is labeled `legacy`, and cannot
 support a strict holdout claim. `--strict-final-test` is rejected with legacy.
 

@@ -1190,6 +1190,18 @@ def validate_seeds(seeds: Sequence[int]) -> tuple[int, ...]:
     return resolved
 
 
+def _ensure_fresh_strict_run_dir(run_dir: Path) -> None:
+    """Fail closed instead of mixing a new strict attempt with old evidence."""
+
+    if not run_dir.exists():
+        return
+    if any(run_dir.iterdir()):
+        raise RuntimeError(
+            "strict run directory must be empty before a new attempt: "
+            f"{run_dir}"
+        )
+
+
 def _get_attr_or_key(value: Any, key: str, default: Any = None) -> Any:
     if isinstance(value, Mapping):
         return value.get(key, default)
@@ -2182,6 +2194,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         summary_path = args.output_dir / "summary.json"
         for seed in resolved_seeds:
             run_dir = args.output_dir / args.head_variant / f"seed{seed}"
+            if args.evaluation_protocol == "strict":
+                _ensure_fresh_strict_run_dir(run_dir)
             config_path = run_dir / "neuralbench_config.json"
             epoch_metrics_path = run_dir / (
                 "epoch_validation_metrics.jsonl"
