@@ -128,6 +128,56 @@ NeuralBench Age task apply its own filters and splits to the complete
 `--data-root`. The reference `mean_linear` path, backbone, optimizer, early
 stopping, and preprocessing remain shared in both modes.
 
+### Selective HBN task acquisition
+
+For the Age experiment, the full HBN root is not required. The standalone
+downloader fetches only `task-RestingState` from the eleven official HBN
+releases. It keeps the official layout under `DATA_ROOT/R1/download` through
+`DATA_ROOT/R11/download` and writes the current acquisition pointer to
+`selective_task_provenance.json` plus its `.sha256` sidecar.
+
+Validate one release first:
+
+```bash
+python selective_hbn_download.py \
+  --data-root /workspace/neurobench_data_hbn \
+  --releases R1 \
+  --workers 8
+```
+
+Download and audit all releases:
+
+```bash
+python selective_hbn_download.py \
+  --data-root /workspace/neurobench_data_hbn \
+  --workers 8
+```
+
+The root provenance reports `complete=true` only after all R1–R11 releases
+pass the file and `.set`/`.fdt` companion audit. A one-release or otherwise
+partial acquisition is useful for validating the downloader but is rejected
+by the benchmark runner. Existing downloaded files are preserved on provider,
+audit, or serialization failures; the root JSON/sidecar is a mutable current
+pointer and each benchmark seed receives its own create-only snapshot.
+
+Run the rich-statistics residual head on this selective root:
+
+```bash
+python official_reve_subset.py \
+  --selective-task \
+  --data-root /workspace/neurobench_data_hbn \
+  --output-dir /workspace/hbn_subset/results/selective_mean_rich_stats_residual \
+  --config /workspace/hbn_subset/results/selective_mean_rich_stats_residual/config.json \
+  --head-variant mean_rich_stats_residual \
+  --evaluation-protocol strict \
+  --strict-final-test \
+  --seeds 33 34 35
+```
+
+Selective mode leaves official HBN timeline discovery intact, records both the
+official per-run timeline provenance and the immutable acquisition snapshot,
+and does not download the other HBN tasks.
+
 Before an HBN run, exercise the installed official REVE/NeuralTrain interface
 without downloading HBN recordings:
 
@@ -146,7 +196,9 @@ The seed
 directory then contains an immutable `selection.json` with the checkpoint,
 configuration, source provenance, validation-history, and SHA-256 hashes. A
 manifest run records its manifest; a full-data run records
-`full_data_provenance.json` and leaves manifest fields null. A strict
+`full_data_provenance.json`, while a selective run records both
+`selective_task_timeline_provenance.json` and its acquisition snapshot. Both
+non-manifest modes leave manifest fields null. A strict
 validation-only report has `test_status: withheld` and no test metric.
 
 After the architecture and hyperparameters are frozen, a single predeclared
@@ -164,8 +216,9 @@ python official_reve_subset.py \
   --seeds 33 34 35
 ```
 
-To run the complete HBN root with the proposed rich-statistics residual head,
-use `--full-data` instead of `--manifest`:
+To run a complete HBN root with the proposed rich-statistics residual head,
+use `--full-data` instead of `--manifest` (or use `--selective-task` above for
+the smaller RestingState-only acquisition):
 
 ```bash
 python official_reve_subset.py \

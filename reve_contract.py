@@ -37,6 +37,7 @@ LOCAL_HEAD_VARIANTS = (
     "mean_attention_gated",
     "global_stats_residual",
     "mean_rich_stats_residual",
+    "mean_anchor_ensemble",
     "grouped_rich_stats_shrinkage",
     "grouped_stats_shared_gate",
     "temporal_pyramid_stats",

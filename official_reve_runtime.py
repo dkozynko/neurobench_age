@@ -590,6 +590,7 @@ def _head_metadata(
         "mean_attention_gated": "train_dummy_final_token_mean",
         "global_stats_residual": "not_applicable",
         "mean_rich_stats_residual": "not_applicable",
+        "mean_anchor_ensemble": "not_applicable",
         "grouped_rich_stats_shrinkage": "not_applicable",
         "grouped_stats_shared_gate": "not_applicable",
         "temporal_pyramid_stats": "not_applicable",
@@ -600,7 +601,7 @@ def _head_metadata(
         "all": "upstream_random",
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
-    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}
+    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_anchor_ensemble", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}
     if data_mode not in {"manifest", "full", "selective_task"}:
         raise ValueError(f"unsupported data mode: {data_mode!r}")
     if data_mode == "manifest" and manifest_path is not None and provenance_path is None:
@@ -643,6 +644,8 @@ def _head_metadata(
             if head_variant == "global_stats_residual"
             else "local_mean_rich_stats_residual"
             if head_variant == "mean_rich_stats_residual"
+            else "local_mean_anchor_ensemble"
+            if head_variant == "mean_anchor_ensemble"
             else "local_grouped_rich_stats_shrinkage"
             if head_variant == "grouped_rich_stats_shrinkage"
             else "local_grouped_stats_shared_gate"
@@ -854,6 +857,19 @@ def _head_metadata(
                 "correction_features": "per_feature_std_range_mad_and_mean_abs",
                 "correction_scale": 0.5,
                 "correction_backbone_gradient": "enabled",
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_anchor_ensemble":
+        metadata.update(
+            {
+                "head_architecture": "mean_linear_anchored_rich_stats_expert_ensemble",
+                "query_initialization": "not_applicable",
+                "expert": "mean_rich_stats_residual",
+                "gate_parameterization": "centered_sigmoid",
+                "gate_initialization": 0.0,
+                "gate_range": [-1.0, 1.0],
+                "baseline_fallback": "mean_linear_exact_at_gate_zero",
                 "normalization": "none",
             }
         )
@@ -1315,7 +1331,7 @@ def _patch_official_components(
     ) -> Any:
         result = original_prepare_pl_module(self, train_loader, val_loader)
         persist_provenance_metadata(self)
-        if head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
+        if head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "mean_anchor_ensemble"}:
             brain_module = getattr(self, "_brain_module", None)
             grouped_head = None
             expected_class_name = {
@@ -1323,6 +1339,7 @@ def _patch_official_components(
                 "grouped_stats_shared_gate": "GroupedStatsSharedGateHead",
                 "temporal_pyramid_stats": "TemporalPyramidStatsResidualHead",
                 "mean_covariance_residual": "MeanCovarianceResidualHead",
+                "mean_anchor_ensemble": "MeanAnchorEnsembleHead",
             }[head_variant]
             if brain_module is not None and hasattr(brain_module, "modules"):
                 grouped_head = next(

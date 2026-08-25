@@ -78,7 +78,7 @@ def _resolve_data_source(
 
     source_modes = int(manifest_path is not None) + int(full_data) + int(selective_task)
     if source_modes != 1:
-        raise ValueError("exactly one of --manifest or --full-data is required")
+        raise ValueError("exactly one of --manifest, --full-data, or --selective-task is required")
     resolved_root = data_root.resolve()
     if (full_data or selective_task) and not resolved_root.exists():
         raise FileNotFoundError(f"data root does not exist: {resolved_root}")
@@ -641,7 +641,7 @@ def _strict_report_fields(
     if selection.get("selection_mode") != "max":
         raise RuntimeError("strict selection mode must be max")
     data_mode = selection.get("data_mode", "manifest")
-    if data_mode not in {"manifest", "full"}:
+    if data_mode not in {"manifest", "full", "selective_task"}:
         raise RuntimeError("strict selection has an invalid data_mode")
 
     required_hash_fields = (
@@ -675,6 +675,29 @@ def _strict_report_fields(
             raise RuntimeError("full-data strict selection has an invalid timeline_count")
         if selection.get("manifest_path") is not None or selection.get("manifest_sha256") is not None:
             raise RuntimeError("full-data strict selection must not bind a manifest")
+    elif data_mode == "selective_task":
+        timeline_count = selection.get("timeline_count")
+        if isinstance(timeline_count, bool) or not isinstance(timeline_count, int) or timeline_count < 1:
+            raise RuntimeError("selective-task strict selection has an invalid timeline_count")
+        if selection.get("manifest_path") is not None or selection.get("manifest_sha256") is not None:
+            raise RuntimeError("selective-task strict selection must not bind a manifest")
+        acquisition_path = selection.get("acquisition_provenance_path")
+        acquisition_digest = selection.get("acquisition_provenance_sha256")
+        if (
+            not isinstance(acquisition_path, str)
+            or not isinstance(acquisition_digest, str)
+            or len(acquisition_digest) != 64
+        ):
+            raise RuntimeError("selective-task strict selection is missing acquisition provenance")
+        acquisition_file = Path(acquisition_path)
+        if not acquisition_file.is_file() or _sha256_file(acquisition_file) != acquisition_digest:
+            raise RuntimeError(f"selective acquisition provenance changed: {acquisition_file}")
+        acquisition_sidecar = acquisition_file.with_suffix(".sha256")
+        if (
+            not acquisition_sidecar.is_file()
+            or acquisition_sidecar.read_text(encoding="ascii").strip() != acquisition_digest
+        ):
+            raise RuntimeError("selective acquisition provenance sidecar mismatch")
     else:
         manifest_path = selection.get("manifest_path")
         manifest_sha256 = selection.get("manifest_sha256")
@@ -729,6 +752,8 @@ def _strict_report_fields(
             "manifest_sha256",
             "provenance_path",
             "provenance_sha256",
+            "acquisition_provenance_path",
+            "acquisition_provenance_sha256",
             "validation_history_path",
             "validation_history_sha256",
         )},
@@ -807,7 +832,7 @@ def _strict_summary_fields(reports: Sequence[Mapping[str, Any]]) -> dict[str, An
     )
     if has_source_metadata:
         data_modes = {report.get("data_mode", "manifest") for report in reports}
-        if len(data_modes) != 1 or data_modes not in ({"manifest"}, {"full"}):
+        if len(data_modes) != 1 or data_modes not in ({"manifest"}, {"full"}, {"selective_task"}):
             raise RuntimeError("strict summary mixes data sources")
         data_mode = next(iter(data_modes))
     else:
@@ -837,22 +862,35 @@ def _strict_summary_fields(reports: Sequence[Mapping[str, Any]]) -> dict[str, An
         "mean_selected_val_pearson": sum(selected_values.values()) / len(selected_values),
     }
     if has_source_metadata:
-        if data_mode == "full":
+        if data_mode in {"full", "selective_task"}:
             timeline_counts: dict[str, int] = {}
             provenance_paths: dict[str, str] = {}
             provenance_hashes: dict[str, str] = {}
+            acquisition_paths: dict[str, str] = {}
+            acquisition_hashes: dict[str, str] = {}
             for report in reports:
                 seed = report["seed"]
                 count = report.get("timeline_count")
                 path = report.get("provenance_path")
                 digest = report.get("provenance_sha256")
                 if isinstance(count, bool) or not isinstance(count, int) or count < 1:
-                    raise RuntimeError("full-data strict summary has an invalid timeline_count")
+                    raise RuntimeError("non-manifest strict summary has an invalid timeline_count")
                 if not isinstance(path, str) or not isinstance(digest, str) or len(digest) != 64:
-                    raise RuntimeError("full-data strict summary is missing provenance metadata")
+                    raise RuntimeError("non-manifest strict summary is missing provenance metadata")
                 timeline_counts[str(seed)] = count
                 provenance_paths[str(seed)] = path
                 provenance_hashes[str(seed)] = digest
+                if data_mode == "selective_task":
+                    acquisition_path = report.get("acquisition_provenance_path")
+                    acquisition_digest = report.get("acquisition_provenance_sha256")
+                    if (
+                        not isinstance(acquisition_path, str)
+                        or not isinstance(acquisition_digest, str)
+                        or len(acquisition_digest) != 64
+                    ):
+                        raise RuntimeError("selective-task strict summary is missing acquisition metadata")
+                    acquisition_paths[str(seed)] = acquisition_path
+                    acquisition_hashes[str(seed)] = acquisition_digest
             if len(set(timeline_counts.values())) != 1:
                 raise RuntimeError("full-data strict summary mixes timeline counts")
             summary.update(
@@ -865,6 +903,15 @@ def _strict_summary_fields(reports: Sequence[Mapping[str, Any]]) -> dict[str, An
                     "provenance_sha256_by_seed": provenance_hashes,
                 }
             )
+            if data_mode == "selective_task":
+                summary.update(
+                    {
+                        "acquisition_provenance_path": acquisition_paths,
+                        "acquisition_provenance_sha256": acquisition_hashes,
+                        "acquisition_provenance_path_by_seed": acquisition_paths,
+                        "acquisition_provenance_sha256_by_seed": acquisition_hashes,
+                    }
+                )
         else:
             manifest_paths = {report.get("manifest_path") for report in reports}
             manifest_hashes = {report.get("manifest_sha256") for report in reports}
@@ -919,7 +966,7 @@ def run_official_stack_smoke(
 
     if head_variant == "last_tuned":
         reve.validate_last_tuned_protocol(head_variant)
-    elif head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
+    elif head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_anchor_ensemble", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
         reve.validate_local_head_variant(head_variant)
     else:
         reve.validate_upstream_head_variant(head_variant)
@@ -1043,7 +1090,7 @@ def run_official_stack_smoke(
                 "prediction_finite": bool(torch.isfinite(prediction).all().item()),
             }
         )
-    elif head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual"}:
+    elif head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "mean_anchor_ensemble"}:
         output.update(
             {
                 "prediction_finite": bool(torch.isfinite(prediction).all().item()),
@@ -1159,6 +1206,8 @@ def run_official_subset(
     strict_final_test: bool = False,
     data_mode: str = "manifest",
     provenance_path: Path | None = None,
+    acquisition_provenance_path: Path | None = None,
+    acquisition_provenance_sha256: str | None = None,
     timeline_count: int | None = None,
     run_metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
@@ -1175,6 +1224,8 @@ def run_official_subset(
         strict_final_test=strict_final_test,
         data_mode=data_mode,
         provenance_path=provenance_path,
+        acquisition_provenance_path=acquisition_provenance_path,
+        acquisition_provenance_sha256=acquisition_provenance_sha256,
         timeline_count=timeline_count,
         run_metadata=run_metadata,
         hooks=_hooks(),
@@ -1248,12 +1299,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument(
         "--smoke-head",
-        choices=("mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_anchor_ensemble", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "last_avg", "last", "all", "last_tuned"),
         help="run a data-free smoke test using the installed official stack",
     )
     parser.add_argument(
         "--head-variant",
-        choices=("mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_anchor_ensemble", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "last_avg", "last", "all", "last_tuned"),
         default="mean_linear",
     )
     parser.add_argument(
@@ -1389,6 +1440,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     strict_final_test=args.strict_final_test,
                     data_mode=source.data_mode,
                     provenance_path=provenance_path,
+                    acquisition_provenance_path=(
+                        Path(seed_metadata["acquisition_provenance_path"])
+                        if seed_metadata.get("acquisition_provenance_path") is not None
+                        else None
+                    ),
+                    acquisition_provenance_sha256=seed_metadata.get(
+                        "acquisition_provenance_sha256"
+                    ),
                     timeline_count=rows,
                     run_metadata=seed_metadata,
                 )
@@ -1411,12 +1470,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                     report["head_metadata"] = resolved_head_metadata
                     if "parameter_count" in resolved_head_metadata:
                         report["head_parameter_count"] = resolved_head_metadata["parameter_count"]
-                if source.data_mode == "full":
+                if source.data_mode in {"full", "selective_task"}:
                     if provenance_path is None or not provenance_path.is_file():
-                        raise RuntimeError("full-data run did not produce full_data_provenance.json")
+                        raise RuntimeError(
+                            f"{source.data_mode} run did not produce timeline provenance"
+                        )
                     provenance_payload = _load_json_object(provenance_path)
-                    if provenance_payload.get("data_mode") != "full":
-                        raise RuntimeError("full-data provenance has the wrong data_mode")
+                    if provenance_payload.get("data_mode") != source.data_mode:
+                        raise RuntimeError(
+                            f"{source.data_mode} timeline provenance has the wrong data_mode"
+                        )
+                    if (
+                        source.data_mode == "selective_task"
+                        and provenance_payload.get("task") != SELECTIVE_TASK
+                    ):
+                        raise RuntimeError("selective-task timeline provenance has the wrong task")
                     actual_timeline_count = provenance_payload.get("timeline_count")
                     if (
                         isinstance(actual_timeline_count, bool)
@@ -1431,6 +1499,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                             "timeline_count": actual_timeline_count,
                         }
                     )
+                    if source.data_mode == "selective_task":
+                        acquisition_path = Path(seed_metadata["acquisition_provenance_path"])
+                        acquisition_digest = seed_metadata["acquisition_provenance_sha256"]
+                        if (
+                            not acquisition_path.is_file()
+                            or _sha256_file(acquisition_path) != acquisition_digest
+                            or not acquisition_path.with_suffix(".sha256").is_file()
+                            or acquisition_path.with_suffix(".sha256").read_text(encoding="ascii").strip()
+                            != acquisition_digest
+                        ):
+                            raise RuntimeError("selective acquisition snapshot is not intact")
+                        report.update(
+                            {
+                                "acquisition_provenance_path": str(acquisition_path.resolve()),
+                                "acquisition_provenance_sha256": acquisition_digest,
+                            }
+                        )
                 if args.evaluation_protocol == "strict":
                     report.update(
                         _strict_report_fields(
@@ -1455,12 +1540,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_dir.mkdir(parents=True, exist_ok=True)
                 (run_dir / "report.json").write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
             except Exception as error:
-                if source.data_mode == "full" and provenance_path is not None:
+                if source.data_mode in {"full", "selective_task"} and provenance_path is not None:
                     try:
                         provenance_path.unlink(missing_ok=True)
                     except OSError as cleanup_error:
                         error.add_note(
-                            f"failed to remove full-data provenance after failure: {cleanup_error!r}"
+                            f"failed to remove {source.data_mode} provenance after failure: {cleanup_error!r}"
                         )
                 write_failure_diagnostics(run_dir, error, launch_command=launch_command, metadata=seed_metadata)
                 report_path = run_dir / "report.json"
@@ -1493,7 +1578,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.evaluation_protocol == "strict":
             summary.update(_strict_summary_fields(reports))
         else:
-            if source.data_mode == "full":
+            if source.data_mode in {"full", "selective_task"}:
                 timeline_counts = {report.get("timeline_count") for report in reports}
                 provenance_paths = {
                     report.get("provenance_path") for report in reports
@@ -1523,6 +1608,32 @@ def main(argv: Sequence[str] | None = None) -> int:
                         },
                     }
                 )
+                if source.data_mode == "selective_task":
+                    acquisition_paths = {
+                        report.get("acquisition_provenance_path") for report in reports
+                    }
+                    acquisition_hashes = {
+                        report.get("acquisition_provenance_sha256") for report in reports
+                    }
+                    if (
+                        len(acquisition_paths) != len(reports)
+                        or None in acquisition_paths
+                        or len(acquisition_hashes) != len(reports)
+                        or None in acquisition_hashes
+                    ):
+                        raise RuntimeError("selective-task legacy summary is missing acquisition metadata")
+                    summary.update(
+                        {
+                            "acquisition_provenance_path": {
+                                str(report["seed"]): report["acquisition_provenance_path"]
+                                for report in reports
+                            },
+                            "acquisition_provenance_sha256": {
+                                str(report["seed"]): report["acquisition_provenance_sha256"]
+                                for report in reports
+                            },
+                        }
+                    )
             summary.update(
                 {
                     "evaluation_protocol": "legacy",
