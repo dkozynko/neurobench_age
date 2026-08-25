@@ -168,6 +168,14 @@ python screening_1000_manifest.py \
   --target-subjects 1000
 ```
 
+If the host's asynchronous `openneuro-py` transport cannot fetch large S3
+objects, use the resumable direct-S3 downloader
+[`download_hbn_resting_direct.py`](download_hbn_resting_direct.py). It queries
+OpenNeuro for the current snapshot metadata and materializes all resting-state
+files for R1--R10; completed files are verified by size and skipped on retry.
+The matching Supervisor configuration is
+[`supervisor_hbn_download_direct_20260825.conf`](supervisor_hbn_download_direct_20260825.conf).
+
 The prepared [`supervisor_screening_1000_mean_linear_20260825.conf`](supervisor_screening_1000_mean_linear_20260825.conf)
 generates the manifest first and then runs the matched `mean_linear` control on
 seeds 33/34/35 with strict validation-only evaluation. It intentionally omits
