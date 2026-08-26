@@ -176,6 +176,19 @@ files for R1--R10; completed files are verified by size and skipped on retry.
 The matching Supervisor configuration is
 [`supervisor_hbn_download_direct_20260825.conf`](supervisor_hbn_download_direct_20260825.conf).
 
+To keep a screening host below the full-data footprint, pass `--manifest` to
+the same downloader. It then materializes only the manifest's selected
+subjects (plus small release-level metadata), while retaining the official
+`R#/download/sub-*/eeg` layout and resumability:
+
+```bash
+python download_hbn_resting_direct.py \
+  --data-root /workspace/neurobench_data_hl2 \
+  --manifest /workspace/hbn_subset/manifests/age_medium_1000_nested_20260826.csv \
+  --releases R1 R2 R3 R4 R5 R6 R7 R8 R9 R10 \
+  --workers 8
+```
+
 The prepared [`supervisor_screening_1000_mean_linear_20260825.conf`](supervisor_screening_1000_mean_linear_20260825.conf)
 generates the manifest first and then runs the matched `mean_linear` control on
 seeds 33/34/35 with strict validation-only evaluation. It intentionally omits
