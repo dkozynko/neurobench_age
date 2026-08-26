@@ -413,6 +413,12 @@ def _install_selective_eeglab_mat_reader() -> dict[str, Any]:
     return {"module": eeglab, "readmat": original_readmat}
 
 
+def _should_use_simplified_eeglab_reader(data_mode: str) -> bool:
+    """Use the HBN EEGLAB compatibility reader for manifest-backed data too."""
+
+    return data_mode in {"manifest", "selective_task"}
+
+
 def _find_nested_study(step: Any, study_class: type[Any]) -> Any | None:
     """Find one concrete study inside a NeuralSet Chain-like pipeline."""
 
@@ -924,6 +930,10 @@ def _head_metadata(
     provenance_digest: str | None = None,
     timeline_count: int | None = None,
     rows: int | None = None,
+    two_stage_finetune: bool = False,
+    two_stage_warmup_epochs: int = 3,
+    two_stage_unfreeze_last_blocks: int = 1,
+    two_stage_encoder_gradient_scale: float = 0.1,
     seeds: Sequence[int],
     launch_command: str,
 ) -> dict[str, Any]:
@@ -1040,6 +1050,10 @@ def _head_metadata(
         "correlation_loss_objective": "batch_pearson" if correlation_loss_lambda else None,
         "robust_loss": robust_loss,
         "target_scaler_mode": target_scaler_mode,
+        "two_stage_finetune": bool(two_stage_finetune),
+        "two_stage_warmup_epochs": int(two_stage_warmup_epochs),
+        "two_stage_unfreeze_last_blocks": int(two_stage_unfreeze_last_blocks),
+        "two_stage_encoder_gradient_scale": float(two_stage_encoder_gradient_scale),
         "head_query_initialization": query_initialization,
         "head_linear_initialization": (
             "neuralbench_default"
@@ -1431,8 +1445,22 @@ def _append_evaluation_callback(
     correction_gradient_scale: float = 1.0,
     swa_window: int = 0,
     target_scaler_mode: str = "none",
+    two_stage_finetune: bool = False,
+    two_stage_config: Any | None = None,
 ) -> None:
     """Attach exactly one training-time metric callback for the protocol."""
+
+    if two_stage_finetune:
+        if two_stage_config is None:
+            raise RuntimeError("two-stage fine-tuning is enabled without its configuration")
+        from two_stage_finetuning import TwoStageFineTuneCallback
+
+        trainer.callbacks.append(
+            TwoStageFineTuneCallback(
+                two_stage_config,
+                metadata_path=epoch_metrics_path.parent / "two_stage_finetuning.json",
+            )
+        )
 
     if evaluation_protocol == "strict":
         trainer.callbacks.append(
@@ -1512,6 +1540,10 @@ def _patch_official_components(
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
+    two_stage_finetune: bool = False,
+    two_stage_warmup_epochs: int = 3,
+    two_stage_unfreeze_last_blocks: int = 1,
+    two_stage_encoder_gradient_scale: float = 0.1,
     data_mode: str = "manifest",
     provenance_path: Path | None = None,
     acquisition_provenance_path: Path | None = None,
@@ -1534,6 +1566,24 @@ def _patch_official_components(
         strict_final_test=strict_final_test,
     )
     reve = hooks._load_reve_helpers()
+
+    two_stage_config = None
+    if two_stage_finetune:
+        from two_stage_finetuning import (
+            TwoStageFineTuneConfig,
+            validate_two_stage_options,
+        )
+
+        validate_two_stage_options(
+            head_variant=head_variant,
+            data_mode=data_mode,
+            evaluation_protocol=evaluation_protocol,
+        )
+        two_stage_config = TwoStageFineTuneConfig(
+            warmup_epochs=two_stage_warmup_epochs,
+            unfreeze_last_blocks=two_stage_unfreeze_last_blocks,
+            encoder_gradient_scale=two_stage_encoder_gradient_scale,
+        )
 
     reve.validate_head_variant(head_variant)
     if head_dropout != 0.0:
@@ -1815,6 +1865,8 @@ def _patch_official_components(
                 correction_gradient_scale=correction_gradient_scale,
                 swa_window=swa_window,
                 target_scaler_mode=target_scaler_mode,
+                two_stage_finetune=two_stage_finetune,
+                two_stage_config=two_stage_config,
                 hooks=hooks,
             )
         return trainer
@@ -1873,6 +1925,16 @@ def _patch_official_components(
                     ),
                     "robust_loss": robust_loss,
                     "target_scaler_mode": target_scaler_mode,
+                    "two_stage_finetune": bool(two_stage_finetune),
+                    "two_stage_warmup_epochs": (
+                        int(two_stage_warmup_epochs) if two_stage_finetune else None
+                    ),
+                    "two_stage_unfreeze_last_blocks": (
+                        int(two_stage_unfreeze_last_blocks) if two_stage_finetune else None
+                    ),
+                    "two_stage_encoder_gradient_scale": (
+                        float(two_stage_encoder_gradient_scale) if two_stage_finetune else None
+                    ),
                     "test_access_policy": (
                         "single_use_predeclared"
                         if strict_final_test
@@ -2048,6 +2110,7 @@ def _patch_official_components(
         "data_mode": data_mode,
         "patched_study_source": data_mode == "manifest",
         "patched_selective_info_compat": data_mode == "selective_task",
+        "patched_eeglab_reader": _should_use_simplified_eeglab_reader(data_mode),
         "study_class": neuralset_study.Study if neuralset_study is not None else None,
         "study_all_timelines": original_study_all_timelines,
         "selective_eeglab_reader": selective_eeglab_reader,
@@ -2080,13 +2143,13 @@ def _patch_official_components(
         return original_experiment_load_yaml_config(path, *args, **kwargs)
 
     try:
-        if data_mode == "selective_task":
-            originals["selective_eeglab_reader"] = _install_selective_eeglab_mat_reader()
         if data_mode == "manifest":
             assert timelines is not None
             shirazi2024hbn.Shirazi2024Hbn.iter_timelines = iter_manifest_timelines
             if original_info is not None:
                 shirazi2024hbn.Shirazi2024Hbn._info = original_info.model_copy(update={"num_timelines": len(timelines)})
+        if _should_use_simplified_eeglab_reader(data_mode):
+            originals["selective_eeglab_reader"] = _install_selective_eeglab_mat_reader()
         if data_mode == "selective_task":
             assert neuralset_study is not None
             neuralset_study.Study._all_timelines = selective_all_timelines
@@ -2124,13 +2187,14 @@ def _restore_official_components(originals: Mapping[str, Any], *, restore_tuned:
     if originals.get("patched_study_source", True):
         attempt("Shirazi2024Hbn.iter_timelines", lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "iter_timelines", originals["iter_timelines"]))
         attempt("Shirazi2024Hbn._info", lambda: setattr(shirazi2024hbn.Shirazi2024Hbn, "_info", originals["info"]))
-    if originals.get("patched_selective_info_compat", False):
+    if originals.get("patched_eeglab_reader", False):
         reader = originals.get("selective_eeglab_reader")
         if reader is not None:
             attempt(
                 "mne.io.eeglab.eeglab._readmat",
                 lambda: setattr(reader["module"], "_readmat", reader["readmat"]),
             )
+    if originals.get("patched_selective_info_compat", False):
         attempt(
             "neuralset.Study._all_timelines",
             lambda: setattr(
@@ -2174,6 +2238,10 @@ def run_official_subset(
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
+    two_stage_finetune: bool = False,
+    two_stage_warmup_epochs: int = 3,
+    two_stage_unfreeze_last_blocks: int = 1,
+    two_stage_encoder_gradient_scale: float = 0.1,
     data_mode: str = "manifest",
     provenance_path: Path | None = None,
     acquisition_provenance_path: Path | None = None,
@@ -2206,6 +2274,10 @@ def run_official_subset(
             seeds=seeds,
             evaluation_protocol=evaluation_protocol,
             strict_final_test=strict_final_test,
+            two_stage_finetune=two_stage_finetune,
+            two_stage_warmup_epochs=two_stage_warmup_epochs,
+            two_stage_unfreeze_last_blocks=two_stage_unfreeze_last_blocks,
+            two_stage_encoder_gradient_scale=two_stage_encoder_gradient_scale,
             data_mode=data_mode,
             provenance_path=provenance_path,
             acquisition_provenance_path=acquisition_provenance_path,

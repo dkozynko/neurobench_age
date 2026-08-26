@@ -1907,6 +1907,10 @@ def run_official_subset(
     seeds: Sequence[int] = (33,),
     evaluation_protocol: str = "strict",
     strict_final_test: bool = False,
+    two_stage_finetune: bool = False,
+    two_stage_warmup_epochs: int = 3,
+    two_stage_unfreeze_last_blocks: int = 1,
+    two_stage_encoder_gradient_scale: float = 0.1,
     data_mode: str = "manifest",
     provenance_path: Path | None = None,
     acquisition_provenance_path: Path | None = None,
@@ -1931,6 +1935,10 @@ def run_official_subset(
         seeds=seeds,
         evaluation_protocol=evaluation_protocol,
         strict_final_test=strict_final_test,
+        two_stage_finetune=two_stage_finetune,
+        two_stage_warmup_epochs=two_stage_warmup_epochs,
+        two_stage_unfreeze_last_blocks=two_stage_unfreeze_last_blocks,
+        two_stage_encoder_gradient_scale=two_stage_encoder_gradient_scale,
         data_mode=data_mode,
         provenance_path=provenance_path,
         acquisition_provenance_path=acquisition_provenance_path,
@@ -1958,6 +1966,10 @@ def _write_config(
     correlation_loss_lambda: float = 0.0,
     robust_loss: str = "mse",
     target_scaler_mode: str = "none",
+    two_stage_finetune: bool = False,
+    two_stage_warmup_epochs: int = 3,
+    two_stage_unfreeze_last_blocks: int = 1,
+    two_stage_encoder_gradient_scale: float = 0.1,
 ) -> None:
     cache_namespace = {
         "full": "neuralbench_official_cache_full",
@@ -1991,6 +2003,10 @@ def _write_config(
                 ),
                 "ROBUST_LOSS": robust_loss,
                 "TARGET_SCALER_MODE": target_scaler_mode,
+                "TWO_STAGE_FINETUNE": bool(two_stage_finetune),
+                "TWO_STAGE_WARMUP_EPOCHS": int(two_stage_warmup_epochs),
+                "TWO_STAGE_UNFREEZE_LAST_BLOCKS": int(two_stage_unfreeze_last_blocks),
+                "TWO_STAGE_ENCODER_GRADIENT_SCALE": float(two_stage_encoder_gradient_scale),
             }
         )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2061,6 +2077,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="consume the single predeclared strict test pass after validation selection",
     )
+    parser.add_argument(
+        "--two-stage-finetune",
+        action="store_true",
+        help="freeze the REVE encoder during warm-up, then adapt only its final block",
+    )
+    parser.add_argument(
+        "--two-stage-warmup-epochs",
+        type=int,
+        default=3,
+        help="number of head-only epochs before final-block adaptation",
+    )
+    parser.add_argument(
+        "--two-stage-unfreeze-last-blocks",
+        type=int,
+        default=1,
+        help="number of final REVE transformer blocks to adapt after warm-up",
+    )
+    parser.add_argument(
+        "--two-stage-encoder-gradient-scale",
+        type=float,
+        default=0.1,
+        help="effective update scale for selected encoder blocks after warm-up",
+    )
     parser.add_argument("--seeds", type=int, nargs="+", default=[33])
     parser.add_argument(
         "--mean-gradient-scale",
@@ -2128,6 +2167,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     ):
         parser.error("--target-scaler zscore requires strict mean_rich_stats_residual evaluation")
 
+    if args.two_stage_finetune:
+        try:
+            from two_stage_finetuning import (
+                TwoStageFineTuneConfig,
+                validate_two_stage_options,
+            )
+
+            validate_two_stage_options(
+                head_variant=args.head_variant,
+                data_mode="manifest" if args.manifest is not None else (
+                    "full" if args.full_data else "selective_task"
+                ),
+                evaluation_protocol=args.evaluation_protocol,
+            )
+            TwoStageFineTuneConfig(
+                warmup_epochs=args.two_stage_warmup_epochs,
+                unfreeze_last_blocks=args.two_stage_unfreeze_last_blocks,
+                encoder_gradient_scale=args.two_stage_encoder_gradient_scale,
+            )
+        except ValueError as error:
+            parser.error(str(error))
+
     if args.smoke_head is not None:
         print(json.dumps(run_official_stack_smoke(head_variant=args.smoke_head), indent=2))
         return 0
@@ -2179,6 +2240,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             correlation_loss_lambda=args.correlation_loss_lambda,
             robust_loss=args.robust_loss,
             target_scaler_mode=args.target_scaler,
+            two_stage_finetune=args.two_stage_finetune,
+            two_stage_warmup_epochs=args.two_stage_warmup_epochs,
+            two_stage_unfreeze_last_blocks=args.two_stage_unfreeze_last_blocks,
+            two_stage_encoder_gradient_scale=args.two_stage_encoder_gradient_scale,
             data_mode=source.data_mode,
             manifest_path=source.manifest_path,
             manifest_digest=source.manifest_sha256,
@@ -2232,6 +2297,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
                 "robust_loss": args.robust_loss,
                 "target_scaler_mode": args.target_scaler,
+                "two_stage_finetune": bool(args.two_stage_finetune),
+                "two_stage_warmup_epochs": (
+                    args.two_stage_warmup_epochs if args.two_stage_finetune else None
+                ),
+                "two_stage_unfreeze_last_blocks": (
+                    args.two_stage_unfreeze_last_blocks if args.two_stage_finetune else None
+                ),
+                "two_stage_encoder_gradient_scale": (
+                    args.two_stage_encoder_gradient_scale if args.two_stage_finetune else None
+                ),
             }
             try:
                 if source.data_mode == "selective_task":
@@ -2257,6 +2332,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     correlation_loss_lambda=args.correlation_loss_lambda,
                     robust_loss=args.robust_loss,
                     target_scaler_mode=args.target_scaler,
+                    two_stage_finetune=args.two_stage_finetune,
+                    two_stage_warmup_epochs=args.two_stage_warmup_epochs,
+                    two_stage_unfreeze_last_blocks=args.two_stage_unfreeze_last_blocks,
+                    two_stage_encoder_gradient_scale=args.two_stage_encoder_gradient_scale,
                 )
                 results = run_official_subset(
                     manifest_path=source.manifest_path,
@@ -2274,6 +2353,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     seeds=(seed,),
                     evaluation_protocol=args.evaluation_protocol,
                     strict_final_test=args.strict_final_test,
+                    two_stage_finetune=args.two_stage_finetune,
+                    two_stage_warmup_epochs=args.two_stage_warmup_epochs,
+                    two_stage_unfreeze_last_blocks=args.two_stage_unfreeze_last_blocks,
+                    two_stage_encoder_gradient_scale=args.two_stage_encoder_gradient_scale,
                     data_mode=source.data_mode,
                     provenance_path=provenance_path,
                     acquisition_provenance_path=(
@@ -2409,6 +2492,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             "timeline_count": rows,
             "manifest_path": str(source.manifest_path) if source.manifest_path is not None else None,
             "manifest_sha256": source.manifest_sha256,
+            "two_stage_finetune": bool(args.two_stage_finetune),
+            "two_stage_warmup_epochs": (
+                args.two_stage_warmup_epochs if args.two_stage_finetune else None
+            ),
+            "two_stage_unfreeze_last_blocks": (
+                args.two_stage_unfreeze_last_blocks if args.two_stage_finetune else None
+            ),
+            "two_stage_encoder_gradient_scale": (
+                args.two_stage_encoder_gradient_scale if args.two_stage_finetune else None
+            ),
             "provenance_path": (
                 str(source.manifest_path) if source.data_mode == "manifest" and source.manifest_path is not None else None
             ),

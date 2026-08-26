@@ -245,6 +245,25 @@ def download_release(
     return payload
 
 
+def ensure_official_study_alias(root: Path) -> Path:
+    """Expose the direct-download root at NeuralBench's official study path."""
+
+    resolved_root = root.resolve()
+    alias = resolved_root / "Shirazi2024Hbn"
+    if alias.is_symlink():
+        if alias.resolve() != resolved_root:
+            raise RuntimeError(
+                f"official study alias points elsewhere: {alias} -> {alias.resolve()}"
+            )
+        return alias
+    if alias.exists():
+        raise FileExistsError(
+            f"cannot create official study alias because the path exists: {alias}"
+        )
+    alias.symlink_to(resolved_root, target_is_directory=True)
+    return alias
+
+
 def download_all(
     root: Path,
     releases: Iterable[str],
@@ -267,6 +286,7 @@ def download_all(
             f"({summary['total_bytes']} bytes)",
             flush=True,
         )
+    ensure_official_study_alias(root)
     payload = {
         "schema_version": 1,
         "data_mode": "openneuro_resting_direct",
