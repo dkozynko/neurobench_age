@@ -43,10 +43,11 @@ def validate_two_stage_options(
         "mean_linear",
         "mean_linear_copy",
         "mean_rich_stats_residual",
+        "multi_query_rich_stats",
     }:
         raise ValueError(
             "two-stage fine-tuning currently requires mean_linear, "
-            "mean_linear_copy, or mean_rich_stats_residual"
+            "mean_linear_copy, mean_rich_stats_residual, or multi_query_rich_stats"
         )
     if data_mode != "manifest":
         raise ValueError("two-stage fine-tuning currently requires manifest data mode")
