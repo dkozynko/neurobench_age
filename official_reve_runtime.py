@@ -918,6 +918,7 @@ def _head_metadata(
     reve: Any,
     *,
     head_variant: str,
+    layer_index: int = -1,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
     correlation_loss_lambda: float = 0.0,
@@ -976,13 +977,15 @@ def _head_metadata(
         "temporal_pyramid_stats": "not_applicable",
         "mean_covariance_residual": "not_applicable",
         "multi_query_rich_stats": "signed_basis_pm_e0",
+        "mean_layer_linear": "not_applicable",
+        "mean_layer_mix": "not_applicable",
         "last_avg": "upstream_random_unused",
         "last_tuned": "train_dummy_final_token_mean",
         "last": "upstream_random",
         "all": "upstream_random",
     }[head_variant]
     is_default_head = head_variant == "mean_linear"
-    is_local_head = head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats"}
+    is_local_head = head_variant in tuple(reve.LOCAL_HEAD_VARIANTS)
     if data_mode not in {"manifest", "full", "selective_task"}:
         raise ValueError(f"unsupported data mode: {data_mode!r}")
     if data_mode == "manifest" and manifest_path is not None and provenance_path is None:
@@ -990,6 +993,8 @@ def _head_metadata(
         provenance_digest = manifest_digest
     metadata: dict[str, Any] = {
         "head_variant": head_variant,
+        "layer_index": int(layer_index),
+        "layer_index_convention": "positive_1_based_or_negative_final_relative",
         "head_source": (
             "neuralbench_default"
             if is_default_head
@@ -1041,6 +1046,8 @@ def _head_metadata(
             if head_variant == "temporal_pyramid_stats"
             else "local_mean_covariance_residual"
             if head_variant == "mean_covariance_residual"
+            else "local_mean_layer_selection"
+            if head_variant in {"mean_layer_linear", "mean_layer_mix"}
             else "local_mean_linear_copy"
             if is_local_head
             else "upstream_reve"
@@ -1266,6 +1273,30 @@ def _head_metadata(
                 "correction_features": "two_query_weighted_mean_std_range_mad_mean_abs",
                 "correction_scale": 0.5,
                 "query_collapse_threshold": 1e-4,
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_layer_linear":
+        metadata.update(
+            {
+                "head_architecture": "mean_selected_transformer_layer_linear",
+                "query_initialization": "not_applicable",
+                "selected_layer_index_requested": int(layer_index),
+                "layer_sequence_contract": "initial_position_plus_ordered_transformer_outputs",
+                "positional_input_excluded": True,
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_layer_mix":
+        metadata.update(
+            {
+                "head_architecture": "mean_final_layer_zero_start_early_layer_mix",
+                "query_initialization": "not_applicable",
+                "selected_layer_indices_requested": None,
+                "layer_selection": "dynamic_final_four_transformer_layers",
+                "layer_sequence_contract": "initial_position_plus_ordered_transformer_outputs",
+                "positional_input_excluded": True,
+                "alpha_initialization": 0.0,
                 "normalization": "none",
             }
         )
@@ -1530,6 +1561,7 @@ def _patch_official_components(
     selection_path: Path,
     *,
     head_variant: str = "mean_linear",
+    layer_index: int = -1,
     head_dropout: float = 0.0,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
@@ -1884,6 +1916,7 @@ def _patch_official_components(
                     dropout=head_dropout,
                     mean_gradient_scale=mean_gradient_scale,
                     correction_gradient_scale=correction_gradient_scale,
+                    layer_index=layer_index,
                 ),
             )
         if head_variant == "last_tuned":
@@ -2029,6 +2062,36 @@ def _patch_official_components(
                     run_seed=int(getattr(self, "seed", 0)),
                     patched_modules=patched_h6_training_steps,
                 )
+        if head_variant in {"mean_layer_linear", "mean_layer_mix"}:
+            brain_module = getattr(self, "_brain_module", None)
+            expected_class_name = (
+                "MeanLayerLinearHead"
+                if head_variant == "mean_layer_linear"
+                else "MeanLayerMixHead"
+            )
+            layer_head = None
+            if brain_module is not None and hasattr(brain_module, "modules"):
+                layer_head = next(
+                    (
+                        module
+                        for module in brain_module.modules()
+                        if module.__class__.__name__ == expected_class_name
+                    ),
+                    None,
+                )
+            if layer_head is None or not callable(getattr(layer_head, "metadata", None)):
+                raise RuntimeError(f"{head_variant} model did not expose its head metadata")
+            head_metadata = dict(layer_head.metadata())
+            head_metadata["parameter_count"] = sum(
+                parameter.numel() for parameter in layer_head.parameters()
+            )
+            persist_tuning_metadata(
+                self,
+                {
+                    "head_metadata": head_metadata,
+                    "head_parameter_count": head_metadata["parameter_count"],
+                },
+            )
         if head_variant == "last_tuned":
             brain_module = getattr(self, "_brain_module", None)
             model = getattr(brain_module, "model", None)
@@ -2228,6 +2291,7 @@ def run_official_subset(
     selection_path: Path,
     config_path: Path,
     head_variant: str = "mean_linear",
+    layer_index: int = -1,
     head_dropout: float = 0.0,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
@@ -2264,6 +2328,7 @@ def run_official_subset(
             epoch_metrics_path,
             selection_path,
             head_variant=head_variant,
+            layer_index=layer_index,
             head_dropout=head_dropout,
             mean_gradient_scale=mean_gradient_scale,
             correction_gradient_scale=correction_gradient_scale,

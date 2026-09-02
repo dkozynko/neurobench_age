@@ -167,6 +167,179 @@ class MeanLinearCopyHead(nn.Module):
         return self.linear(self.pool_tokens(tokens))
 
 
+def _validate_layer_sequence(
+    layers: Any, *, embed_dim: int
+) -> tuple[torch.Tensor, ...]:
+    """Validate REVE's ``[positional_input, layer_1, ..., layer_N]`` output."""
+
+    if isinstance(layers, torch.Tensor) or not isinstance(layers, (list, tuple)):
+        raise AdapterContractError(
+            "layer heads require an ordered sequence of [batch, tokens, dim] tensors"
+        )
+    if len(layers) < 2:
+        raise AdapterContractError(
+            "layer heads require positional input plus at least one transformer layer"
+        )
+    first = layers[0]
+    if not isinstance(first, torch.Tensor) or first.ndim != 3:
+        raise AdapterContractError(
+            "layer heads require every output to have shape [batch, tokens, dim]"
+        )
+    expected_shape = (first.shape[0], first.shape[1], embed_dim)
+    validated: list[torch.Tensor] = []
+    for index, layer in enumerate(layers):
+        if not isinstance(layer, torch.Tensor) or layer.ndim != 3:
+            raise AdapterContractError(
+                f"layer output {index} must have shape [batch, tokens, dim]"
+            )
+        if tuple(layer.shape)[:2] != expected_shape[:2] or layer.shape[-1] != embed_dim:
+            raise AdapterContractError(
+                "layer heads require matching batch, token, and embedding dimensions"
+            )
+        if layer.shape[1] <= 0:
+            raise AdapterContractError(f"layer output {index} has no tokens")
+        if not torch.isfinite(layer).all():
+            raise AdapterContractError(f"layer output {index} contains non-finite values")
+        validated.append(layer)
+    return tuple(validated)
+
+
+def _resolve_transformer_layer_index(layer_index: int, *, layer_count: int) -> int:
+    """Resolve a positive 1-based index or a negative final-relative offset."""
+
+    if isinstance(layer_index, bool) or not isinstance(layer_index, int):
+        raise AdapterContractError("layer index must be a non-zero integer")
+    if layer_index == 0:
+        raise AdapterContractError("layer index 0 is reserved for positional input")
+    resolved = layer_index if layer_index > 0 else layer_count + 1 + layer_index
+    if not 1 <= resolved <= layer_count:
+        raise AdapterContractError(
+            f"layer index {layer_index} is out of range for {layer_count} transformer layers"
+        )
+    return resolved
+
+
+class MeanLayerLinearHead(nn.Module):
+    """Direct linear regression on the mean of one ordered REVE layer."""
+
+    def __init__(self, *, embed_dim: int, n_outputs: int, layer_index: int):
+        super().__init__()
+        if embed_dim <= 0 or n_outputs <= 0:
+            raise ValueError("embed_dim and n_outputs must be positive")
+        if isinstance(layer_index, bool) or not isinstance(layer_index, int) or layer_index == 0:
+            raise ValueError("layer_index must be a non-zero integer")
+        self.embed_dim = embed_dim
+        self.requested_layer_index = layer_index
+        self.last_resolved_layer_index: int | None = None
+        self.linear = nn.Linear(embed_dim, n_outputs)
+
+    def pool_tokens(self, layers: Any) -> torch.Tensor:
+        validated = _validate_layer_sequence(layers, embed_dim=self.embed_dim)
+        layer_count = len(validated) - 1
+        resolved = _resolve_transformer_layer_index(
+            self.requested_layer_index, layer_count=layer_count
+        )
+        self.last_resolved_layer_index = resolved
+        return validated[resolved].mean(dim=1)
+
+    def forward(self, layers: Any) -> torch.Tensor:
+        return self.linear(self.pool_tokens(layers))
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "matched_baseline": "mean_linear",
+            "head_source": "local_mean_layer_selection",
+            "protocol_class": "screening",
+            "positional_input_excluded": True,
+            "layer_index_convention": "1_based_transformer; negative_final_relative_cli",
+            "requested_layer_index": self.requested_layer_index,
+            "layer_index": self.last_resolved_layer_index,
+        }
+
+
+class MeanLayerMixHead(nn.Module):
+    """Final-layer mean-linear with a zero-start scalar earlier-layer mix."""
+
+    def __init__(
+        self,
+        *,
+        embed_dim: int,
+        n_outputs: int,
+        layer_indices: Sequence[int] | None = None,
+    ):
+        super().__init__()
+        if embed_dim <= 0 or n_outputs <= 0:
+            raise ValueError("embed_dim and n_outputs must be positive")
+        if layer_indices is not None:
+            if not layer_indices or any(
+                isinstance(index, bool) or not isinstance(index, int) or index == 0
+                for index in layer_indices
+            ):
+                raise ValueError("layer_indices must contain non-zero integer indices")
+            self.requested_layer_indices: tuple[int, ...] | None = tuple(layer_indices)
+        else:
+            self.requested_layer_indices = None
+        self.embed_dim = embed_dim
+        # Construct the baseline linear before the scalar so its RNG path is
+        # identical to MeanLinearCopyHead.
+        self.linear = nn.Linear(embed_dim, n_outputs)
+        self.alpha = nn.Parameter(torch.zeros(()))
+        self.last_resolved_layer_indices: tuple[int, ...] | None = None
+
+    def _resolve_indices(self, *, layer_count: int) -> tuple[int, ...]:
+        requested = self.requested_layer_indices
+        if requested is None:
+            resolved = tuple(range(max(1, layer_count - 3), layer_count + 1))
+        else:
+            resolved = tuple(
+                _resolve_transformer_layer_index(index, layer_count=layer_count)
+                for index in requested
+            )
+        if len(resolved) < 2 or resolved[-1] != layer_count:
+            raise AdapterContractError(
+                "mean layer mix requires at least one earlier layer and the final layer"
+            )
+        if len(set(resolved)) != len(resolved):
+            raise AdapterContractError("mean layer mix layer indices must be unique")
+        return resolved
+
+    def pool_tokens(self, layers: Any) -> torch.Tensor:
+        validated = _validate_layer_sequence(layers, embed_dim=self.embed_dim)
+        layer_count = len(validated) - 1
+        resolved = self._resolve_indices(layer_count=layer_count)
+        self.last_resolved_layer_indices = resolved
+        means = torch.stack(tuple(validated[index].mean(dim=1) for index in resolved), dim=0)
+        final_mean = means[-1]
+        early_mean = means[:-1].mean(dim=0)
+        if not torch.isfinite(self.alpha).all():
+            raise AdapterContractError("mean layer mix alpha must be finite")
+        return final_mean + self.alpha * (early_mean - final_mean)
+
+    def forward(self, layers: Any) -> torch.Tensor:
+        return self.linear(self.pool_tokens(layers))
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "matched_baseline": "mean_linear",
+            "head_source": "local_mean_layer_selection",
+            "protocol_class": "screening",
+            "positional_input_excluded": True,
+            "layer_index_convention": "1_based_transformer; negative_final_relative_cli",
+            "layer_indices": (
+                None
+                if self.last_resolved_layer_indices is None
+                else list(self.last_resolved_layer_indices)
+            ),
+            "early_layer_indices": (
+                None
+                if self.last_resolved_layer_indices is None
+                else list(self.last_resolved_layer_indices[:-1])
+            ),
+            "alpha_initialization": "zero",
+            "alpha": float(self.alpha.detach()),
+        }
+
+
 class MeanLinearDetachedHead(MeanLinearCopyHead):
     """Mean-linear probe that keeps the pretrained encoder fixed."""
 
@@ -1726,9 +1899,11 @@ class UpstreamReveHeadModel(nn.Module):
         query_initialization_metadata: Mapping[str, Any] | None = None,
         mean_gradient_scale: float = 0.5,
         correction_gradient_scale: float = 1.0,
+        layer_index: int = -1,
+        layer_indices: Sequence[int] | None = None,
     ):
         super().__init__()
-        if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats"}:
+        if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix"}:
             validate_local_head_variant(variant)
         elif variant == "last_tuned":
             validate_last_tuned_protocol(variant)
@@ -1738,7 +1913,11 @@ class UpstreamReveHeadModel(nn.Module):
             validate_upstream_head_variant(variant)
         self.encoder = encoder
         self.variant = variant
-        self.all_layer_encoder = AllLayerReveEncoder(encoder) if variant == "all" else None
+        self.all_layer_encoder = (
+            AllLayerReveEncoder(encoder)
+            if variant in {"all", "mean_layer_linear", "mean_layer_mix"}
+            else None
+        )
         # The upstream downstream classifier initializes its own query token;
         # the pretrained NtReve encoder has no classifier token in its state.
         # ``UpstreamReveHead`` performs that explicit torch.randn init after
@@ -1804,6 +1983,18 @@ class UpstreamReveHeadModel(nn.Module):
             self.head = MeanCovarianceResidualHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "multi_query_rich_stats":
             self.head = MultiQueryRichStatsResidualHead(embed_dim=embed_dim, n_outputs=n_outputs)
+        elif variant == "mean_layer_linear":
+            self.head = MeanLayerLinearHead(
+                embed_dim=embed_dim,
+                n_outputs=n_outputs,
+                layer_index=layer_index,
+            )
+        elif variant == "mean_layer_mix":
+            self.head = MeanLayerMixHead(
+                embed_dim=embed_dim,
+                n_outputs=n_outputs,
+                layer_indices=layer_indices,
+            )
         elif variant == "mean_stats_residual_detached":
             self.head = MeanStatsResidualDetachedHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "mean_stats_residual_gradient_scaled":
@@ -1840,13 +2031,13 @@ class UpstreamReveHeadModel(nn.Module):
         self, eeg: torch.Tensor, channel_positions: torch.Tensor | None
     ) -> Any:
         del channel_positions
+        if self.variant in {"all", "mean_layer_linear", "mean_layer_mix"}:
+            assert self.all_layer_encoder is not None
+            return self.all_layer_encoder(eeg)
         if self.variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats"}:
             # The official NtReve wrapper keeps its resolved REVE positions
             # internally and does not receive per-batch channel positions.
             return self.encoder(eeg)
-        if self.variant == "all":
-            assert self.all_layer_encoder is not None
-            return self.all_layer_encoder(eeg)
         return self.encoder(eeg)
 
     def forward(
@@ -1875,10 +2066,12 @@ def make_upstream_reve_wrapper(
     dropout: float = DEFAULT_UPSTREAM_DROPOUT,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
+    layer_index: int = -1,
+    layer_indices: Sequence[int] | None = None,
 ) -> Any:
     """Create a concrete official NeuralBench wrapper config lazily."""
 
-    if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats"}:
+    if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix"}:
         validate_local_head_variant(variant)
     elif variant == "last_tuned":
         validate_last_tuned_protocol(variant)
@@ -1894,6 +2087,10 @@ def make_upstream_reve_wrapper(
         head_dropout: float = float(dropout)
         head_mean_gradient_scale: float = float(mean_gradient_scale)
         head_correction_gradient_scale: float = float(correction_gradient_scale)
+        head_layer_index: int = int(layer_index)
+        head_layer_indices: tuple[int, ...] | None = (
+            None if layer_indices is None else tuple(layer_indices)
+        )
 
         def build(
             self,
@@ -1929,7 +2126,7 @@ def make_upstream_reve_wrapper(
             if sample is None:
                 raise AdapterContractError("dummy batch contains no EEG tensor")
 
-            if self.head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats"}:
+            if self.head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix"}:
                 # Match DownstreamWrapper.build: run the already-built model
                 # once before constructing its linear probe.
                 with torch.no_grad():
@@ -1946,6 +2143,8 @@ def make_upstream_reve_wrapper(
                 query_initialization_metadata=query_metadata,
                 mean_gradient_scale=self.head_mean_gradient_scale,
                 correction_gradient_scale=self.head_correction_gradient_scale,
+                layer_index=self.head_layer_index,
+                layer_indices=self.head_layer_indices,
             )
             with torch.no_grad():
                 head_model.eval()
@@ -1953,4 +2152,10 @@ def make_upstream_reve_wrapper(
             head_model.train()
             return head_model
 
-    return UpstreamReveHeadWrapper(model_output_key=None, aggregation=None, probe_config=None, head_variant=variant, head_dropout=float(dropout))
+    return UpstreamReveHeadWrapper(
+        model_output_key=None,
+        aggregation=None,
+        probe_config=None,
+        head_variant=variant,
+        head_dropout=float(dropout),
+    )
