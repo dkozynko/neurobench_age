@@ -1642,6 +1642,7 @@ def run_official_stack_smoke(
     *,
     head_variant: str,
     layer_indices: Sequence[int] | None = None,
+    layer_mix_alpha: float = 0.0,
     device: str = "cpu",
 ) -> dict[str, Any]:
     """Exercise the real REVE/NeuralTrain interfaces without HBN data.
@@ -1657,7 +1658,7 @@ def run_official_stack_smoke(
 
     if head_variant == "last_tuned":
         reve.validate_last_tuned_protocol(head_variant)
-    elif head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix"}:
+    elif head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed"}:
         reve.validate_local_head_variant(head_variant)
     else:
         reve.validate_upstream_head_variant(head_variant)
@@ -1693,6 +1694,7 @@ def run_official_stack_smoke(
             n_outputs=1,
             dropout=0.0,
             layer_indices=layer_indices,
+            layer_mix_alpha=layer_mix_alpha,
         ).to(device)
     eeg = torch.randn(2, n_chans, n_times, device=device)
     positions = torch.randn(2, n_chans, 3, device=device)
@@ -1801,14 +1803,14 @@ def run_official_stack_smoke(
                 "head_metadata": adapter.head.metadata(),
             }
         )
-    elif head_variant in {"mean_layer_linear", "mean_layer_mix"}:
+    elif head_variant in {"mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed"}:
         output.update(
             {
                 "prediction_finite": bool(torch.isfinite(prediction).all().item()),
                 "head_metadata": adapter.head.metadata(),
             }
         )
-        if head_variant == "mean_layer_mix":
+        if head_variant in {"mean_layer_mix", "mean_layer_mix_fixed"}:
             output["layer_indices_requested"] = (
                 None if layer_indices is None else list(layer_indices)
             )
@@ -1917,6 +1919,7 @@ def run_official_subset(
     head_variant: str = "mean_linear",
     layer_index: int = -1,
     layer_indices: Sequence[int] | None = None,
+    layer_mix_alpha: float = 0.0,
     head_dropout: float = 0.0,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
@@ -1947,6 +1950,7 @@ def run_official_subset(
         head_variant=head_variant,
         layer_index=layer_index,
         layer_indices=layer_indices,
+        layer_mix_alpha=layer_mix_alpha,
         head_dropout=head_dropout,
         mean_gradient_scale=mean_gradient_scale,
         correction_gradient_scale=correction_gradient_scale,
@@ -1984,6 +1988,7 @@ def _write_config(
     head_variant: str | None = None,
     layer_index: int = -1,
     layer_indices: Sequence[int] | None = None,
+    layer_mix_alpha: float = 0.0,
     mean_gradient_scale: float | None = None,
     correction_gradient_scale: float | None = None,
     swa_window: int = 0,
@@ -2022,6 +2027,7 @@ def _write_config(
                 "H7_LAYER_INDICES": (
                     None if layer_indices is None else [int(index) for index in layer_indices]
                 ),
+                "H7_LAYER_MIX_ALPHA": float(layer_mix_alpha),
                 "H7_MEAN_GRADIENT_SCALE": mean_gradient_scale,
                 "H7_CORRECTION_GRADIENT_SCALE": correction_gradient_scale,
                 "SWA_WINDOW": swa_window,
@@ -2086,12 +2092,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument(
         "--smoke-head",
-        choices=("mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed", "last_avg", "last", "all", "last_tuned"),
         help="run a data-free smoke test using the installed official stack",
     )
     parser.add_argument(
         "--head-variant",
-        choices=("mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix", "last_avg", "last", "all", "last_tuned"),
+        choices=("mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed", "last_avg", "last", "all", "last_tuned"),
         default="mean_linear",
     )
     parser.add_argument(
@@ -2106,6 +2112,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         nargs="+",
         default=None,
         help="explicit transformer layers for mean_layer_mix; final layer must be last",
+    )
+    parser.add_argument(
+        "--layer-mix-alpha",
+        type=float,
+        default=0.0,
+        help="fixed alpha for mean_layer_mix_fixed",
     )
     parser.add_argument(
         "--evaluation-protocol",
@@ -2208,10 +2220,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     ):
         parser.error("--target-scaler zscore requires strict mean_rich_stats_residual evaluation")
     if args.layer_indices is not None:
-        if args.head_variant != "mean_layer_mix" and args.smoke_head != "mean_layer_mix":
-            parser.error("--layer-indices requires mean_layer_mix")
+        if args.head_variant not in {"mean_layer_mix", "mean_layer_mix_fixed"} and args.smoke_head not in {"mean_layer_mix", "mean_layer_mix_fixed"}:
+            parser.error("--layer-indices requires a layer-mix head")
         if len(args.layer_indices) < 2 or any(index == 0 for index in args.layer_indices):
             parser.error("--layer-indices requires at least two non-zero indices")
+    if not math.isfinite(float(args.layer_mix_alpha)):
+        parser.error("--layer-mix-alpha must be finite")
+    if args.layer_mix_alpha != 0.0 and args.head_variant != "mean_layer_mix_fixed" and args.smoke_head != "mean_layer_mix_fixed":
+        parser.error("--layer-mix-alpha requires mean_layer_mix_fixed")
 
     if args.two_stage_finetune:
         try:
@@ -2241,6 +2257,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_official_stack_smoke(
                     head_variant=args.smoke_head,
                     layer_indices=args.layer_indices,
+                    layer_mix_alpha=args.layer_mix_alpha,
                 ),
                 indent=2,
             )
@@ -2291,6 +2308,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             head_variant=args.head_variant,
             layer_index=args.layer_index,
             layer_indices=args.layer_indices,
+            layer_mix_alpha=args.layer_mix_alpha,
             mean_gradient_scale=args.mean_gradient_scale,
             correction_gradient_scale=args.correction_gradient_scale,
             correlation_loss_lambda=args.correlation_loss_lambda,
@@ -2367,6 +2385,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "layer_indices": (
                     None if args.layer_indices is None else list(args.layer_indices)
                 ),
+                "layer_mix_alpha": args.layer_mix_alpha,
             }
             try:
                 if source.data_mode == "selective_task":
@@ -2388,6 +2407,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     head_variant=args.head_variant,
                     layer_index=args.layer_index,
                     layer_indices=args.layer_indices,
+                    layer_mix_alpha=args.layer_mix_alpha,
                     mean_gradient_scale=args.mean_gradient_scale,
                     correction_gradient_scale=args.correction_gradient_scale,
                     swa_window=args.swa_window,
@@ -2408,6 +2428,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     head_variant=args.head_variant,
                     layer_index=args.layer_index,
                     layer_indices=args.layer_indices,
+                    layer_mix_alpha=args.layer_mix_alpha,
                     mean_gradient_scale=args.mean_gradient_scale,
                     correction_gradient_scale=args.correction_gradient_scale,
                     swa_window=args.swa_window,

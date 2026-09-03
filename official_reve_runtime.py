@@ -920,6 +920,7 @@ def _head_metadata(
     head_variant: str,
     layer_index: int = -1,
     layer_indices: Sequence[int] | None = None,
+    layer_mix_alpha: float = 0.0,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
     correlation_loss_lambda: float = 0.0,
@@ -980,6 +981,7 @@ def _head_metadata(
         "multi_query_rich_stats": "signed_basis_pm_e0",
         "mean_layer_linear": "not_applicable",
         "mean_layer_mix": "not_applicable",
+        "mean_layer_mix_fixed": "not_applicable",
         "last_avg": "upstream_random_unused",
         "last_tuned": "train_dummy_final_token_mean",
         "last": "upstream_random",
@@ -1049,7 +1051,7 @@ def _head_metadata(
             else "local_mean_covariance_residual"
             if head_variant == "mean_covariance_residual"
             else "local_mean_layer_selection"
-            if head_variant in {"mean_layer_linear", "mean_layer_mix"}
+            if head_variant in {"mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed"}
             else "local_mean_linear_copy"
             if is_local_head
             else "upstream_reve"
@@ -1305,6 +1307,27 @@ def _head_metadata(
                 "layer_sequence_contract": "initial_position_plus_ordered_transformer_outputs",
                 "positional_input_excluded": True,
                 "alpha_initialization": 0.0,
+                "normalization": "none",
+            }
+        )
+    if head_variant == "mean_layer_mix_fixed":
+        metadata.update(
+            {
+                "head_architecture": "mean_final_layer_fixed_earlier_layer_mix",
+                "query_initialization": "not_applicable",
+                "selected_layer_indices_requested": (
+                    None if layer_indices is None else [int(index) for index in layer_indices]
+                ),
+                "layer_selection": (
+                    "dynamic_final_four_transformer_layers"
+                    if layer_indices is None
+                    else "explicit_final_relative_or_1_based_transformer_layers"
+                ),
+                "layer_sequence_contract": "initial_position_plus_ordered_transformer_outputs",
+                "positional_input_excluded": True,
+                "alpha_initialization": "fixed",
+                "alpha_trainable": False,
+                "fixed_alpha": float(layer_mix_alpha),
                 "normalization": "none",
             }
         )
@@ -1571,6 +1594,7 @@ def _patch_official_components(
     head_variant: str = "mean_linear",
     layer_index: int = -1,
     layer_indices: Sequence[int] | None = None,
+    layer_mix_alpha: float = 0.0,
     head_dropout: float = 0.0,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
@@ -1927,6 +1951,7 @@ def _patch_official_components(
                     correction_gradient_scale=correction_gradient_scale,
                     layer_index=layer_index,
                     layer_indices=layer_indices,
+                    layer_mix_alpha=layer_mix_alpha,
                 ),
             )
         if head_variant == "last_tuned":
@@ -2072,12 +2097,14 @@ def _patch_official_components(
                     run_seed=int(getattr(self, "seed", 0)),
                     patched_modules=patched_h6_training_steps,
                 )
-        if head_variant in {"mean_layer_linear", "mean_layer_mix"}:
+        if head_variant in {"mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed"}:
             brain_module = getattr(self, "_brain_module", None)
             expected_class_name = (
                 "MeanLayerLinearHead"
                 if head_variant == "mean_layer_linear"
                 else "MeanLayerMixHead"
+                if head_variant == "mean_layer_mix"
+                else "MeanLayerMixFixedHead"
             )
             layer_head = None
             if brain_module is not None and hasattr(brain_module, "modules"):
@@ -2303,6 +2330,7 @@ def run_official_subset(
     head_variant: str = "mean_linear",
     layer_index: int = -1,
     layer_indices: Sequence[int] | None = None,
+    layer_mix_alpha: float = 0.0,
     head_dropout: float = 0.0,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
@@ -2341,6 +2369,7 @@ def run_official_subset(
             head_variant=head_variant,
             layer_index=layer_index,
             layer_indices=layer_indices,
+            layer_mix_alpha=layer_mix_alpha,
             head_dropout=head_dropout,
             mean_gradient_scale=mean_gradient_scale,
             correction_gradient_scale=correction_gradient_scale,

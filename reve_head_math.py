@@ -340,6 +340,38 @@ class MeanLayerMixHead(nn.Module):
         }
 
 
+class MeanLayerMixFixedHead(MeanLayerMixHead):
+    """Layer mix with an explicitly fixed, non-trainable scalar alpha."""
+
+    def __init__(
+        self,
+        *,
+        embed_dim: int,
+        n_outputs: int,
+        layer_indices: Sequence[int] | None = None,
+        fixed_alpha: float,
+    ):
+        if not math.isfinite(float(fixed_alpha)):
+            raise ValueError("fixed_alpha must be finite")
+        super().__init__(
+            embed_dim=embed_dim,
+            n_outputs=n_outputs,
+            layer_indices=layer_indices,
+        )
+        del self._parameters["alpha"]
+        self.register_buffer("alpha", torch.tensor(float(fixed_alpha)))
+        self.fixed_alpha = float(fixed_alpha)
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            **super().metadata(),
+            "head_architecture": "mean_final_layer_fixed_earlier_layer_mix",
+            "alpha_initialization": "fixed",
+            "alpha_trainable": False,
+            "fixed_alpha": self.fixed_alpha,
+        }
+
+
 class MeanLinearDetachedHead(MeanLinearCopyHead):
     """Mean-linear probe that keeps the pretrained encoder fixed."""
 
@@ -1901,9 +1933,10 @@ class UpstreamReveHeadModel(nn.Module):
         correction_gradient_scale: float = 1.0,
         layer_index: int = -1,
         layer_indices: Sequence[int] | None = None,
+        layer_mix_alpha: float = 0.0,
     ):
         super().__init__()
-        if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix"}:
+        if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed"}:
             validate_local_head_variant(variant)
         elif variant == "last_tuned":
             validate_last_tuned_protocol(variant)
@@ -1915,7 +1948,7 @@ class UpstreamReveHeadModel(nn.Module):
         self.variant = variant
         self.all_layer_encoder = (
             AllLayerReveEncoder(encoder)
-            if variant in {"all", "mean_layer_linear", "mean_layer_mix"}
+            if variant in {"all", "mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed"}
             else None
         )
         # The upstream downstream classifier initializes its own query token;
@@ -1995,6 +2028,13 @@ class UpstreamReveHeadModel(nn.Module):
                 n_outputs=n_outputs,
                 layer_indices=layer_indices,
             )
+        elif variant == "mean_layer_mix_fixed":
+            self.head = MeanLayerMixFixedHead(
+                embed_dim=embed_dim,
+                n_outputs=n_outputs,
+                layer_indices=layer_indices,
+                fixed_alpha=layer_mix_alpha,
+            )
         elif variant == "mean_stats_residual_detached":
             self.head = MeanStatsResidualDetachedHead(embed_dim=embed_dim, n_outputs=n_outputs)
         elif variant == "mean_stats_residual_gradient_scaled":
@@ -2031,7 +2071,7 @@ class UpstreamReveHeadModel(nn.Module):
         self, eeg: torch.Tensor, channel_positions: torch.Tensor | None
     ) -> Any:
         del channel_positions
-        if self.variant in {"all", "mean_layer_linear", "mean_layer_mix"}:
+        if self.variant in {"all", "mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed"}:
             assert self.all_layer_encoder is not None
             return self.all_layer_encoder(eeg)
         if self.variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats"}:
@@ -2068,10 +2108,11 @@ def make_upstream_reve_wrapper(
     correction_gradient_scale: float = 1.0,
     layer_index: int = -1,
     layer_indices: Sequence[int] | None = None,
+    layer_mix_alpha: float = 0.0,
 ) -> Any:
     """Create a concrete official NeuralBench wrapper config lazily."""
 
-    if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix"}:
+    if variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed"}:
         validate_local_head_variant(variant)
     elif variant == "last_tuned":
         validate_last_tuned_protocol(variant)
@@ -2091,6 +2132,7 @@ def make_upstream_reve_wrapper(
         head_layer_indices: tuple[int, ...] | None = (
             None if layer_indices is None else tuple(layer_indices)
         )
+        head_layer_mix_alpha: float = float(layer_mix_alpha)
 
         def build(
             self,
@@ -2126,7 +2168,7 @@ def make_upstream_reve_wrapper(
             if sample is None:
                 raise AdapterContractError("dummy batch contains no EEG tensor")
 
-            if self.head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix"}:
+            if self.head_variant in {"mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed"}:
                 # Match DownstreamWrapper.build: run the already-built model
                 # once before constructing its linear probe.
                 with torch.no_grad():
@@ -2145,6 +2187,7 @@ def make_upstream_reve_wrapper(
                 correction_gradient_scale=self.head_correction_gradient_scale,
                 layer_index=self.head_layer_index,
                 layer_indices=self.head_layer_indices,
+                layer_mix_alpha=self.head_layer_mix_alpha,
             )
             with torch.no_grad():
                 head_model.eval()

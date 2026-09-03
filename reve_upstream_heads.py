@@ -57,6 +57,7 @@ def make_upstream_reve_wrapper(
     correction_gradient_scale: float = 1.0,
     layer_index: int = -1,
     layer_indices: tuple[int, ...] | None = None,
+    layer_mix_alpha: float = 0.0,
 ) -> Any:
     """Build the adapter while preserving the historical monkeypatch seam."""
 
@@ -68,6 +69,7 @@ def make_upstream_reve_wrapper(
         correction_gradient_scale=correction_gradient_scale,
         layer_index=layer_index,
         layer_indices=layer_indices,
+        layer_mix_alpha=layer_mix_alpha,
     )
 
 
@@ -101,6 +103,7 @@ __all__ = [
     "MeanLinearProbeScaledHead",
     "MeanLayerLinearHead",
     "MeanLayerMixHead",
+    "MeanLayerMixFixedHead",
     "MeanResidualHead",
     "MeanVectorAnchorHead",
     "MeanMLPResidualHead",

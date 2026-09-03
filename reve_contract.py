@@ -48,6 +48,7 @@ LOCAL_HEAD_VARIANTS = (
     "multi_query_rich_stats",
     "mean_layer_linear",
     "mean_layer_mix",
+    "mean_layer_mix_fixed",
 )
 LAST_TUNED_PROTOCOL_VARIANTS = ("last_tuned",)
 HEAD_VARIANTS = OFFICIAL_HEAD_VARIANTS + LOCAL_HEAD_VARIANTS + LAST_TUNED_PROTOCOL_VARIANTS
