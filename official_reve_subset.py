@@ -1934,6 +1934,9 @@ def run_official_subset(
     two_stage_warmup_epochs: int = 3,
     two_stage_unfreeze_last_blocks: int = 1,
     two_stage_encoder_gradient_scale: float = 0.1,
+    augmentation_consistency: bool = False,
+    augmentation_consistency_lambda: float = 0.0,
+    augmentation_noise_scale: float = 0.01,
     data_mode: str = "manifest",
     provenance_path: Path | None = None,
     acquisition_provenance_path: Path | None = None,
@@ -1965,6 +1968,9 @@ def run_official_subset(
         two_stage_warmup_epochs=two_stage_warmup_epochs,
         two_stage_unfreeze_last_blocks=two_stage_unfreeze_last_blocks,
         two_stage_encoder_gradient_scale=two_stage_encoder_gradient_scale,
+        augmentation_consistency=augmentation_consistency,
+        augmentation_consistency_lambda=augmentation_consistency_lambda,
+        augmentation_noise_scale=augmentation_noise_scale,
         data_mode=data_mode,
         provenance_path=provenance_path,
         acquisition_provenance_path=acquisition_provenance_path,
@@ -1999,6 +2005,9 @@ def _write_config(
     two_stage_warmup_epochs: int = 3,
     two_stage_unfreeze_last_blocks: int = 1,
     two_stage_encoder_gradient_scale: float = 0.1,
+    augmentation_consistency: bool = False,
+    augmentation_consistency_lambda: float = 0.0,
+    augmentation_noise_scale: float = 0.01,
 ) -> None:
     cache_namespace = {
         "full": "neuralbench_official_cache_full",
@@ -2041,6 +2050,13 @@ def _write_config(
                 "TWO_STAGE_WARMUP_EPOCHS": int(two_stage_warmup_epochs),
                 "TWO_STAGE_UNFREEZE_LAST_BLOCKS": int(two_stage_unfreeze_last_blocks),
                 "TWO_STAGE_ENCODER_GRADIENT_SCALE": float(two_stage_encoder_gradient_scale),
+                "AUGMENTATION_CONSISTENCY": bool(augmentation_consistency),
+                "AUGMENTATION_CONSISTENCY_LAMBDA": float(augmentation_consistency_lambda),
+                "AUGMENTATION_NOISE_SCALE": float(augmentation_noise_scale),
+                "AUGMENTATION_SPACE": (
+                    "neuro_representation" if augmentation_consistency else None
+                ),
+                "AUGMENTATION_SCOPE": "train_only" if augmentation_consistency else None,
             }
         )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2192,6 +2208,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="none",
         help="fit a training-only target z-score scaler (strict rich-stats screen only)",
     )
+    parser.add_argument(
+        "--augmentation-consistency",
+        action="store_true",
+        help="add train-only paired-view prediction consistency on the REVE representation",
+    )
+    parser.add_argument(
+        "--augmentation-consistency-lambda",
+        type=float,
+        default=0.05,
+        help="weight for the train-only augmentation consistency MSE",
+    )
+    parser.add_argument(
+        "--augmentation-noise-scale",
+        type=float,
+        default=0.01,
+        help="bounded per-token representation jitter scale",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -2219,6 +2252,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.evaluation_protocol != "strict" or args.head_variant != "mean_rich_stats_residual"
     ):
         parser.error("--target-scaler zscore requires strict mean_rich_stats_residual evaluation")
+    if args.augmentation_consistency and args.evaluation_protocol != "strict":
+        parser.error("--augmentation-consistency requires strict evaluation")
     if args.layer_indices is not None:
         if args.head_variant not in {"mean_layer_mix", "mean_layer_mix_fixed"} and args.smoke_head not in {"mean_layer_mix", "mean_layer_mix_fixed"}:
             parser.error("--layer-indices requires a layer-mix head")
@@ -2284,6 +2319,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error(f"{name} must be finite and in [0, 2]")
     if not math.isfinite(float(args.correlation_loss_lambda)) or not 0.0 <= float(args.correlation_loss_lambda) <= 0.1:
         parser.error("--correlation-loss-lambda must be finite and in [0, 0.1]")
+    if not math.isfinite(float(args.augmentation_consistency_lambda)) or not 0.0 <= float(args.augmentation_consistency_lambda) <= 0.1:
+        parser.error("--augmentation-consistency-lambda must be finite and in [0, 0.1]")
+    if args.augmentation_consistency and args.augmentation_consistency_lambda == 0.0:
+        parser.error("--augmentation-consistency requires a positive lambda")
+    if not math.isfinite(float(args.augmentation_noise_scale)) or not 0.0 <= float(args.augmentation_noise_scale) <= 0.1:
+        parser.error("--augmentation-noise-scale must be finite and in [0, 0.1]")
     try:
         source = _resolve_data_source(
             manifest_path=args.manifest,
@@ -2318,6 +2359,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             two_stage_warmup_epochs=args.two_stage_warmup_epochs,
             two_stage_unfreeze_last_blocks=args.two_stage_unfreeze_last_blocks,
             two_stage_encoder_gradient_scale=args.two_stage_encoder_gradient_scale,
+            augmentation_consistency=args.augmentation_consistency,
+            augmentation_consistency_lambda=(
+                args.augmentation_consistency_lambda
+                if args.augmentation_consistency
+                else 0.0
+            ),
+            augmentation_noise_scale=(
+                args.augmentation_noise_scale if args.augmentation_consistency else 0.0
+            ),
             data_mode=source.data_mode,
             manifest_path=source.manifest_path,
             manifest_digest=source.manifest_sha256,
@@ -2381,6 +2431,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "two_stage_encoder_gradient_scale": (
                     args.two_stage_encoder_gradient_scale if args.two_stage_finetune else None
                 ),
+                "augmentation_consistency": bool(args.augmentation_consistency),
+                "augmentation_consistency_lambda": (
+                    args.augmentation_consistency_lambda
+                    if args.augmentation_consistency
+                    else 0.0
+                ),
+                "augmentation_noise_scale": (
+                    args.augmentation_noise_scale if args.augmentation_consistency else None
+                ),
+                "augmentation_space": (
+                    "neuro_representation" if args.augmentation_consistency else None
+                ),
+                "augmentation_scope": (
+                    "train_only" if args.augmentation_consistency else None
+                ),
+                "augmentation_pairing": (
+                    "same_batch_example_two_views"
+                    if args.augmentation_consistency
+                    else None
+                ),
                 "layer_index": args.layer_index,
                 "layer_indices": (
                     None if args.layer_indices is None else list(args.layer_indices)
@@ -2418,6 +2488,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                     two_stage_warmup_epochs=args.two_stage_warmup_epochs,
                     two_stage_unfreeze_last_blocks=args.two_stage_unfreeze_last_blocks,
                     two_stage_encoder_gradient_scale=args.two_stage_encoder_gradient_scale,
+                    augmentation_consistency=args.augmentation_consistency,
+                    augmentation_consistency_lambda=(
+                        args.augmentation_consistency_lambda
+                        if args.augmentation_consistency
+                        else 0.0
+                    ),
+                    augmentation_noise_scale=(
+                        args.augmentation_noise_scale
+                        if args.augmentation_consistency
+                        else 0.0
+                    ),
                 )
                 results = run_official_subset(
                     manifest_path=source.manifest_path,
@@ -2442,6 +2523,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                     two_stage_warmup_epochs=args.two_stage_warmup_epochs,
                     two_stage_unfreeze_last_blocks=args.two_stage_unfreeze_last_blocks,
                     two_stage_encoder_gradient_scale=args.two_stage_encoder_gradient_scale,
+                    augmentation_consistency=args.augmentation_consistency,
+                    augmentation_consistency_lambda=(
+                        args.augmentation_consistency_lambda
+                        if args.augmentation_consistency
+                        else 0.0
+                    ),
+                    augmentation_noise_scale=(
+                        args.augmentation_noise_scale
+                        if args.augmentation_consistency
+                        else 0.0
+                    ),
                     data_mode=source.data_mode,
                     provenance_path=provenance_path,
                     acquisition_provenance_path=(
@@ -2586,6 +2678,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             "two_stage_encoder_gradient_scale": (
                 args.two_stage_encoder_gradient_scale if args.two_stage_finetune else None
+            ),
+            "augmentation_consistency": bool(args.augmentation_consistency),
+            "augmentation_consistency_lambda": (
+                args.augmentation_consistency_lambda
+                if args.augmentation_consistency
+                else 0.0
+            ),
+            "augmentation_noise_scale": (
+                args.augmentation_noise_scale if args.augmentation_consistency else None
+            ),
+            "augmentation_space": (
+                "neuro_representation" if args.augmentation_consistency else None
+            ),
+            "augmentation_scope": (
+                "train_only" if args.augmentation_consistency else None
+            ),
+            "augmentation_pairing": (
+                "same_batch_example_two_views" if args.augmentation_consistency else None
             ),
             "provenance_path": (
                 str(source.manifest_path) if source.data_mode == "manifest" and source.manifest_path is not None else None

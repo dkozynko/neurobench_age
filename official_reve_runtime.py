@@ -23,6 +23,8 @@ _CONFIGURE_OPTIMIZERS_ABSENT = object()
 _TRAINING_STEP_ABSENT = object()
 H6_GATE_STABILITY_LAMBDA = 0.001
 H6_NOISE_SCALE = 0.01
+AUGMENTATION_CONSISTENCY_LAMBDA = 0.05
+AUGMENTATION_CONSISTENCY_NOISE_SCALE = 0.01
 
 
 class CorrelationAuxiliaryLoss(nn.Module):
@@ -188,6 +190,79 @@ def make_h6_training_view(
     return neuro + float(noise_scale) * scale * noise
 
 
+def _augmentation_consistency_noise_seed(*, run_seed: int, epoch: int, batch_idx: int) -> int:
+    """Derive a private deterministic seed for a paired training view."""
+
+    return 1_000_003 + int(run_seed) + 1009 * int(epoch) + int(batch_idx)
+
+
+def make_augmentation_consistency_view(
+    neuro: Any,
+    *,
+    run_seed: int,
+    epoch: int,
+    batch_idx: int,
+    noise_scale: float = AUGMENTATION_CONSISTENCY_NOISE_SCALE,
+) -> Any:
+    """Jitter each representation token independently without global RNG state.
+
+    ``neuro`` is the cached REVE representation consumed by the downstream
+    head. The returned tensor has the same shape: every token receives an
+    independent bounded noise vector across its final ``D`` features, while
+    no information is mixed between tokens or examples.
+    """
+
+    if not isinstance(neuro, torch.Tensor) or neuro.ndim < 2:
+        raise TypeError("augmentation consistency expects a tensor with batch and token dimensions")
+    if not torch.is_floating_point(neuro):
+        raise TypeError("augmentation consistency expects a floating-point representation")
+    if not math.isfinite(float(noise_scale)) or noise_scale < 0.0:
+        raise ValueError("augmentation consistency noise_scale must be finite and non-negative")
+    generator = torch.Generator(device=neuro.device)
+    generator.manual_seed(
+        _augmentation_consistency_noise_seed(
+            run_seed=run_seed,
+            epoch=epoch,
+            batch_idx=batch_idx,
+        )
+    )
+    noise = torch.randn(
+        neuro.shape,
+        generator=generator,
+        device=neuro.device,
+        dtype=neuro.dtype,
+    ).clamp(-3.0, 3.0)
+    token_scale = torch.nan_to_num(
+        neuro.detach().std(dim=-1, keepdim=True, unbiased=False),
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    ).clamp_min(1e-6)
+    return neuro + float(noise_scale) * token_scale * noise
+
+
+def augmentation_consistency_loss(
+    prediction_one: Any,
+    prediction_two: Any,
+    *,
+    lambda_consistency: float = AUGMENTATION_CONSISTENCY_LAMBDA,
+) -> tuple[Any, Any]:
+    """Return weighted and raw MSE agreement losses for paired predictions."""
+
+    if not isinstance(prediction_one, torch.Tensor) or not isinstance(prediction_two, torch.Tensor):
+        raise TypeError("augmentation consistency predictions must be tensors")
+    if prediction_one.shape != prediction_two.shape:
+        raise ValueError("augmentation consistency predictions must have identical shapes")
+    if not math.isfinite(float(lambda_consistency)) or lambda_consistency < 0.0:
+        raise ValueError("augmentation consistency lambda must be finite and non-negative")
+    if not torch.isfinite(prediction_one).all() or not torch.isfinite(prediction_two).all():
+        raise RuntimeError("augmentation consistency received non-finite predictions")
+    raw = torch.nn.functional.mse_loss(prediction_two, prediction_one.detach())
+    if not torch.isfinite(raw):
+        raise RuntimeError("augmentation consistency loss is non-finite")
+    return float(lambda_consistency) * raw, raw
+
+
 def h6_gate_consistency_loss(
     alpha_one: Any,
     alpha_two: Any,
@@ -307,6 +382,104 @@ def _restore_h6_training_steps(patched_modules: list[dict[str, Any]]) -> None:
             errors.append(error)
     if errors:
         error = RuntimeError("failed to restore one or more H6 training-step patches")
+        for restoration_error in errors:
+            error.add_note(repr(restoration_error))
+        raise error
+
+
+def _patch_augmentation_consistency_training_step(
+    brain_module: Any,
+    *,
+    run_seed: int,
+    lambda_consistency: float = AUGMENTATION_CONSISTENCY_LAMBDA,
+    noise_scale: float = AUGMENTATION_CONSISTENCY_NOISE_SCALE,
+    patched_modules: list[dict[str, Any]],
+) -> None:
+    """Add a train-only paired-view prediction agreement loss."""
+
+    if brain_module is None or not isinstance(patched_modules, list):
+        raise TypeError("augmentation consistency requires a BrainModule and a patch record list")
+    if not math.isfinite(float(lambda_consistency)) or lambda_consistency < 0.0:
+        raise ValueError("augmentation consistency lambda must be finite and non-negative")
+    if not math.isfinite(float(noise_scale)) or noise_scale < 0.0:
+        raise ValueError("augmentation consistency noise_scale must be finite and non-negative")
+    if any(record["module"] is brain_module for record in patched_modules):
+        raise RuntimeError("augmentation consistency BrainModule was already patched in this run")
+    attributes = getattr(brain_module, "__dict__", None)
+    if not isinstance(attributes, dict):
+        raise TypeError("augmentation consistency BrainModule must expose instance attributes")
+    previous = attributes.get("training_step", _TRAINING_STEP_ABSENT)
+    original = brain_module.training_step
+    record = {"module": brain_module, "previous": previous}
+    patched_modules.append(record)
+
+    def training_step(module: Any, batch: Any, batch_idx: int) -> Any:
+        from types import SimpleNamespace
+
+        base_loss = original(batch, batch_idx)
+        data = getattr(batch, "data", None)
+        if not isinstance(data, Mapping) or "neuro" not in data:
+            raise RuntimeError("augmentation consistency batch does not expose data['neuro']")
+        neuro = data["neuro"]
+        clean_prediction = module.model_forward(batch)
+        paired_data = dict(data)
+        paired_data["neuro"] = make_augmentation_consistency_view(
+            neuro,
+            run_seed=run_seed,
+            epoch=int(getattr(module, "current_epoch", 0)) + 1,
+            batch_idx=batch_idx,
+            noise_scale=noise_scale,
+        )
+        augmented_prediction = module.model_forward(SimpleNamespace(data=paired_data))
+        consistency_loss, raw_consistency = augmentation_consistency_loss(
+            clean_prediction,
+            augmented_prediction,
+            lambda_consistency=lambda_consistency,
+        )
+        module._augmentation_consistency_last_loss = raw_consistency.detach()
+        trainer = getattr(module, "trainer", None)
+        module.log(
+            "train/augmentation_consistency",
+            raw_consistency,
+            on_step=False,
+            on_epoch=True,
+            logger=True,
+            prog_bar=False,
+            batch_size=neuro.shape[0],
+            sync_dist=getattr(trainer, "world_size", 1) > 1,
+        )
+        return base_loss + consistency_loss
+
+    try:
+        brain_module.training_step = types.MethodType(training_step, brain_module)
+    except BaseException:
+        patched_modules.pop()
+        raise
+
+
+def _restore_augmentation_consistency_training_steps(
+    patched_modules: list[dict[str, Any]],
+) -> None:
+    """Restore all instance-level augmentation consistency patches."""
+
+    errors: list[BaseException] = []
+    while patched_modules:
+        record = patched_modules.pop()
+        module = record["module"]
+        previous = record["previous"]
+        try:
+            if previous is _TRAINING_STEP_ABSENT:
+                attributes = getattr(module, "__dict__", {})
+                if "training_step" in attributes:
+                    delattr(module, "training_step")
+            else:
+                module.training_step = previous
+        except BaseException as error:
+            errors.append(error)
+    if errors:
+        error = RuntimeError(
+            "failed to restore one or more augmentation consistency training-step patches"
+        )
         for restoration_error in errors:
             error.add_note(repr(restoration_error))
         raise error
@@ -937,6 +1110,9 @@ def _head_metadata(
     two_stage_warmup_epochs: int = 3,
     two_stage_unfreeze_last_blocks: int = 1,
     two_stage_encoder_gradient_scale: float = 0.1,
+    augmentation_consistency: bool = False,
+    augmentation_consistency_lambda: float = 0.0,
+    augmentation_noise_scale: float = AUGMENTATION_CONSISTENCY_NOISE_SCALE,
     seeds: Sequence[int],
     launch_command: str,
 ) -> dict[str, Any]:
@@ -950,6 +1126,10 @@ def _head_metadata(
             raise ValueError(f"{name} must be finite and in [0, 2]")
     if not math.isfinite(float(correlation_loss_lambda)) or not 0.0 <= float(correlation_loss_lambda) <= 0.1:
         raise ValueError("correlation_loss_lambda must be finite and in [0, 0.1]")
+    if not math.isfinite(float(augmentation_consistency_lambda)) or not 0.0 <= float(augmentation_consistency_lambda) <= 0.1:
+        raise ValueError("augmentation_consistency_lambda must be finite and in [0, 0.1]")
+    if not math.isfinite(float(augmentation_noise_scale)) or not 0.0 <= float(augmentation_noise_scale) <= 0.1:
+        raise ValueError("augmentation_noise_scale must be finite and in [0, 0.1]")
 
     query_initialization = {
         "mean_linear": "neuralbench_default",
@@ -1065,6 +1245,16 @@ def _head_metadata(
         "two_stage_warmup_epochs": int(two_stage_warmup_epochs),
         "two_stage_unfreeze_last_blocks": int(two_stage_unfreeze_last_blocks),
         "two_stage_encoder_gradient_scale": float(two_stage_encoder_gradient_scale),
+        "augmentation_consistency": bool(augmentation_consistency),
+        "augmentation_consistency_lambda": float(augmentation_consistency_lambda),
+        "augmentation_noise_scale": float(augmentation_noise_scale),
+        "augmentation_space": (
+            "neuro_representation" if augmentation_consistency else None
+        ),
+        "augmentation_scope": "train_only" if augmentation_consistency else None,
+        "augmentation_pairing": (
+            "same_batch_example_two_views" if augmentation_consistency else None
+        ),
         "head_query_initialization": query_initialization,
         "head_linear_initialization": (
             "neuralbench_default"
@@ -1609,6 +1799,9 @@ def _patch_official_components(
     two_stage_warmup_epochs: int = 3,
     two_stage_unfreeze_last_blocks: int = 1,
     two_stage_encoder_gradient_scale: float = 0.1,
+    augmentation_consistency: bool = False,
+    augmentation_consistency_lambda: float = 0.0,
+    augmentation_noise_scale: float = AUGMENTATION_CONSISTENCY_NOISE_SCALE,
     data_mode: str = "manifest",
     provenance_path: Path | None = None,
     acquisition_provenance_path: Path | None = None,
@@ -1665,6 +1858,12 @@ def _patch_official_components(
         raise ValueError("SWA requires strict evaluation of mean_rich_stats_residual")
     if not math.isfinite(float(correlation_loss_lambda)) or not 0.0 <= float(correlation_loss_lambda) <= 0.1:
         raise ValueError("correlation_loss_lambda must be finite and in [0, 0.1]")
+    if not math.isfinite(float(augmentation_consistency_lambda)) or not 0.0 <= float(augmentation_consistency_lambda) <= 0.1:
+        raise ValueError("augmentation_consistency_lambda must be finite and in [0, 0.1]")
+    if not math.isfinite(float(augmentation_noise_scale)) or not 0.0 <= float(augmentation_noise_scale) <= 0.1:
+        raise ValueError("augmentation_noise_scale must be finite and in [0, 0.1]")
+    if augmentation_consistency and augmentation_consistency_lambda == 0.0:
+        raise ValueError("augmentation consistency requires a positive lambda")
     if correlation_loss_lambda and (
         head_variant != "mean_rich_stats_residual" or evaluation_protocol != "strict"
     ):
@@ -1754,6 +1953,7 @@ def _patch_official_components(
     provenance_state_by_data: dict[int, dict[str, Any]] = {}
     patched_brain_modules: list[dict[str, Any]] = []
     patched_h6_training_steps: list[dict[str, Any]] = []
+    patched_augmentation_consistency_training_steps: list[dict[str, Any]] = []
     tuning_metadata_by_experiment: dict[int, dict[str, Any]] = {}
     test_invocations: set[int] = set()
 
@@ -2003,6 +2203,21 @@ def _patch_official_components(
                     "two_stage_encoder_gradient_scale": (
                         float(two_stage_encoder_gradient_scale) if two_stage_finetune else None
                     ),
+                    "augmentation_consistency": bool(augmentation_consistency),
+                    "augmentation_consistency_lambda": (
+                        float(augmentation_consistency_lambda)
+                        if augmentation_consistency
+                        else 0.0
+                    ),
+                    "augmentation_noise_scale": (
+                        float(augmentation_noise_scale)
+                        if augmentation_consistency
+                        else None
+                    ),
+                    "augmentation_space": (
+                        "neuro_representation" if augmentation_consistency else None
+                    ),
+                    "augmentation_scope": "train_only" if augmentation_consistency else None,
                     "test_access_policy": (
                         "single_use_predeclared"
                         if strict_final_test
@@ -2195,6 +2410,26 @@ def _patch_official_components(
                     "correlation_loss_objective": "batch_pearson",
                 },
             )
+        if augmentation_consistency:
+            brain_module = getattr(self, "_brain_module", None)
+            _patch_augmentation_consistency_training_step(
+                brain_module,
+                run_seed=int(getattr(self, "seed", 0)),
+                lambda_consistency=augmentation_consistency_lambda,
+                noise_scale=augmentation_noise_scale,
+                patched_modules=patched_augmentation_consistency_training_steps,
+            )
+            persist_tuning_metadata(
+                self,
+                {
+                    "augmentation_consistency": True,
+                    "augmentation_consistency_lambda": float(augmentation_consistency_lambda),
+                    "augmentation_noise_scale": float(augmentation_noise_scale),
+                    "augmentation_space": "neuro_representation",
+                    "augmentation_scope": "train_only",
+                    "augmentation_pairing": "same_batch_example_two_views",
+                },
+            )
         return result
 
     # NeuralBench's CLI and experiment_config modules each keep a local alias
@@ -2222,6 +2457,9 @@ def _patch_official_components(
         "prepare_pl_module": original_prepare_pl_module,
         "patched_brain_modules": patched_brain_modules,
         "patched_h6_training_steps": patched_h6_training_steps,
+        "patched_augmentation_consistency_training_steps": (
+            patched_augmentation_consistency_training_steps
+        ),
         "setup_trainer": original_setup_trainer,
         "cli_loader": (cli, original_cli_load_yaml_config),
         "experiment_loader": (
@@ -2312,6 +2550,12 @@ def _restore_official_components(originals: Mapping[str, Any], *, restore_tuned:
     attempt("neuralbench.experiment_config.load_yaml_config", lambda: setattr(experiment_config, "load_yaml_config", original_experiment_loader))
     attempt("last_tuned.configure_optimizers", lambda: restore_tuned(originals.get("patched_brain_modules", [])))
     attempt("h6.training_step", lambda: _restore_h6_training_steps(originals.get("patched_h6_training_steps", [])))
+    attempt(
+        "augmentation_consistency.training_step",
+        lambda: _restore_augmentation_consistency_training_steps(
+            originals.get("patched_augmentation_consistency_training_steps", [])
+        ),
+    )
 
     if restoration_errors:
         error = RuntimeError("official component restoration failed")
@@ -2345,6 +2589,9 @@ def run_official_subset(
     two_stage_warmup_epochs: int = 3,
     two_stage_unfreeze_last_blocks: int = 1,
     two_stage_encoder_gradient_scale: float = 0.1,
+    augmentation_consistency: bool = False,
+    augmentation_consistency_lambda: float = 0.0,
+    augmentation_noise_scale: float = AUGMENTATION_CONSISTENCY_NOISE_SCALE,
     data_mode: str = "manifest",
     provenance_path: Path | None = None,
     acquisition_provenance_path: Path | None = None,
@@ -2384,6 +2631,9 @@ def run_official_subset(
             two_stage_warmup_epochs=two_stage_warmup_epochs,
             two_stage_unfreeze_last_blocks=two_stage_unfreeze_last_blocks,
             two_stage_encoder_gradient_scale=two_stage_encoder_gradient_scale,
+            augmentation_consistency=augmentation_consistency,
+            augmentation_consistency_lambda=augmentation_consistency_lambda,
+            augmentation_noise_scale=augmentation_noise_scale,
             data_mode=data_mode,
             provenance_path=provenance_path,
             acquisition_provenance_path=acquisition_provenance_path,
