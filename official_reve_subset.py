@@ -2053,8 +2053,9 @@ def _write_config(
                 "AUGMENTATION_CONSISTENCY": bool(augmentation_consistency),
                 "AUGMENTATION_CONSISTENCY_LAMBDA": float(augmentation_consistency_lambda),
                 "AUGMENTATION_NOISE_SCALE": float(augmentation_noise_scale),
+                "AUGMENTATION_CONSISTENCY_BATCH_SIZE": 8,
                 "AUGMENTATION_SPACE": (
-                    "neuro_representation" if augmentation_consistency else None
+                    "neuro_input" if augmentation_consistency else None
                 ),
                 "AUGMENTATION_SCOPE": "train_only" if augmentation_consistency else None,
             }
@@ -2211,7 +2212,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--augmentation-consistency",
         action="store_true",
-        help="add train-only paired-view prediction consistency on the REVE representation",
+        help="add train-only paired-view prediction consistency on standardized REVE input",
     )
     parser.add_argument(
         "--augmentation-consistency-lambda",
@@ -2440,8 +2441,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "augmentation_noise_scale": (
                     args.augmentation_noise_scale if args.augmentation_consistency else None
                 ),
+                "augmentation_consistency_batch_size": (
+                    8 if args.augmentation_consistency else None
+                ),
                 "augmentation_space": (
-                    "neuro_representation" if args.augmentation_consistency else None
+                    "neuro_input" if args.augmentation_consistency else None
                 ),
                 "augmentation_scope": (
                     "train_only" if args.augmentation_consistency else None
@@ -2688,8 +2692,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "augmentation_noise_scale": (
                 args.augmentation_noise_scale if args.augmentation_consistency else None
             ),
+            "augmentation_consistency_batch_size": (
+                8 if args.augmentation_consistency else None
+            ),
             "augmentation_space": (
-                "neuro_representation" if args.augmentation_consistency else None
+                "neuro_input" if args.augmentation_consistency else None
             ),
             "augmentation_scope": (
                 "train_only" if args.augmentation_consistency else None

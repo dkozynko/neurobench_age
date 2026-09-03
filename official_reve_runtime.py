@@ -25,6 +25,7 @@ H6_GATE_STABILITY_LAMBDA = 0.001
 H6_NOISE_SCALE = 0.01
 AUGMENTATION_CONSISTENCY_LAMBDA = 0.05
 AUGMENTATION_CONSISTENCY_NOISE_SCALE = 0.01
+AUGMENTATION_CONSISTENCY_BATCH_SIZE = 8
 
 
 class CorrelationAuxiliaryLoss(nn.Module):
@@ -206,10 +207,10 @@ def make_augmentation_consistency_view(
 ) -> Any:
     """Jitter each representation token independently without global RNG state.
 
-    ``neuro`` is the cached REVE representation consumed by the downstream
-    head. The returned tensor has the same shape: every token receives an
-    independent bounded noise vector across its final ``D`` features, while
-    no information is mixed between tokens or examples.
+    ``neuro`` is the standardized EEG input tensor consumed by the REVE
+    wrapper. The returned tensor has the same shape: every input sample
+    receives independent bounded noise across its final time dimension, while
+    no information is mixed between examples.
     """
 
     if not isinstance(neuro, torch.Tensor) or neuro.ndim < 2:
@@ -261,6 +262,20 @@ def augmentation_consistency_loss(
     if not torch.isfinite(raw):
         raise RuntimeError("augmentation consistency loss is non-finite")
     return float(lambda_consistency) * raw, raw
+
+
+def _batch_prefix(data: Mapping[str, Any], *, size: int, batch_size: int) -> dict[str, Any]:
+    """Slice fields aligned to the first batch dimension for a small paired view."""
+
+    result: dict[str, Any] = {}
+    for key, value in data.items():
+        if isinstance(value, torch.Tensor) and value.ndim > 0 and value.shape[0] == batch_size:
+            result[key] = value[:size]
+        elif isinstance(value, (list, tuple)) and len(value) == batch_size:
+            result[key] = value[:size]
+        else:
+            result[key] = value
+    return result
 
 
 def h6_gate_consistency_loss(
@@ -393,6 +408,7 @@ def _patch_augmentation_consistency_training_step(
     run_seed: int,
     lambda_consistency: float = AUGMENTATION_CONSISTENCY_LAMBDA,
     noise_scale: float = AUGMENTATION_CONSISTENCY_NOISE_SCALE,
+    consistency_batch_size: int = AUGMENTATION_CONSISTENCY_BATCH_SIZE,
     patched_modules: list[dict[str, Any]],
 ) -> None:
     """Add a train-only paired-view prediction agreement loss."""
@@ -403,6 +419,8 @@ def _patch_augmentation_consistency_training_step(
         raise ValueError("augmentation consistency lambda must be finite and non-negative")
     if not math.isfinite(float(noise_scale)) or noise_scale < 0.0:
         raise ValueError("augmentation consistency noise_scale must be finite and non-negative")
+    if isinstance(consistency_batch_size, bool) or not isinstance(consistency_batch_size, int) or consistency_batch_size < 1:
+        raise ValueError("augmentation consistency batch size must be a positive integer")
     if any(record["module"] is brain_module for record in patched_modules):
         raise RuntimeError("augmentation consistency BrainModule was already patched in this run")
     attributes = getattr(brain_module, "__dict__", None)
@@ -416,15 +434,43 @@ def _patch_augmentation_consistency_training_step(
     def training_step(module: Any, batch: Any, batch_idx: int) -> Any:
         from types import SimpleNamespace
 
-        base_loss = original(batch, batch_idx)
         data = getattr(batch, "data", None)
         if not isinstance(data, Mapping) or "neuro" not in data:
             raise RuntimeError("augmentation consistency batch does not expose data['neuro']")
         neuro = data["neuro"]
-        clean_prediction = module.model_forward(batch)
-        paired_data = dict(data)
+        if not isinstance(neuro, torch.Tensor) or neuro.ndim < 1:
+            raise TypeError("augmentation consistency batch data['neuro'] must be batched")
+        batch_size = int(neuro.shape[0])
+        pair_size = min(int(consistency_batch_size), batch_size)
+        captured: dict[str, torch.Tensor] = {}
+        model_forward_attributes = getattr(module, "__dict__", None)
+        if not isinstance(model_forward_attributes, dict):
+            raise TypeError("augmentation consistency BrainModule must expose instance attributes")
+        previous_model_forward = model_forward_attributes.get("model_forward", _TRAINING_STEP_ABSENT)
+        original_model_forward = module.model_forward
+
+        def capture_model_forward(model: Any, clean_batch: Any) -> Any:
+            prediction = original_model_forward(clean_batch)
+            if not isinstance(prediction, torch.Tensor):
+                raise TypeError("augmentation consistency model_forward must return a tensor")
+            captured["clean_prediction"] = prediction
+            return prediction
+
+        try:
+            module.model_forward = types.MethodType(capture_model_forward, module)
+            base_loss = original(batch, batch_idx)
+        finally:
+            if previous_model_forward is _TRAINING_STEP_ABSENT:
+                if "model_forward" in model_forward_attributes:
+                    delattr(module, "model_forward")
+            else:
+                module.model_forward = previous_model_forward
+        clean_prediction = captured.get("clean_prediction")
+        if clean_prediction is None:
+            raise RuntimeError("augmentation consistency did not capture the clean prediction")
+        paired_data = _batch_prefix(data, size=pair_size, batch_size=batch_size)
         paired_data["neuro"] = make_augmentation_consistency_view(
-            neuro,
+            neuro[:pair_size],
             run_seed=run_seed,
             epoch=int(getattr(module, "current_epoch", 0)) + 1,
             batch_idx=batch_idx,
@@ -432,7 +478,7 @@ def _patch_augmentation_consistency_training_step(
         )
         augmented_prediction = module.model_forward(SimpleNamespace(data=paired_data))
         consistency_loss, raw_consistency = augmentation_consistency_loss(
-            clean_prediction,
+            clean_prediction[:pair_size],
             augmented_prediction,
             lambda_consistency=lambda_consistency,
         )
@@ -445,7 +491,7 @@ def _patch_augmentation_consistency_training_step(
             on_epoch=True,
             logger=True,
             prog_bar=False,
-            batch_size=neuro.shape[0],
+            batch_size=pair_size,
             sync_dist=getattr(trainer, "world_size", 1) > 1,
         )
         return base_loss + consistency_loss
@@ -1248,9 +1294,10 @@ def _head_metadata(
         "augmentation_consistency": bool(augmentation_consistency),
         "augmentation_consistency_lambda": float(augmentation_consistency_lambda),
         "augmentation_noise_scale": float(augmentation_noise_scale),
-        "augmentation_space": (
-            "neuro_representation" if augmentation_consistency else None
+        "augmentation_consistency_batch_size": (
+            AUGMENTATION_CONSISTENCY_BATCH_SIZE if augmentation_consistency else None
         ),
+        "augmentation_space": "neuro_input" if augmentation_consistency else None,
         "augmentation_scope": "train_only" if augmentation_consistency else None,
         "augmentation_pairing": (
             "same_batch_example_two_views" if augmentation_consistency else None
@@ -2214,8 +2261,13 @@ def _patch_official_components(
                         if augmentation_consistency
                         else None
                     ),
+                    "augmentation_consistency_batch_size": (
+                        AUGMENTATION_CONSISTENCY_BATCH_SIZE
+                        if augmentation_consistency
+                        else None
+                    ),
                     "augmentation_space": (
-                        "neuro_representation" if augmentation_consistency else None
+                        "neuro_input" if augmentation_consistency else None
                     ),
                     "augmentation_scope": "train_only" if augmentation_consistency else None,
                     "test_access_policy": (
@@ -2425,7 +2477,12 @@ def _patch_official_components(
                     "augmentation_consistency": True,
                     "augmentation_consistency_lambda": float(augmentation_consistency_lambda),
                     "augmentation_noise_scale": float(augmentation_noise_scale),
-                    "augmentation_space": "neuro_representation",
+                    "augmentation_consistency_batch_size": (
+                        AUGMENTATION_CONSISTENCY_BATCH_SIZE
+                        if augmentation_consistency
+                        else None
+                    ),
+                    "augmentation_space": "neuro_input",
                     "augmentation_scope": "train_only",
                     "augmentation_pairing": "same_batch_example_two_views",
                 },
