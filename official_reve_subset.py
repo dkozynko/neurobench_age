@@ -22,6 +22,7 @@ import os
 import shlex
 import shutil
 import sys
+import time
 import traceback
 import uuid
 from dataclasses import dataclass
@@ -35,6 +36,20 @@ from selective_hbn_download import (
     _audit_release,
     _build_provenance_payload,
     _current_provenance_paths,
+)
+from experiment_evidence import (
+    EvidenceRecorder,
+    SCHEMA_VERSION,
+    parameter_buckets_from_model,
+    sha256_json,
+    write_json_atomic,
+    write_jsonl_atomic,
+)
+from prediction_evidence import (
+    PredictionEvidenceError,
+    aggregate_subject_predictions,
+    compute_regression_metrics,
+    write_prediction_jsonl,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -432,13 +447,346 @@ class EpochValidationMetrics(LightningCallback):
             raise RuntimeError("strict validation produced non-finite val/pearsonr")
 
         record = {
+            "schema_version": SCHEMA_VERSION,
             "seed": self.seed,
             "epoch": int(trainer.current_epoch + 1),
             "val/pearsonr": pearson,
         }
+        for metric_name in ("val/mae", "val/rmse", "val/r2"):
+            metric_value = getattr(trainer, "callback_metrics", {}).get(metric_name)
+            if metric_value is not None:
+                numeric_value = float(torch.as_tensor(metric_value).detach().cpu())
+                if math.isfinite(numeric_value):
+                    record[metric_name] = numeric_value
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         with self.output_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def _batch_data(batch: Any) -> Mapping[str, Any]:
+    data = getattr(batch, "data", batch)
+    if not isinstance(data, Mapping):
+        raise PredictionEvidenceError("prediction batch does not expose a data mapping")
+    return data
+
+
+def _batch_subject_ids_for_predictions(batch: Any, count: int) -> list[Any]:
+    data = _batch_data(batch)
+    values = next(
+        (
+            data.get(key)
+            for key in ("subject_ids", "subject_id", "subject", "participant_id")
+            if key in data
+        ),
+        None,
+    )
+    if values is None:
+        raise PredictionEvidenceError("prediction batch does not expose stable subject IDs")
+    if hasattr(values, "detach"):
+        values = values.detach().cpu().reshape(-1).tolist()
+    else:
+        values = list(values)
+    if len(values) != count:
+        raise PredictionEvidenceError("prediction batch subject ID count does not match predictions")
+    if any(value is None or not str(value).strip() for value in values):
+        raise PredictionEvidenceError("prediction batch contains an empty subject ID")
+    return [str(value) for value in values]
+
+
+def _export_prediction_file(
+    *,
+    trainer: Any,
+    pl_module: Any,
+    loader: Any,
+    output_path: Path,
+    split: str,
+    seed: int,
+    selected_checkpoint_path: Path | None = None,
+) -> dict[str, Any]:
+    """Export one subject-level prediction file without touching test data."""
+
+    import torch
+
+    if selected_checkpoint_path is not None and selected_checkpoint_path.is_file():
+        checkpoint = torch.load(
+            selected_checkpoint_path,
+            map_location=torch.device("cpu"),
+            weights_only=False,
+        )
+        state_dict = checkpoint.get("state_dict") if isinstance(checkpoint, Mapping) else None
+        if isinstance(state_dict, Mapping):
+            pl_module.load_state_dict(state_dict, strict=True)
+
+    was_training = bool(pl_module.training)
+    pl_module.eval()
+    subject_ids: list[Any] = []
+    true_ages: list[float] = []
+    predictions: list[float] = []
+    scaler = getattr(pl_module, "target_scaler", None)
+    try:
+        with torch.inference_mode():
+            for batch in loader:
+                batch = trainer.strategy.batch_to_device(
+                    batch, pl_module.device, dataloader_idx=0
+                )
+                data = _batch_data(batch)
+                raw_target = data.get("target")
+                if raw_target is None:
+                    raise PredictionEvidenceError("prediction batch is missing target")
+                prediction = pl_module.model_forward(batch)
+                target = raw_target
+                if scaler is not None and callable(getattr(scaler, "inverse_transform", None)):
+                    prediction = scaler.inverse_transform(prediction)
+                    target = scaler.inverse_transform(target)
+                prediction_values = prediction.detach().cpu().reshape(-1).tolist()
+                target_values = target.detach().cpu().reshape(-1).tolist()
+                if len(prediction_values) != len(target_values):
+                    raise PredictionEvidenceError("prediction and target row counts differ")
+                subject_ids.extend(
+                    _batch_subject_ids_for_predictions(batch, len(prediction_values))
+                )
+                predictions.extend(float(value) for value in prediction_values)
+                true_ages.extend(float(value) for value in target_values)
+    finally:
+        if was_training:
+            pl_module.train()
+
+    rows = aggregate_subject_predictions(
+        subject_ids,
+        true_ages,
+        predictions,
+        split=split,
+        seed=seed,
+    )
+    row_count = write_prediction_jsonl(output_path, rows, expected_split=split)
+    metrics = compute_regression_metrics(
+        [row["true_age"] for row in rows],
+        [row["predicted_age"] for row in rows],
+    )
+    return {
+        "path": str(output_path.resolve()),
+        "split": split,
+        "seed": int(seed),
+        "subject_count": row_count,
+        "aggregation": "arithmetic_mean_per_subject",
+        "metrics": metrics,
+    }
+
+
+class ValidationPredictionExporter(LightningCallback):
+    """Export selected-checkpoint validation predictions at train end."""
+
+    def __init__(self, output_path: Path, validation_loader: Any, *, seed: int | None):
+        self.output_path = output_path
+        self.validation_loader = validation_loader
+        self.seed = int(seed) if seed is not None else 0
+
+    def on_train_end(self, trainer: Any, pl_module: Any) -> None:
+        checkpoint_callback = getattr(trainer, "checkpoint_callback", None)
+        raw_path = getattr(checkpoint_callback, "best_model_path", None)
+        checkpoint_path = Path(str(raw_path)) if raw_path else None
+        if checkpoint_path is None or not checkpoint_path.is_file():
+            raise RuntimeError("validation prediction export requires the selected checkpoint")
+        _export_prediction_file(
+            trainer=trainer,
+            pl_module=pl_module,
+            loader=self.validation_loader,
+            output_path=self.output_path,
+            split="validation",
+            seed=self.seed,
+            selected_checkpoint_path=checkpoint_path,
+        )
+
+
+class TrainAgeReferenceExporter(LightningCallback):
+    """Persist subject/age labels observed from the training split only."""
+
+    def __init__(self, output_path: Path, *, seed: int | None):
+        self.output_path = output_path
+        self.seed = int(seed) if seed is not None else 0
+        self.training_started = False
+        self._ages_by_subject: dict[str, float] = {}
+
+    def on_train_start(self, trainer: Any, pl_module: Any) -> None:
+        del trainer, pl_module
+        self.training_started = True
+        self._ages_by_subject.clear()
+
+    def on_train_batch_end(
+        self,
+        trainer: Any,
+        pl_module: Any,
+        outputs: Any,
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
+        del outputs, batch_idx
+        if not self.training_started or getattr(trainer, "sanity_checking", False):
+            return
+        data = _batch_data(batch)
+        raw_target = data.get("target")
+        if raw_target is None:
+            raise PredictionEvidenceError("training batch is missing target for age reference")
+        import torch
+
+        target = raw_target
+        target_values = torch.as_tensor(target).detach().cpu().reshape(-1).tolist()
+        subject_ids = _batch_subject_ids_for_predictions(batch, len(target_values))
+        for subject_id, age in zip(subject_ids, target_values):
+            subject = str(subject_id)
+            value = float(age)
+            if not subject or subject == "None" or not math.isfinite(value):
+                raise PredictionEvidenceError("training age reference contains an invalid row")
+            previous = self._ages_by_subject.get(subject)
+            if previous is not None and not math.isclose(previous, value, rel_tol=0.0, abs_tol=1e-6):
+                raise PredictionEvidenceError(
+                    f"training subject {subject} has inconsistent ages"
+                )
+            self._ages_by_subject[subject] = value
+
+    def on_train_end(self, trainer: Any, pl_module: Any) -> None:
+        del trainer, pl_module
+        if not self.training_started:
+            return
+        if not self._ages_by_subject:
+            raise PredictionEvidenceError("training age reference contains no subjects")
+        rows = [
+            {
+                "schema_version": SCHEMA_VERSION,
+                "split": "train",
+                "seed": self.seed,
+                "subject_id": subject,
+                "true_age": age,
+            }
+            for subject, age in sorted(self._ages_by_subject.items())
+        ]
+        write_jsonl_atomic(self.output_path, rows)
+
+
+class OptimizerEvidenceExporter(LightningCallback):
+    """Persist the optimizer and scheduler actually constructed by Lightning."""
+
+    def __init__(self, output_path: Path):
+        self.output_path = output_path
+
+    def on_fit_start(self, trainer: Any, pl_module: Any) -> None:
+        del pl_module
+        optimizers = getattr(trainer, "optimizers", None)
+        if not isinstance(optimizers, (list, tuple)) or not optimizers:
+            write_json_atomic(
+                self.output_path,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "status": "unavailable",
+                    "reason": "Lightning did not expose constructed optimizers at fit start",
+                },
+            )
+            return
+        optimizer_rows: list[dict[str, Any]] = []
+        for index, optimizer in enumerate(optimizers):
+            defaults = getattr(optimizer, "defaults", {})
+            groups = []
+            for group_index, group in enumerate(getattr(optimizer, "param_groups", [])):
+                groups.append(
+                    {
+                        "index": group_index,
+                        "parameter_count": sum(
+                            int(parameter.numel())
+                            for parameter in group.get("params", [])
+                        ),
+                        "learning_rate": group.get("lr"),
+                        "weight_decay": group.get("weight_decay"),
+                    }
+                )
+            optimizer_rows.append(
+                {
+                    "index": index,
+                    "class": optimizer.__class__.__name__,
+                    "defaults": {
+                        key: value
+                        for key, value in defaults.items()
+                        if isinstance(value, (str, int, float, bool)) or value is None
+                    },
+                    "param_groups": groups,
+                }
+            )
+        schedulers = []
+        for config in getattr(trainer, "lr_scheduler_configs", []) or []:
+            scheduler = getattr(config, "scheduler", None)
+            if scheduler is None:
+                continue
+            schedulers.append(
+                {
+                    "class": scheduler.__class__.__name__,
+                    "interval": getattr(config, "interval", None),
+                    "frequency": getattr(config, "frequency", None),
+                    "monitor": getattr(config, "monitor", None),
+                }
+            )
+        write_json_atomic(
+            self.output_path,
+            {
+                "schema_version": SCHEMA_VERSION,
+                "status": "complete",
+                "optimizers": optimizer_rows,
+                "schedulers": schedulers,
+            },
+        )
+
+
+class ThroughputEvidenceExporter(LightningCallback):
+    """Measure training batches, samples, and wall-clock throughput."""
+
+    def __init__(self, output_path: Path):
+        self.output_path = output_path
+        self.training_started = False
+        self.started_at = 0.0
+        self.batch_count = 0
+        self.sample_count = 0
+
+    def on_train_start(self, trainer: Any, pl_module: Any) -> None:
+        del trainer, pl_module
+        self.training_started = True
+        self.started_at = time.perf_counter()
+        self.batch_count = 0
+        self.sample_count = 0
+
+    def on_train_batch_end(
+        self,
+        trainer: Any,
+        pl_module: Any,
+        outputs: Any,
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
+        del trainer, pl_module, outputs, batch_idx
+        if not self.training_started:
+            return
+        self.batch_count += 1
+        data = _batch_data(batch)
+        target = data.get("target")
+        if hasattr(target, "shape") and len(target.shape) > 0:
+            self.sample_count += int(target.shape[0])
+        else:
+            self.sample_count += 1
+
+    def on_train_end(self, trainer: Any, pl_module: Any) -> None:
+        del trainer, pl_module
+        if not self.training_started:
+            return
+        elapsed = max(0.0, time.perf_counter() - self.started_at)
+        write_json_atomic(
+            self.output_path,
+            {
+                "schema_version": SCHEMA_VERSION,
+                "status": "complete",
+                "batches": self.batch_count,
+                "samples": self.sample_count,
+                "elapsed_seconds": elapsed,
+                "batches_per_second": self.batch_count / elapsed if elapsed > 0 else 0.0,
+                "samples_per_second": self.sample_count / elapsed if elapsed > 0 else 0.0,
+            },
+        )
 
 
 def _select_swa_window(
@@ -565,7 +913,7 @@ class SWAValidationCheckpoint(LightningCallback):
         }
         torch.save({"epoch": epoch, "val/pearsonr": pearson, "state_dict": state}, snapshot_path)
         self._snapshot_paths.append(snapshot_path)
-        self._records.append({"epoch": epoch, "val/pearsonr": pearson})
+        self._records.append({"schema_version": SCHEMA_VERSION, "epoch": epoch, "val/pearsonr": pearson})
         while len(self._snapshot_paths) > self.window_size:
             self._snapshot_paths.pop(0).unlink(missing_ok=True)
 
@@ -620,6 +968,7 @@ class SWAValidationCheckpoint(LightningCallback):
         averaged_score = self._evaluate_validation(trainer, pl_module)
         synthetic_epoch = max(int(record["epoch"]) for record in self._records) + 1
         history_record = {
+            "schema_version": SCHEMA_VERSION,
             "seed": self.seed,
             "epoch": synthetic_epoch,
             "val/pearsonr": averaged_score,
@@ -1937,12 +2286,20 @@ def run_official_subset(
     augmentation_consistency: bool = False,
     augmentation_consistency_lambda: float = 0.0,
     augmentation_noise_scale: float = 0.01,
+    continued_pretraining: bool = False,
+    pretraining_epochs: int = 1,
+    pretraining_mask_fraction: float = 0.15,
+    pretraining_mask_block_samples: int = 20,
+    pretraining_learning_rate: float = 1e-5,
+    pretraining_weight_decay: float = 0.05,
+    pretraining_max_batches: int = 0,
     data_mode: str = "manifest",
     provenance_path: Path | None = None,
     acquisition_provenance_path: Path | None = None,
     acquisition_provenance_sha256: str | None = None,
     timeline_count: int | None = None,
     run_metadata: Mapping[str, Any] | None = None,
+    evidence_recorder: Any | None = None,
 ) -> list[dict[str, Any]]:
     return _runtime.run_official_subset(
         manifest_path=manifest_path,
@@ -1971,12 +2328,20 @@ def run_official_subset(
         augmentation_consistency=augmentation_consistency,
         augmentation_consistency_lambda=augmentation_consistency_lambda,
         augmentation_noise_scale=augmentation_noise_scale,
+        continued_pretraining=continued_pretraining,
+        pretraining_epochs=pretraining_epochs,
+        pretraining_mask_fraction=pretraining_mask_fraction,
+        pretraining_mask_block_samples=pretraining_mask_block_samples,
+        pretraining_learning_rate=pretraining_learning_rate,
+        pretraining_weight_decay=pretraining_weight_decay,
+        pretraining_max_batches=pretraining_max_batches,
         data_mode=data_mode,
         provenance_path=provenance_path,
         acquisition_provenance_path=acquisition_provenance_path,
         acquisition_provenance_sha256=acquisition_provenance_sha256,
         timeline_count=timeline_count,
         run_metadata=run_metadata,
+        evidence_recorder=evidence_recorder,
         hooks=_hooks(),
     )
 
@@ -2008,6 +2373,13 @@ def _write_config(
     augmentation_consistency: bool = False,
     augmentation_consistency_lambda: float = 0.0,
     augmentation_noise_scale: float = 0.01,
+    continued_pretraining: bool = False,
+    pretraining_epochs: int = 1,
+    pretraining_mask_fraction: float = 0.15,
+    pretraining_mask_block_samples: int = 20,
+    pretraining_learning_rate: float = 1e-5,
+    pretraining_weight_decay: float = 0.05,
+    pretraining_max_batches: int = 0,
 ) -> None:
     cache_namespace = {
         "full": "neuralbench_official_cache_full",
@@ -2058,6 +2430,32 @@ def _write_config(
                     "neuro_input" if augmentation_consistency else None
                 ),
                 "AUGMENTATION_SCOPE": "train_only" if augmentation_consistency else None,
+                "CONTINUED_PRETRAINING": bool(continued_pretraining),
+                "PRETRAINING_EPOCHS": int(pretraining_epochs) if continued_pretraining else None,
+                "PRETRAINING_MASK_FRACTION": (
+                    float(pretraining_mask_fraction) if continued_pretraining else None
+                ),
+                "PRETRAINING_MASK_BLOCK_SAMPLES": (
+                    int(pretraining_mask_block_samples) if continued_pretraining else None
+                ),
+                "PRETRAINING_LEARNING_RATE": (
+                    float(pretraining_learning_rate) if continued_pretraining else None
+                ),
+                "PRETRAINING_WEIGHT_DECAY": (
+                    float(pretraining_weight_decay) if continued_pretraining else None
+                ),
+                "PRETRAINING_MAX_BATCHES": (
+                    int(pretraining_max_batches)
+                    if continued_pretraining and pretraining_max_batches
+                    else None
+                ),
+                "PRETRAINING_SOURCE_SPLIT": "train_only" if continued_pretraining else None,
+                "PRETRAINING_OBJECTIVE": (
+                    "masked_teacher_student_embedding_mse"
+                    if continued_pretraining
+                    else None
+                ),
+                "PRETRAINING_AGE_LABELS_USED": False if continued_pretraining else None,
             }
         )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2076,6 +2474,48 @@ def _resolved_head_metadata(run_dir: Path) -> dict[str, Any]:
         if isinstance(metadata, Mapping):
             return dict(metadata)
     return {}
+
+
+def _resolved_run_metadata(run_dir: Path) -> dict[str, Any]:
+    """Read one late-bound official run metadata object, if available."""
+
+    for path in sorted(run_dir.rglob("run_metadata.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, Mapping):
+            return dict(payload)
+    return {}
+
+
+def _write_train_age_reference(run_dir: Path, source: DataSource) -> str | None:
+    """Persist a canonical train-only subject/age reference when available."""
+
+    if source.manifest_path is None:
+        return None
+    rows_by_subject: dict[str, float] = {}
+    with source.manifest_path.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            if row.get("split") != "train":
+                continue
+            subject = str(row.get("subject", "")).strip()
+            if not subject:
+                raise ValueError("train age reference contains an empty subject")
+            age = float(row.get("age", "nan"))
+            if not math.isfinite(age):
+                raise ValueError(f"train age reference contains a non-finite age for {subject}")
+            prior = rows_by_subject.get(subject)
+            if prior is not None and prior != age:
+                raise ValueError(f"train subject {subject} has inconsistent ages")
+            rows_by_subject[subject] = age
+    if not rows_by_subject:
+        raise ValueError("train age reference has no training subjects")
+    rows = [
+        {"subject_id": subject, "true_age": age}
+        for subject, age in sorted(rows_by_subject.items())
+    ]
+    return write_jsonl_atomic(run_dir / "analysis" / "train_age_reference.jsonl", rows)
 
 
 def _resolved_swa_metadata(run_dir: Path) -> dict[str, Any]:
@@ -2107,6 +2547,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--data-root", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--config", type=Path)
+    parser.add_argument(
+        "--gpu-hourly-rate-usd",
+        type=float,
+        default=None,
+        help="optional provider GPU hourly rate used to estimate run cost",
+    )
     parser.add_argument(
         "--smoke-head",
         choices=("mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed", "last_avg", "last", "all", "last_tuned"),
@@ -2145,7 +2591,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--strict-final-test",
         action="store_true",
-        help="consume the single predeclared strict test pass after validation selection",
+        help="compatibility alias for --evaluation-mode final_test",
+    )
+    parser.add_argument(
+        "--evaluation-mode",
+        choices=("validation_only", "final_test"),
+        default="validation_only",
+        help="validation-only evidence (default) or the sealed final-test phase",
+    )
+    parser.add_argument(
+        "--allow-sealed-test-evaluation",
+        action="store_true",
+        help="explicitly authorize the one-time sealed test phase",
     )
     parser.add_argument(
         "--two-stage-finetune",
@@ -2226,7 +2683,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=0.01,
         help="bounded per-token representation jitter scale",
     )
+    parser.add_argument(
+        "--continued-pretraining",
+        action="store_true",
+        help="run train-only masked teacher-student encoder pretraining before supervised fit",
+    )
+    parser.add_argument("--pretraining-epochs", type=int, default=1)
+    parser.add_argument("--pretraining-mask-fraction", type=float, default=0.15)
+    parser.add_argument("--pretraining-mask-block-samples", type=int, default=20)
+    parser.add_argument("--pretraining-learning-rate", type=float, default=1e-5)
+    parser.add_argument("--pretraining-weight-decay", type=float, default=0.05)
+    parser.add_argument(
+        "--pretraining-max-batches",
+        type=int,
+        default=0,
+        help="maximum train batches per pretraining epoch; 0 means all train batches",
+    )
     args = parser.parse_args(argv)
+
+    if args.strict_final_test:
+        if args.evaluation_mode != "validation_only":
+            parser.error("--strict-final-test cannot be combined with --evaluation-mode final_test")
+        args.evaluation_mode = "final_test"
+    if args.evaluation_mode == "final_test" and not args.allow_sealed_test_evaluation:
+        parser.error("final_test requires --allow-sealed-test-evaluation")
+    if args.evaluation_mode == "validation_only" and args.allow_sealed_test_evaluation:
+        parser.error("--allow-sealed-test-evaluation requires --evaluation-mode final_test")
+    args.strict_final_test = args.evaluation_mode == "final_test"
 
     try:
         args.evaluation_protocol, args.strict_final_test = validate_evaluation_options(
@@ -2255,6 +2738,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--target-scaler zscore requires strict mean_rich_stats_residual evaluation")
     if args.augmentation_consistency and args.evaluation_protocol != "strict":
         parser.error("--augmentation-consistency requires strict evaluation")
+    if args.continued_pretraining:
+        if args.evaluation_protocol != "strict":
+            parser.error("--continued-pretraining requires strict evaluation")
+        if args.head_variant != "mean_linear":
+            parser.error("--continued-pretraining currently requires --head-variant mean_linear")
+        if args.augmentation_consistency or args.two_stage_finetune:
+            parser.error(
+                "--continued-pretraining must be screened without augmentation or two-stage fine-tuning"
+            )
     if args.layer_indices is not None:
         if args.head_variant not in {"mean_layer_mix", "mean_layer_mix_fixed"} and args.smoke_head not in {"mean_layer_mix", "mean_layer_mix_fixed"}:
             parser.error("--layer-indices requires a layer-mix head")
@@ -2326,6 +2818,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--augmentation-consistency requires a positive lambda")
     if not math.isfinite(float(args.augmentation_noise_scale)) or not 0.0 <= float(args.augmentation_noise_scale) <= 0.1:
         parser.error("--augmentation-noise-scale must be finite and in [0, 0.1]")
+    if args.gpu_hourly_rate_usd is not None and (
+        not math.isfinite(float(args.gpu_hourly_rate_usd)) or args.gpu_hourly_rate_usd < 0.0
+    ):
+        parser.error("--gpu-hourly-rate-usd must be finite and non-negative")
+    if args.continued_pretraining:
+        if args.pretraining_epochs < 1:
+            parser.error("--pretraining-epochs must be positive")
+        if not math.isfinite(float(args.pretraining_mask_fraction)) or not 0.0 < args.pretraining_mask_fraction <= 1.0:
+            parser.error("--pretraining-mask-fraction must be finite and in (0, 1]")
+        if args.pretraining_mask_block_samples < 1:
+            parser.error("--pretraining-mask-block-samples must be positive")
+        if not math.isfinite(float(args.pretraining_learning_rate)) or args.pretraining_learning_rate <= 0.0:
+            parser.error("--pretraining-learning-rate must be finite and positive")
+        if not math.isfinite(float(args.pretraining_weight_decay)) or args.pretraining_weight_decay < 0.0:
+            parser.error("--pretraining-weight-decay must be finite and non-negative")
+        if args.pretraining_max_batches < 0:
+            parser.error("--pretraining-max-batches must be non-negative")
     try:
         source = _resolve_data_source(
             manifest_path=args.manifest,
@@ -2368,6 +2877,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             augmentation_noise_scale=(
                 args.augmentation_noise_scale if args.augmentation_consistency else 0.0
+            ),
+            continued_pretraining=args.continued_pretraining,
+            pretraining_epochs=args.pretraining_epochs,
+            pretraining_mask_fraction=args.pretraining_mask_fraction,
+            pretraining_mask_block_samples=args.pretraining_mask_block_samples,
+            pretraining_learning_rate=args.pretraining_learning_rate,
+            pretraining_weight_decay=args.pretraining_weight_decay,
+            pretraining_max_batches=(
+                args.pretraining_max_batches if args.pretraining_max_batches else None
             ),
             data_mode=source.data_mode,
             manifest_path=source.manifest_path,
@@ -2455,12 +2973,73 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if args.augmentation_consistency
                     else None
                 ),
+                "continued_pretraining": bool(args.continued_pretraining),
+                "pretraining_epochs": (
+                    args.pretraining_epochs if args.continued_pretraining else None
+                ),
+                "pretraining_mask_fraction": (
+                    args.pretraining_mask_fraction
+                    if args.continued_pretraining
+                    else None
+                ),
+                "pretraining_mask_block_samples": (
+                    args.pretraining_mask_block_samples
+                    if args.continued_pretraining
+                    else None
+                ),
+                "pretraining_learning_rate": (
+                    args.pretraining_learning_rate
+                    if args.continued_pretraining
+                    else None
+                ),
+                "pretraining_weight_decay": (
+                    args.pretraining_weight_decay
+                    if args.continued_pretraining
+                    else None
+                ),
+                "pretraining_max_batches": (
+                    args.pretraining_max_batches
+                    if args.continued_pretraining and args.pretraining_max_batches
+                    else None
+                ),
+                "pretraining_source_split": (
+                    "train_only" if args.continued_pretraining else None
+                ),
+                "pretraining_objective": (
+                    "masked_teacher_student_embedding_mse"
+                    if args.continued_pretraining
+                    else None
+                ),
+                "pretraining_age_labels_used": (
+                    False if args.continued_pretraining else None
+                ),
                 "layer_index": args.layer_index,
                 "layer_indices": (
                     None if args.layer_indices is None else list(args.layer_indices)
                 ),
                 "layer_mix_alpha": args.layer_mix_alpha,
+                "evaluation_mode": args.evaluation_mode,
+                "allow_sealed_test_evaluation": bool(args.allow_sealed_test_evaluation),
+                "gpu_hourly_rate_usd": args.gpu_hourly_rate_usd,
             }
+            evidence_recorder = EvidenceRecorder(
+                run_dir,
+                run_id=f"{args.head_variant}-seed{seed}",
+                task="age",
+                dataset_manifest=(source.manifest_sha256 or source.data_mode),
+                split_fingerprint=(source.manifest_sha256 or f"{source.data_mode}-split"),
+                seed=seed,
+                resolved_config=seed_metadata,
+                command_line=launch_command,
+                evaluation_mode=args.evaluation_mode,
+                gpu_hourly_rate_usd=args.gpu_hourly_rate_usd,
+            )
+            head_complexity = seed_metadata.get("head_complexity")
+            if isinstance(head_complexity, Mapping):
+                evidence_recorder.set_head_complexity(head_complexity)
+            else:
+                evidence_recorder.add_missing("head complexity contract unavailable")
+            evidence_recorder.start()
             try:
                 if source.data_mode == "selective_task":
                     acquisition_path, acquisition_digest = _copy_selective_acquisition_snapshot(
@@ -2503,7 +3082,38 @@ def main(argv: Sequence[str] | None = None) -> int:
                         if args.augmentation_consistency
                         else 0.0
                     ),
+                    continued_pretraining=args.continued_pretraining,
+                    pretraining_epochs=args.pretraining_epochs,
+                    pretraining_mask_fraction=args.pretraining_mask_fraction,
+                    pretraining_mask_block_samples=args.pretraining_mask_block_samples,
+                    pretraining_learning_rate=args.pretraining_learning_rate,
+                    pretraining_weight_decay=args.pretraining_weight_decay,
+                    pretraining_max_batches=args.pretraining_max_batches,
                 )
+                config_payload = json.loads(config_path.read_text(encoding="utf-8"))
+                write_json_atomic(
+                    run_dir / "config.json",
+                    {
+                        "schema_version": SCHEMA_VERSION,
+                        "source": "neuralbench_config.json",
+                        "config": config_payload,
+                    },
+                )
+                evidence_recorder.set_manifest_metadata(config_hash=sha256_json(config_payload))
+                try:
+                    reference_sha256 = _write_train_age_reference(run_dir, source)
+                except (OSError, ValueError) as reference_error:
+                    evidence_recorder.add_missing(
+                        f"train age reference unavailable: {reference_error}"
+                    )
+                else:
+                    if reference_sha256 is not None:
+                        evidence_recorder.set_manifest_metadata(
+                            train_age_reference_path=str(
+                                (run_dir / "analysis" / "train_age_reference.jsonl").resolve()
+                            ),
+                            train_age_reference_sha256=reference_sha256,
+                        )
                 results = run_official_subset(
                     manifest_path=source.manifest_path,
                     data_root=source.data_root,
@@ -2538,6 +3148,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                         if args.augmentation_consistency
                         else 0.0
                     ),
+                    continued_pretraining=args.continued_pretraining,
+                    pretraining_epochs=args.pretraining_epochs,
+                    pretraining_mask_fraction=args.pretraining_mask_fraction,
+                    pretraining_mask_block_samples=args.pretraining_mask_block_samples,
+                    pretraining_learning_rate=args.pretraining_learning_rate,
+                    pretraining_weight_decay=args.pretraining_weight_decay,
+                    pretraining_max_batches=args.pretraining_max_batches,
                     data_mode=source.data_mode,
                     provenance_path=provenance_path,
                     acquisition_provenance_path=(
@@ -2550,7 +3167,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ),
                     timeline_count=rows,
                     run_metadata=seed_metadata,
+                    evidence_recorder=evidence_recorder,
                 )
+                reference_path = run_dir / "analysis" / "train_age_reference.jsonl"
+                if reference_path.is_file():
+                    evidence_recorder.set_manifest_metadata(
+                        train_age_reference_path=str(reference_path.resolve()),
+                        train_age_reference_sha256=_sha256_file(reference_path),
+                    )
+                else:
+                    evidence_recorder.add_missing(
+                        "train age reference unavailable after training; no train-only subject/age artifact"
+                    )
                 tuning_metadata = (
                     _merge_last_tuned_result_metadata(results)
                     if args.head_variant == "last_tuned"
@@ -2570,6 +3198,42 @@ def main(argv: Sequence[str] | None = None) -> int:
                     report["head_metadata"] = resolved_head_metadata
                     if "parameter_count" in resolved_head_metadata:
                         report["head_parameter_count"] = resolved_head_metadata["parameter_count"]
+                resolved_run_metadata = _resolved_run_metadata(run_dir)
+                parameter_buckets = resolved_run_metadata.get("parameter_buckets")
+                if isinstance(parameter_buckets, Mapping):
+                    evidence_recorder.set_parameter_buckets(parameter_buckets)
+                else:
+                    evidence_recorder.add_missing(
+                        "runtime parameter buckets unavailable; model-level accounting was not exposed"
+                    )
+                optimizer_metadata = resolved_run_metadata.get("optimizer")
+                if isinstance(optimizer_metadata, Mapping):
+                    evidence_recorder.set_optimizer_metadata(optimizer_metadata)
+                else:
+                    optimizer_path = run_dir / "optimizer.json"
+                    if optimizer_path.is_file():
+                        optimizer_payload = _load_json_object(optimizer_path)
+                        evidence_recorder.set_optimizer_metadata(optimizer_payload)
+                        if optimizer_payload.get("status") != "complete":
+                            evidence_recorder.add_missing(
+                                "optimizer evidence is marked unavailable by Lightning"
+                            )
+                    else:
+                        evidence_recorder.add_missing(
+                            "optimizer evidence unavailable; Lightning did not expose optimizer metadata"
+                        )
+                throughput_path = run_dir / "throughput.json"
+                if throughput_path.is_file():
+                    throughput_payload = _load_json_object(throughput_path)
+                    evidence_recorder.set_throughput_metadata(throughput_payload)
+                    if throughput_payload.get("status") != "complete":
+                        evidence_recorder.add_missing(
+                            "throughput evidence is marked unavailable by the training callback"
+                        )
+                else:
+                    evidence_recorder.add_missing(
+                        "throughput evidence unavailable; training callback did not complete"
+                    )
                 if source.data_mode in {"full", "selective_task"}:
                     if provenance_path is None or not provenance_path.is_file():
                         raise RuntimeError(
@@ -2641,7 +3305,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if selected_checkpoint_epoch is not None:
                         report["selected_checkpoint_epoch"] = selected_checkpoint_epoch
                 run_dir.mkdir(parents=True, exist_ok=True)
-                (run_dir / "report.json").write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
+                report["schema_version"] = SCHEMA_VERSION
+                report["evidence_status"] = "complete"
+                # Keep the existing report writer seam intact: callers and
+                # tests use it to verify that report failures preserve the
+                # original exception diagnostics.
+                (run_dir / "report.json").write_text(
+                    json.dumps(report, indent=2, default=str) + "\n",
+                    encoding="utf-8",
+                )
+                evidence_recorder.finalize("completed")
             except Exception as error:
                 if source.data_mode in {"full", "selective_task"} and provenance_path is not None:
                     try:
@@ -2660,6 +3333,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     summary_path.unlink(missing_ok=True)
                 except OSError as cleanup_error:
                     error.add_note(f"failed to remove stale summary.json after failure: {cleanup_error!r}")
+                try:
+                    evidence_recorder.finalize("failed", error=str(error))
+                except Exception as evidence_error:
+                    error.add_note(f"failed to finalize evidence: {evidence_error!r}")
                 raise
 
             reports.append(report)
@@ -2703,6 +3380,38 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             "augmentation_pairing": (
                 "same_batch_example_two_views" if args.augmentation_consistency else None
+            ),
+            "continued_pretraining": bool(args.continued_pretraining),
+            "pretraining_epochs": (
+                args.pretraining_epochs if args.continued_pretraining else None
+            ),
+            "pretraining_mask_fraction": (
+                args.pretraining_mask_fraction if args.continued_pretraining else None
+            ),
+            "pretraining_mask_block_samples": (
+                args.pretraining_mask_block_samples if args.continued_pretraining else None
+            ),
+            "pretraining_learning_rate": (
+                args.pretraining_learning_rate if args.continued_pretraining else None
+            ),
+            "pretraining_weight_decay": (
+                args.pretraining_weight_decay if args.continued_pretraining else None
+            ),
+            "pretraining_max_batches": (
+                args.pretraining_max_batches
+                if args.continued_pretraining and args.pretraining_max_batches
+                else None
+            ),
+            "pretraining_source_split": (
+                "train_only" if args.continued_pretraining else None
+            ),
+            "pretraining_objective": (
+                "masked_teacher_student_embedding_mse"
+                if args.continued_pretraining
+                else None
+            ),
+            "pretraining_age_labels_used": (
+                False if args.continued_pretraining else None
             ),
             "provenance_path": (
                 str(source.manifest_path) if source.data_mode == "manifest" and source.manifest_path is not None else None
@@ -2775,8 +3484,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "test_status": "epoch_diagnostic",
                 }
             )
+        summary["schema_version"] = SCHEMA_VERSION
+        summary["evidence_status"] = "complete"
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        summary_path.write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
+        write_json_atomic(summary_path, summary)
         print(json.dumps(summary, indent=2, default=str))
         return 0
     except Exception as error:

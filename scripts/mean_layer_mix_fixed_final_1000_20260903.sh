@@ -17,4 +17,5 @@ exec "$PY" "$SCRIPT" \
   --layer-mix-alpha 0.5 \
   --evaluation-protocol strict \
   --strict-final-test \
+  --allow-sealed-test-evaluation \
   --seeds 33 34 35

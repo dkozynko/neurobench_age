@@ -258,6 +258,7 @@ python official_reve_subset.py \
   --head-variant mean_rich_stats_residual \
   --evaluation-protocol strict \
   --strict-final-test \
+  --allow-sealed-test-evaluation \
   --seeds 33 34 35
 ```
 
@@ -300,6 +301,7 @@ python official_reve_subset.py \
   --head-variant mean_linear \
   --evaluation-protocol strict \
   --strict-final-test \
+  --allow-sealed-test-evaluation \
   --seeds 33 34 35
 ```
 
@@ -316,6 +318,7 @@ python official_reve_subset.py \
   --head-variant mean_rich_stats_residual \
   --evaluation-protocol strict \
   --strict-final-test \
+  --allow-sealed-test-evaluation \
   --seeds 33 34 35
 ```
 
@@ -326,6 +329,31 @@ metadata only; it is never fed back as a replacement iterator. Use the same
 command with `--head-variant mean_linear` to produce the full-data reference
 for comparison with the rich-statistics head.
 
+### Article-ready evidence analysis
+
+Every strict seed run now records a schema-versioned manifest, normalized
+configuration, parameter accounting, observed optimizer and throughput,
+subject-level validation predictions, and a train-only age reference. Analyze
+matched candidate and baseline seeds with:
+
+```bash
+PYTHONPATH=. python scripts/analyze_paper_evidence.py \
+  /workspace/results/candidate/seed33 \
+  /workspace/results/candidate/seed34 \
+  /workspace/results/candidate/seed35 \
+  --baseline-run /workspace/results/mean_linear/seed33 \
+  --baseline-run /workspace/results/mean_linear/seed34 \
+  --baseline-run /workspace/results/mean_linear/seed35 \
+  --output-dir /workspace/results/analysis/candidate_vs_mean_linear
+```
+
+The analysis writes per-run Pearson/MAE/RMSE/R², per-seed deltas and sample
+SD, wins and worst-seed delta, paired subject bootstrap intervals, train-only
+age-group tables, complexity-adjusted comparisons, and prediction/residual
+plots. A final-test artifact is included automatically when the run was
+explicitly launched with `--evaluation-mode final_test
+--allow-sealed-test-evaluation`.
+
 This gated run creates durable `test_started.json` and `test_completed.json`
 markers, verifies that the selected checkpoint hash did not change, and records
 the exact official result key `test/pearsonr` as the report's
@@ -335,7 +363,10 @@ stale report, failure record, marker, config, or checkpoint makes the new
 attempt fail closed instead of mixing evidence. Use
 `--evaluation-protocol legacy` only for historical parity; it
 explicitly enables `epoch_test_metrics.jsonl`, is labeled `legacy`, and cannot
-support a strict holdout claim. `--strict-final-test` is rejected with legacy.
+support a strict holdout claim. `--strict-final-test` is a compatibility alias
+for `--evaluation-mode final_test`; final evaluation additionally requires the
+explicit `--allow-sealed-test-evaluation` acknowledgement and is rejected with
+legacy.
 
 Run one seed for a head comparison:
 

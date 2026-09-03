@@ -15,6 +15,7 @@ try:
     from .reve_contract import (
         AdapterContractError,
         DEFAULT_UPSTREAM_DROPOUT,
+        HEAD_VARIANTS,
         LAST_TUNED_HEAD_ARCHITECTURE,
         LAST_TUNED_HEAD_SOURCE,
         LAST_TUNED_INITIAL_ALPHA,
@@ -37,6 +38,7 @@ except ImportError:
     from reve_contract import (
         AdapterContractError,
         DEFAULT_UPSTREAM_DROPOUT,
+        HEAD_VARIANTS,
         LAST_TUNED_HEAD_ARCHITECTURE,
         LAST_TUNED_HEAD_SOURCE,
         LAST_TUNED_INITIAL_ALPHA,
@@ -55,6 +57,172 @@ except ImportError:
         initialize_last_tuned_query,
         _unwrap_reve_module,
     )
+
+
+SUPPORTED_HEAD_VARIANTS = tuple(HEAD_VARIANTS)
+
+
+def _linear_parameter_count(input_width: int, output_width: int, *, bias: bool = True) -> int:
+    return input_width * output_width + (output_width if bias else 0)
+
+
+def head_complexity_metadata(
+    variant: str,
+    *,
+    embed_dim: int,
+    n_outputs: int,
+    layer_count: int | None = None,
+    hidden_dim: int | None = None,
+    segments: int = 2,
+    correction_rank: int = 8,
+    projection_rank: int = 4,
+) -> dict[str, Any]:
+    """Return a comparable, head-only complexity contract.
+
+    ``parameter_count`` is the number of trainable head parameters for the
+    default architecture settings.  ``parameter_count_formula`` remains the
+    authoritative description when the upstream head or all-layer width is
+    resolved only after the encoder is built.  Encoder parameters are
+    intentionally excluded; runtime evidence records them in separate
+    frozen/trainable buckets.
+    """
+
+    if variant not in SUPPORTED_HEAD_VARIANTS:
+        raise ValueError(f"unsupported head variant {variant!r}")
+    if isinstance(embed_dim, bool) or not isinstance(embed_dim, int) or embed_dim <= 0:
+        raise ValueError("embed_dim must be a positive integer")
+    if isinstance(n_outputs, bool) or not isinstance(n_outputs, int) or n_outputs <= 0:
+        raise ValueError("n_outputs must be a positive integer")
+    if layer_count is not None and (
+        isinstance(layer_count, bool) or not isinstance(layer_count, int) or layer_count <= 0
+    ):
+        raise ValueError("layer_count must be a positive integer when provided")
+    if hidden_dim is None:
+        hidden_dim = max(32, min(256, embed_dim // 2))
+    if hidden_dim <= 0 or segments < 2 or correction_rank <= 0 or projection_rank <= 0:
+        raise ValueError("head complexity dimensions must be positive")
+
+    d = embed_dim
+    o = n_outputs
+    linear = _linear_parameter_count(d, o)
+    formula = "(D+1)*O"
+    operations: list[str] = ["mean_pool", "linear_projection"]
+    input_width: int | str = d
+    parameter_count: int | None = linear
+
+    if variant in {"mean_linear", "mean_linear_copy", "mean_linear_detached", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_layer_linear"}:
+        pass
+    elif variant == "mean_linear_warmup":
+        formula = "2*(D+1)*O+1"
+        parameter_count = 2 * linear + 1
+        operations = ["mean_pool", "baseline_linear", "residual_linear", "scalar_gate"]
+    elif variant == "mean_layer_mix":
+        formula = "(D+1)*O+1"
+        parameter_count = linear + 1
+        operations = ["mean_pool_per_selected_layer", "earlier_layer_average", "scalar_layer_mix", "linear_projection"]
+    elif variant == "mean_layer_mix_fixed":
+        formula = "(D+1)*O"
+        operations = ["mean_pool_per_selected_layer", "earlier_layer_average", "fixed_scalar_layer_mix", "linear_projection"]
+    elif variant in {"mean_anchor", "mean_residual", "mean_vector_anchor", "mean_stats_attention_residual", "mean_attention_gated"}:
+        query = d
+        if variant == "mean_anchor":
+            formula = "D+1+(D+1)*O"
+            parameter_count = query + 1 + linear
+            operations = ["mean_pool", "query_attention_pool", "scalar_residual_gate", "linear_projection"]
+        elif variant == "mean_residual":
+            formula = "D+(D+1)*O+D*O"
+            parameter_count = query + linear + d * o
+            operations = ["mean_pool", "query_attention_residual", "baseline_linear", "residual_linear"]
+        elif variant == "mean_vector_anchor":
+            formula = "2*D+(D+1)*O"
+            parameter_count = 2 * query + linear
+            operations = ["mean_pool", "query_attention_pool", "featurewise_residual_gate", "linear_projection"]
+        elif variant == "mean_stats_attention_residual":
+            formula = "D+(D+1)*O+D*O+2*D*O"
+            parameter_count = query + linear + d * o + 2 * d * o
+            operations = ["mean_pool", "query_attention_residual", "per_feature_stats", "two_residual_projections"]
+        else:
+            formula = "D+(D+1)*O+D*O+1"
+            parameter_count = query + linear + d * o + 1
+            operations = ["mean_pool", "detached_query_attention_residual", "linear_projection", "scalar_gate"]
+    elif variant == "mean_mlp_residual":
+        h = hidden_dim
+        formula = "(D+1)*O+(D+1)*H+H*O"
+        parameter_count = linear + _linear_parameter_count(d, h) + h * o
+        operations = ["mean_pool", "baseline_linear", "hidden_linear", "gelu", "correction_linear"]
+    elif variant in {"mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled"}:
+        formula = "(D+1)*O+2*D*O"
+        parameter_count = linear + 2 * d * o
+        operations = ["mean_pool", "std_and_range_stats", "baseline_linear", "statistics_correction"]
+    elif variant == "global_stats_residual":
+        formula = "(D+1)*O+4*O"
+        parameter_count = linear + 4 * o
+        operations = ["mean_pool", "four_global_stats", "baseline_linear", "statistics_correction"]
+    elif variant in {"mean_rich_stats_residual", "mean_rich_stats_gradient_routes"}:
+        formula = "(D+1)*O+4*D*O"
+        parameter_count = linear + 4 * d * o
+        operations = ["mean_pool", "four_per_feature_stats", "baseline_linear", "statistics_correction"]
+    elif variant == "mean_anchor_ensemble":
+        formula = "2*(D+1)*O+4*D*O+1"
+        parameter_count = 2 * linear + 4 * d * o + 1
+        operations = ["mean_pool", "baseline_linear", "rich_stats_expert", "scalar_ensemble_gate"]
+    elif variant in {"mean_reliability_shrinkage", "mean_reliability_stable"}:
+        formula = "(D+1)*O+4*D*O+4"
+        parameter_count = linear + 4 * d * o + 4
+        operations = ["mean_pool", "four_per_feature_stats", "reliability_features", "gated_statistics_correction"]
+    elif variant == "grouped_rich_stats_shrinkage":
+        formula = "(D+1)*O+4*(D*D+D)+4"
+        parameter_count = linear + 4 * (d * d + d) + 4
+        operations = ["mean_pool", "four_grouped_stats", "four_D_to_D_projections", "four_scalar_gates", "linear_projection"]
+    elif variant == "grouped_stats_shared_gate":
+        formula = "(D+1)*O+4*(D*D+D)+1"
+        parameter_count = linear + 4 * (d * d + d) + 1
+        operations = ["mean_pool", "four_grouped_stats", "four_D_to_D_projections", "shared_scalar_gate", "linear_projection"]
+    elif variant == "temporal_pyramid_stats":
+        formula = "(D+1)*O+(4*S*D)*R+R*D"
+        parameter_count = linear + (4 * segments * d) * correction_rank + correction_rank * d
+        operations = ["mean_pool", "ordered_segment_split", "four_stats_per_segment", "low_rank_correction"]
+    elif variant == "mean_covariance_residual":
+        formula = "(D+1)*O+D*R+R*D"
+        parameter_count = linear + d * projection_rank + projection_rank * d
+        operations = ["mean_pool", "diagonal_covariance", "low_rank_correction"]
+    elif variant == "multi_query_rich_stats":
+        formula = "Q*D+(D+1)*O+(5*Q*D)*O"
+        query_count = 2
+        parameter_count = query_count * d + linear + 5 * query_count * d * o
+        operations = ["mean_pool", "multi_query_attention", "five_stats_per_query", "statistics_correction"]
+    elif variant in {"last_avg", "last", "last_tuned"}:
+        formula = "D+D+(D+1)*O" if variant != "last_tuned" else "D+D+1+(D+1)*O"
+        parameter_count = 2 * d + linear + (1 if variant == "last_tuned" else 0)
+        operations = ["token_pool", "learned_query" if variant != "last_avg" else "unused_query", "rms_norm", "linear_projection"]
+    elif variant == "all":
+        layer_width = d * (layer_count or 1)
+        input_width = layer_width
+        formula = "D*L+D+(D+1)*O"
+        parameter_count = 2 * d + linear
+        operations = ["concatenate_all_layers", "token_pool", "learned_query", "rms_norm", "linear_projection"]
+    else:  # pragma: no cover - HEAD_VARIANTS and this dispatch are kept in sync.
+        raise ValueError(f"unsupported head variant {variant!r}")
+
+    return {
+        "variant": variant,
+        "input_width": input_width,
+        "output_width": o,
+        "operations": operations,
+        "parameter_count_formula": formula,
+        "parameter_count": parameter_count,
+        "count_scope": "trainable_head_only",
+        "dimensions": {
+            "embed_dim": d,
+            "n_outputs": o,
+            "layer_count": layer_count,
+            "hidden_dim": hidden_dim,
+            "segments": segments,
+            "correction_rank": correction_rank,
+            "projection_rank": projection_rank,
+        },
+    }
+
 
 class RMSNorm(nn.Module):
     """The RMSNorm used by the pinned upstream REVE classifier."""

@@ -19,6 +19,11 @@ from typing import Any, Iterable, Mapping, Sequence
 import torch
 from torch import nn
 
+try:
+    from .experiment_evidence import parameter_buckets_from_model
+except ImportError:
+    from experiment_evidence import parameter_buckets_from_model
+
 _CONFIGURE_OPTIMIZERS_ABSENT = object()
 _TRAINING_STEP_ABSENT = object()
 H6_GATE_STABILITY_LAMBDA = 0.001
@@ -893,11 +898,16 @@ def _build_strict_selection_record(
 
     manifest_sha256 = sha256_file(manifest_path) if manifest_path is not None else None
     return {
+        "schema_version": "1.0",
         "evaluation_protocol": "strict",
         "data_mode": data_mode,
         "timeline_count": timeline_count,
         "selection_monitor": selection_monitor,
         "selection_mode": selection_mode,
+        "selection_rule": {
+            "primary": "max_validation_pearsonr",
+            "tie_breaking": "official_checkpoint_callback",
+        },
         "seed": int(seed),
         "head_variant": head_variant,
         **selected,
@@ -1051,6 +1061,7 @@ def _run_strict_test_phase(
     invocation_key: int,
     test_invocations: set[int],
     sha256_file: Any,
+    prediction_exporter: Any | None = None,
 ) -> dict[str, Any]:
     """Seal selection and optionally consume the one permitted test pass."""
 
@@ -1080,6 +1091,8 @@ def _run_strict_test_phase(
     if not isinstance(expected_checkpoint_sha256, str):
         raise RuntimeError("strict selection is missing checkpoint_sha256")
     test_started_payload = {
+        "schema_version": "1.0",
+        "evaluation_mode": "final_test",
         "selection_sha256": sha256_file(selection_path),
         "checkpoint_sha256": expected_checkpoint_sha256,
         "test_evaluations": 1,
@@ -1095,13 +1108,29 @@ def _run_strict_test_phase(
     if actual_checkpoint_sha256 != expected_checkpoint_sha256:
         raise RuntimeError("strict checkpoint hash changed during test")
 
+    prediction_export = None
+    # The facade owns the loader-to-subject-ID adapter.  Older lightweight
+    # fixtures do not provide it, so preserve their marker behavior while
+    # real runs export the sealed test predictions here.
+    if callable(prediction_exporter):
+        prediction_export = prediction_exporter(
+            experiment=experiment,
+            loaders=loaders,
+            checkpoint_path=checkpoint_path,
+            output_path=run_dir / "predictions" / "test.jsonl",
+            seed=int(getattr(experiment, "seed", 0)),
+        )
+
     _create_test_completed_marker(
         test_completed_path,
         {
+            "schema_version": "1.0",
+            "evaluation_mode": "final_test",
             "selection_sha256": sha256_file(selection_path),
             "checkpoint_sha256_after_test": actual_checkpoint_sha256,
             "test_pearsonr": test_pearson,
             "test_evaluations": 1,
+            "prediction_export": prediction_export,
         },
     )
     return dict(result)
@@ -1159,6 +1188,13 @@ def _head_metadata(
     augmentation_consistency: bool = False,
     augmentation_consistency_lambda: float = 0.0,
     augmentation_noise_scale: float = AUGMENTATION_CONSISTENCY_NOISE_SCALE,
+    continued_pretraining: bool = False,
+    pretraining_epochs: int = 1,
+    pretraining_mask_fraction: float = 0.15,
+    pretraining_mask_block_samples: int = 20,
+    pretraining_learning_rate: float = 1e-5,
+    pretraining_weight_decay: float = 0.05,
+    pretraining_max_batches: int | None = None,
     seeds: Sequence[int],
     launch_command: str,
 ) -> dict[str, Any]:
@@ -1176,6 +1212,19 @@ def _head_metadata(
         raise ValueError("augmentation_consistency_lambda must be finite and in [0, 0.1]")
     if not math.isfinite(float(augmentation_noise_scale)) or not 0.0 <= float(augmentation_noise_scale) <= 0.1:
         raise ValueError("augmentation_noise_scale must be finite and in [0, 0.1]")
+    if continued_pretraining:
+        from continued_pretraining import ContinuedPretrainingConfig
+
+        ContinuedPretrainingConfig(
+            epochs=pretraining_epochs,
+            mask_fraction=pretraining_mask_fraction,
+            mask_block_samples=pretraining_mask_block_samples,
+            learning_rate=pretraining_learning_rate,
+            weight_decay=pretraining_weight_decay,
+            max_batches=(
+                None if pretraining_max_batches == 0 else pretraining_max_batches
+            ),
+        )
 
     query_initialization = {
         "mean_linear": "neuralbench_default",
@@ -1302,6 +1351,30 @@ def _head_metadata(
         "augmentation_pairing": (
             "same_batch_example_two_views" if augmentation_consistency else None
         ),
+        "continued_pretraining": bool(continued_pretraining),
+        "pretraining_epochs": int(pretraining_epochs) if continued_pretraining else None,
+        "pretraining_mask_fraction": (
+            float(pretraining_mask_fraction) if continued_pretraining else None
+        ),
+        "pretraining_mask_block_samples": (
+            int(pretraining_mask_block_samples) if continued_pretraining else None
+        ),
+        "pretraining_learning_rate": (
+            float(pretraining_learning_rate) if continued_pretraining else None
+        ),
+        "pretraining_weight_decay": (
+            float(pretraining_weight_decay) if continued_pretraining else None
+        ),
+        "pretraining_max_batches": (
+            int(pretraining_max_batches)
+            if continued_pretraining and pretraining_max_batches not in {None, 0}
+            else None
+        ),
+        "pretraining_source_split": "train_only" if continued_pretraining else None,
+        "pretraining_objective": (
+            "masked_teacher_student_embedding_mse" if continued_pretraining else None
+        ),
+        "pretraining_age_labels_used": False if continued_pretraining else None,
         "head_query_initialization": query_initialization,
         "head_linear_initialization": (
             "neuralbench_default"
@@ -1728,6 +1801,16 @@ def _head_metadata(
         )
     if not is_default_head and not is_local_head:
         metadata["head_source_lock"] = reve.source_lock_metadata()
+    complexity_builder = getattr(reve, "head_complexity_metadata", None)
+    if callable(complexity_builder):
+        metadata["head_complexity"] = complexity_builder(
+            head_variant,
+            embed_dim=int(getattr(reve, "UPSTREAM_HEAD_HIDDEN_SIZE", 512)),
+            n_outputs=1,
+            layer_count=None,
+        )
+    else:
+        metadata["complexity_status"] = "unavailable"
     return metadata
 
 
@@ -1744,10 +1827,29 @@ def _append_evaluation_callback(
     correction_gradient_scale: float = 1.0,
     swa_window: int = 0,
     target_scaler_mode: str = "none",
+    continued_pretraining: bool = False,
+    continued_pretraining_config: Any | None = None,
     two_stage_finetune: bool = False,
     two_stage_config: Any | None = None,
 ) -> None:
     """Attach exactly one training-time metric callback for the protocol."""
+
+    if continued_pretraining:
+        if continued_pretraining_config is None:
+            raise RuntimeError("continued pretraining is enabled without its configuration")
+        if "train" not in loaders:
+            raise RuntimeError("continued pretraining requires the official train loader")
+        from continued_pretraining import ContinuedPretrainingCallback
+
+        trainer.callbacks.append(
+            ContinuedPretrainingCallback(
+                continued_pretraining_config,
+                train_loader=loaders["train"],
+                metadata_path=epoch_metrics_path.parent / "continued_pretraining.json",
+                metrics_path=epoch_metrics_path.parent / "continued_pretraining_metrics.jsonl",
+                run_seed=int(seed if seed is not None else 0),
+            )
+        )
 
     if two_stage_finetune:
         if two_stage_config is None:
@@ -1758,6 +1860,24 @@ def _append_evaluation_callback(
             TwoStageFineTuneCallback(
                 two_stage_config,
                 metadata_path=epoch_metrics_path.parent / "two_stage_finetuning.json",
+            )
+        )
+
+    if "train" in loaders:
+        trainer.callbacks.append(
+            hooks.TrainAgeReferenceExporter(
+                epoch_metrics_path.parent / "analysis" / "train_age_reference.jsonl",
+                seed=seed,
+            )
+        )
+        trainer.callbacks.append(
+            hooks.OptimizerEvidenceExporter(
+                epoch_metrics_path.parent / "optimizer.json",
+            )
+        )
+        trainer.callbacks.append(
+            hooks.ThroughputEvidenceExporter(
+                epoch_metrics_path.parent / "throughput.json",
             )
         )
 
@@ -1807,6 +1927,15 @@ def _append_evaluation_callback(
                     window_size=swa_window,
                 )
             )
+        validation_loader = loaders.get("val")
+        if validation_loader is not None:
+            trainer.callbacks.append(
+                hooks.ValidationPredictionExporter(
+                    epoch_metrics_path.parent / "predictions" / "validation.jsonl",
+                    validation_loader,
+                    seed=seed,
+                )
+            )
         return
     if evaluation_protocol != "legacy":
         raise ValueError(f"unsupported evaluation protocol: {evaluation_protocol!r}")
@@ -1849,6 +1978,13 @@ def _patch_official_components(
     augmentation_consistency: bool = False,
     augmentation_consistency_lambda: float = 0.0,
     augmentation_noise_scale: float = AUGMENTATION_CONSISTENCY_NOISE_SCALE,
+    continued_pretraining: bool = False,
+    pretraining_epochs: int = 1,
+    pretraining_mask_fraction: float = 0.15,
+    pretraining_mask_block_samples: int = 20,
+    pretraining_learning_rate: float = 1e-5,
+    pretraining_weight_decay: float = 0.05,
+    pretraining_max_batches: int = 0,
     data_mode: str = "manifest",
     provenance_path: Path | None = None,
     acquisition_provenance_path: Path | None = None,
@@ -1856,6 +1992,7 @@ def _patch_official_components(
     timeline_count: int | None = None,
     run_metadata: Mapping[str, Any] | None = None,
     final_results: list[dict[str, Any]] | None = None,
+    evidence_recorder: Any | None = None,
     hooks: Any,
 ) -> dict[str, Any]:
     """Install the fixed-manifest and optional upstream-head patches.
@@ -1871,6 +2008,31 @@ def _patch_official_components(
         strict_final_test=strict_final_test,
     )
     reve = hooks._load_reve_helpers()
+
+    continued_pretraining_config = None
+    if continued_pretraining:
+        if evaluation_protocol != "strict":
+            raise ValueError("continued pretraining requires strict evaluation")
+        if head_variant != "mean_linear":
+            raise ValueError("continued pretraining screen currently requires mean_linear")
+        if augmentation_consistency or two_stage_finetune:
+            raise ValueError(
+                "continued pretraining must be screened as a standalone training factor"
+            )
+        from continued_pretraining import ContinuedPretrainingConfig
+
+        if isinstance(pretraining_max_batches, bool) or not isinstance(pretraining_max_batches, int):
+            raise ValueError("pretraining_max_batches must be an integer")
+        if pretraining_max_batches < 0:
+            raise ValueError("pretraining_max_batches must be non-negative")
+        continued_pretraining_config = ContinuedPretrainingConfig(
+            epochs=pretraining_epochs,
+            mask_fraction=pretraining_mask_fraction,
+            mask_block_samples=pretraining_mask_block_samples,
+            learning_rate=pretraining_learning_rate,
+            weight_decay=pretraining_weight_decay,
+            max_batches=(None if pretraining_max_batches == 0 else pretraining_max_batches),
+        )
 
     two_stage_config = None
     if two_stage_finetune:
@@ -2079,7 +2241,11 @@ def _patch_official_components(
         best_model_path: str | None,
     ) -> dict[str, Any]:
         if evaluation_protocol == "legacy":
-            result = original_test(self, loaders, best_model_path)
+            if evidence_recorder is None:
+                result = original_test(self, loaders, best_model_path)
+            else:
+                with evidence_recorder.phase("test_diagnostic"):
+                    result = original_test(self, loaders, best_model_path)
             if final_results is not None:
                 final_results.append(
                     hooks._capture_test_result(
@@ -2135,20 +2301,55 @@ def _patch_official_components(
             strict_final_test=strict_final_test,
             sha256_file=hooks._sha256_file,
         )
-        result = hooks._run_strict_test_phase(
-            original_test=original_test,
-            experiment=self,
-            loaders=loaders,
-            best_model_path=best_model_path,
-            selection_path=selection_path,
-            test_started_path=selection_path.parent / "test_started.json",
-            test_completed_path=selection_path.parent / "test_completed.json",
-            selection_record=selection_record,
-            strict_final_test=strict_final_test,
-            invocation_key=id(self),
-            test_invocations=test_invocations,
-            sha256_file=hooks._sha256_file,
-        )
+        def _export_final_predictions(
+            *,
+            experiment: Any,
+            loaders: Mapping[str, Any],
+            checkpoint_path: Path,
+            output_path: Path,
+            seed: int,
+        ) -> dict[str, Any] | None:
+            brain_module = getattr(experiment, "_brain_module", None)
+            trainer = getattr(experiment, "trainer", None)
+            if trainer is None:
+                trainer = getattr(experiment, "_trainer", None)
+            if trainer is None and brain_module is not None:
+                trainer = getattr(brain_module, "trainer", None)
+            if trainer is None or brain_module is None:
+                return None
+            return hooks._export_prediction_file(
+                trainer=trainer,
+                pl_module=brain_module,
+                loader=loaders["test"],
+                output_path=output_path,
+                split="test",
+                seed=seed,
+                selected_checkpoint_path=checkpoint_path,
+            )
+
+        def _strict_test() -> Any:
+            return hooks._run_strict_test_phase(
+                original_test=original_test,
+                experiment=self,
+                loaders=loaders,
+                best_model_path=best_model_path,
+                selection_path=selection_path,
+                test_started_path=selection_path.parent / "test_started.json",
+                test_completed_path=selection_path.parent / "test_completed.json",
+                selection_record=selection_record,
+                strict_final_test=strict_final_test,
+                invocation_key=id(self),
+                test_invocations=test_invocations,
+                sha256_file=hooks._sha256_file,
+                prediction_exporter=_export_final_predictions,
+            )
+        if evidence_recorder is None:
+            result = _strict_test()
+        else:
+            with evidence_recorder.phase(
+                "test_final" if strict_final_test else "validation_selection"
+            ):
+                result = _strict_test()
         if strict_final_test and final_results is not None:
             final_results.append(
                 hooks._capture_test_result(
@@ -2177,6 +2378,8 @@ def _patch_official_components(
                 correction_gradient_scale=correction_gradient_scale,
                 swa_window=swa_window,
                 target_scaler_mode=target_scaler_mode,
+                continued_pretraining=continued_pretraining,
+                continued_pretraining_config=continued_pretraining_config,
                 two_stage_finetune=two_stage_finetune,
                 two_stage_config=two_stage_config,
                 hooks=hooks,
@@ -2270,6 +2473,44 @@ def _patch_official_components(
                         "neuro_input" if augmentation_consistency else None
                     ),
                     "augmentation_scope": "train_only" if augmentation_consistency else None,
+                    "continued_pretraining": bool(continued_pretraining),
+                    "pretraining_epochs": (
+                        int(pretraining_epochs) if continued_pretraining else None
+                    ),
+                    "pretraining_mask_fraction": (
+                        float(pretraining_mask_fraction) if continued_pretraining else None
+                    ),
+                    "pretraining_mask_block_samples": (
+                        int(pretraining_mask_block_samples)
+                        if continued_pretraining
+                        else None
+                    ),
+                    "pretraining_learning_rate": (
+                        float(pretraining_learning_rate)
+                        if continued_pretraining
+                        else None
+                    ),
+                    "pretraining_weight_decay": (
+                        float(pretraining_weight_decay)
+                        if continued_pretraining
+                        else None
+                    ),
+                    "pretraining_max_batches": (
+                        int(pretraining_max_batches)
+                        if continued_pretraining and pretraining_max_batches
+                        else None
+                    ),
+                    "pretraining_source_split": (
+                        "train_only" if continued_pretraining else None
+                    ),
+                    "pretraining_objective": (
+                        "masked_teacher_student_embedding_mse"
+                        if continued_pretraining
+                        else None
+                    ),
+                    "pretraining_age_labels_used": (
+                        False if continued_pretraining else None
+                    ),
                     "test_access_policy": (
                         "single_use_predeclared"
                         if strict_final_test
@@ -2324,6 +2565,28 @@ def _patch_official_components(
     ) -> Any:
         result = original_prepare_pl_module(self, train_loader, val_loader)
         persist_provenance_metadata(self)
+        brain_module = getattr(self, "_brain_module", None)
+        model = getattr(brain_module, "model", brain_module)
+        if model is not None and callable(getattr(model, "parameters", None)):
+            head = getattr(model, "head", None)
+            try:
+                parameter_buckets = parameter_buckets_from_model(model, head=head)
+            except (TypeError, ValueError, RuntimeError) as accounting_error:
+                persist_tuning_metadata(
+                    self,
+                    {
+                        "parameter_accounting_status": "unavailable",
+                        "parameter_accounting_error": str(accounting_error),
+                    },
+                )
+            else:
+                persist_tuning_metadata(
+                    self,
+                    {
+                        "parameter_buckets": parameter_buckets,
+                        "parameter_accounting_status": "complete",
+                    },
+                )
         if head_variant in {"grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable"}:
             brain_module = getattr(self, "_brain_module", None)
             grouped_head = None
@@ -2649,12 +2912,20 @@ def run_official_subset(
     augmentation_consistency: bool = False,
     augmentation_consistency_lambda: float = 0.0,
     augmentation_noise_scale: float = AUGMENTATION_CONSISTENCY_NOISE_SCALE,
+    continued_pretraining: bool = False,
+    pretraining_epochs: int = 1,
+    pretraining_mask_fraction: float = 0.15,
+    pretraining_mask_block_samples: int = 20,
+    pretraining_learning_rate: float = 1e-5,
+    pretraining_weight_decay: float = 0.05,
+    pretraining_max_batches: int = 0,
     data_mode: str = "manifest",
     provenance_path: Path | None = None,
     acquisition_provenance_path: Path | None = None,
     acquisition_provenance_sha256: str | None = None,
     timeline_count: int | None = None,
     run_metadata: Mapping[str, Any] | None = None,
+    evidence_recorder: Any | None = None,
     hooks: Any,
 ) -> list[dict[str, Any]]:
     """Run official REVE on the selected source and collect cached results."""
@@ -2691,6 +2962,13 @@ def run_official_subset(
             augmentation_consistency=augmentation_consistency,
             augmentation_consistency_lambda=augmentation_consistency_lambda,
             augmentation_noise_scale=augmentation_noise_scale,
+            continued_pretraining=continued_pretraining,
+            pretraining_epochs=pretraining_epochs,
+            pretraining_mask_fraction=pretraining_mask_fraction,
+            pretraining_mask_block_samples=pretraining_mask_block_samples,
+            pretraining_learning_rate=pretraining_learning_rate,
+            pretraining_weight_decay=pretraining_weight_decay,
+            pretraining_max_batches=pretraining_max_batches,
             data_mode=data_mode,
             provenance_path=provenance_path,
             acquisition_provenance_path=acquisition_provenance_path,
@@ -2698,12 +2976,18 @@ def run_official_subset(
             timeline_count=timeline_count,
             run_metadata=run_metadata,
             final_results=final_results,
+            evidence_recorder=evidence_recorder,
         )
         from neuralbench.main import BenchmarkAggregator
 
         benchmark_aggregator = BenchmarkAggregator
         original_aggregator_prepare = BenchmarkAggregator.prepare
-        BenchmarkAggregator.prepare = _run_experiments_synchronously
+        BenchmarkAggregator.prepare = (
+            lambda aggregator: _run_experiments_synchronously(
+                aggregator,
+                evidence_recorder=evidence_recorder,
+            )
+        )
         from neuralbench import run_benchmark
 
         run_benchmark(device="eeg", task="age", model="reve", force=True)
@@ -2741,7 +3025,11 @@ def run_official_subset(
                 raise cleanup_error
 
 
-def _run_experiments_synchronously(aggregator: Any) -> None:
+def _run_experiments_synchronously(
+    aggregator: Any,
+    *,
+    evidence_recorder: Any | None = None,
+) -> None:
     """Run prepared NeuralBench experiments in the current process.
 
     NeuralBench's public non-debug runner submits experiments to an ``exca``
@@ -2752,4 +3040,8 @@ def _run_experiments_synchronously(aggregator: Any) -> None:
     """
 
     for experiment in aggregator.experiments:
-        experiment.run()
+        if evidence_recorder is None:
+            experiment.run()
+        else:
+            with evidence_recorder.phase("fit_and_evaluation"):
+                experiment.run()

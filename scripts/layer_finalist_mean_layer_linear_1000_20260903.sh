@@ -17,4 +17,5 @@ exec "$PY" "$SCRIPT" \
   --layer-index -2 \
   --evaluation-protocol strict \
   --strict-final-test \
+  --allow-sealed-test-evaluation \
   --seeds 33 34 35
