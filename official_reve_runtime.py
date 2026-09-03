@@ -919,6 +919,7 @@ def _head_metadata(
     *,
     head_variant: str,
     layer_index: int = -1,
+    layer_indices: Sequence[int] | None = None,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
     correlation_loss_lambda: float = 0.0,
@@ -994,6 +995,7 @@ def _head_metadata(
     metadata: dict[str, Any] = {
         "head_variant": head_variant,
         "layer_index": int(layer_index),
+        "layer_indices": None if layer_indices is None else [int(index) for index in layer_indices],
         "layer_index_convention": "positive_1_based_or_negative_final_relative",
         "head_source": (
             "neuralbench_default"
@@ -1292,8 +1294,14 @@ def _head_metadata(
             {
                 "head_architecture": "mean_final_layer_zero_start_early_layer_mix",
                 "query_initialization": "not_applicable",
-                "selected_layer_indices_requested": None,
-                "layer_selection": "dynamic_final_four_transformer_layers",
+                "selected_layer_indices_requested": (
+                    None if layer_indices is None else [int(index) for index in layer_indices]
+                ),
+                "layer_selection": (
+                    "dynamic_final_four_transformer_layers"
+                    if layer_indices is None
+                    else "explicit_final_relative_or_1_based_transformer_layers"
+                ),
                 "layer_sequence_contract": "initial_position_plus_ordered_transformer_outputs",
                 "positional_input_excluded": True,
                 "alpha_initialization": 0.0,
@@ -1562,6 +1570,7 @@ def _patch_official_components(
     *,
     head_variant: str = "mean_linear",
     layer_index: int = -1,
+    layer_indices: Sequence[int] | None = None,
     head_dropout: float = 0.0,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
@@ -1917,6 +1926,7 @@ def _patch_official_components(
                     mean_gradient_scale=mean_gradient_scale,
                     correction_gradient_scale=correction_gradient_scale,
                     layer_index=layer_index,
+                    layer_indices=layer_indices,
                 ),
             )
         if head_variant == "last_tuned":
@@ -2292,6 +2302,7 @@ def run_official_subset(
     config_path: Path,
     head_variant: str = "mean_linear",
     layer_index: int = -1,
+    layer_indices: Sequence[int] | None = None,
     head_dropout: float = 0.0,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
@@ -2329,6 +2340,7 @@ def run_official_subset(
             selection_path,
             head_variant=head_variant,
             layer_index=layer_index,
+            layer_indices=layer_indices,
             head_dropout=head_dropout,
             mean_gradient_scale=mean_gradient_scale,
             correction_gradient_scale=correction_gradient_scale,

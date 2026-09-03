@@ -1641,6 +1641,7 @@ def _strict_summary_fields(reports: Sequence[Mapping[str, Any]]) -> dict[str, An
 def run_official_stack_smoke(
     *,
     head_variant: str,
+    layer_indices: Sequence[int] | None = None,
     device: str = "cpu",
 ) -> dict[str, Any]:
     """Exercise the real REVE/NeuralTrain interfaces without HBN data.
@@ -1686,7 +1687,13 @@ def run_official_stack_smoke(
         # Keep the official smoke variants on their exact existing RNG and
         # construction path.  Query-initialization branches need encoder
         # tokens before they can construct their explicit query.
-        adapter = reve.UpstreamReveHeadModel(encoder, variant=head_variant, n_outputs=1, dropout=0.0).to(device)
+        adapter = reve.UpstreamReveHeadModel(
+            encoder,
+            variant=head_variant,
+            n_outputs=1,
+            dropout=0.0,
+            layer_indices=layer_indices,
+        ).to(device)
     eeg = torch.randn(2, n_chans, n_times, device=device)
     positions = torch.randn(2, n_chans, 3, device=device)
 
@@ -1801,6 +1808,10 @@ def run_official_stack_smoke(
                 "head_metadata": adapter.head.metadata(),
             }
         )
+        if head_variant == "mean_layer_mix":
+            output["layer_indices_requested"] = (
+                None if layer_indices is None else list(layer_indices)
+            )
     elif head_variant == "mean_stats_residual_detached":
         output.update(
             {
@@ -1905,6 +1916,7 @@ def run_official_subset(
     config_path: Path,
     head_variant: str = "mean_linear",
     layer_index: int = -1,
+    layer_indices: Sequence[int] | None = None,
     head_dropout: float = 0.0,
     mean_gradient_scale: float = 0.5,
     correction_gradient_scale: float = 1.0,
@@ -1934,6 +1946,7 @@ def run_official_subset(
         config_path=config_path,
         head_variant=head_variant,
         layer_index=layer_index,
+        layer_indices=layer_indices,
         head_dropout=head_dropout,
         mean_gradient_scale=mean_gradient_scale,
         correction_gradient_scale=correction_gradient_scale,
@@ -1970,6 +1983,7 @@ def _write_config(
     data_mode: str = "manifest",
     head_variant: str | None = None,
     layer_index: int = -1,
+    layer_indices: Sequence[int] | None = None,
     mean_gradient_scale: float | None = None,
     correction_gradient_scale: float | None = None,
     swa_window: int = 0,
@@ -2005,6 +2019,9 @@ def _write_config(
             {
                 "H7_HEAD_VARIANT": head_variant,
                 "H7_LAYER_INDEX": int(layer_index),
+                "H7_LAYER_INDICES": (
+                    None if layer_indices is None else [int(index) for index in layer_indices]
+                ),
                 "H7_MEAN_GRADIENT_SCALE": mean_gradient_scale,
                 "H7_CORRECTION_GRADIENT_SCALE": correction_gradient_scale,
                 "SWA_WINDOW": swa_window,
@@ -2082,6 +2099,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=int,
         default=-1,
         help="selected transformer layer: positive 1-based or negative final-relative (-1 is final)",
+    )
+    parser.add_argument(
+        "--layer-indices",
+        type=int,
+        nargs="+",
+        default=None,
+        help="explicit transformer layers for mean_layer_mix; final layer must be last",
     )
     parser.add_argument(
         "--evaluation-protocol",
@@ -2183,6 +2207,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.evaluation_protocol != "strict" or args.head_variant != "mean_rich_stats_residual"
     ):
         parser.error("--target-scaler zscore requires strict mean_rich_stats_residual evaluation")
+    if args.layer_indices is not None:
+        if args.head_variant != "mean_layer_mix" and args.smoke_head != "mean_layer_mix":
+            parser.error("--layer-indices requires mean_layer_mix")
+        if len(args.layer_indices) < 2 or any(index == 0 for index in args.layer_indices):
+            parser.error("--layer-indices requires at least two non-zero indices")
 
     if args.two_stage_finetune:
         try:
@@ -2207,7 +2236,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error(str(error))
 
     if args.smoke_head is not None:
-        print(json.dumps(run_official_stack_smoke(head_variant=args.smoke_head), indent=2))
+        print(
+            json.dumps(
+                run_official_stack_smoke(
+                    head_variant=args.smoke_head,
+                    layer_indices=args.layer_indices,
+                ),
+                indent=2,
+            )
+        )
         return 0
     required = {
         "--data-root": args.data_root,
@@ -2253,6 +2290,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             reve,
             head_variant=args.head_variant,
             layer_index=args.layer_index,
+            layer_indices=args.layer_indices,
             mean_gradient_scale=args.mean_gradient_scale,
             correction_gradient_scale=args.correction_gradient_scale,
             correlation_loss_lambda=args.correlation_loss_lambda,
@@ -2326,6 +2364,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.two_stage_encoder_gradient_scale if args.two_stage_finetune else None
                 ),
                 "layer_index": args.layer_index,
+                "layer_indices": (
+                    None if args.layer_indices is None else list(args.layer_indices)
+                ),
             }
             try:
                 if source.data_mode == "selective_task":
@@ -2346,6 +2387,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     data_mode=source.data_mode,
                     head_variant=args.head_variant,
                     layer_index=args.layer_index,
+                    layer_indices=args.layer_indices,
                     mean_gradient_scale=args.mean_gradient_scale,
                     correction_gradient_scale=args.correction_gradient_scale,
                     swa_window=args.swa_window,
@@ -2365,6 +2407,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     config_path=config_path,
                     head_variant=args.head_variant,
                     layer_index=args.layer_index,
+                    layer_indices=args.layer_indices,
                     mean_gradient_scale=args.mean_gradient_scale,
                     correction_gradient_scale=args.correction_gradient_scale,
                     swa_window=args.swa_window,
