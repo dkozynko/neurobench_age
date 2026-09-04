@@ -1,4 +1,4 @@
-# NeuralBench Age — article-ready REVE study
+# NeuralBench Age — REVE study
 
 This repository contains the code and compact evidence for the paper
 **“Stability of age probing in REVE and the limits of increasingly complex
@@ -23,11 +23,11 @@ src/neurobench_age/data/       manifests and data acquisition
 src/neurobench_age/pipelines/  official and independent runners
 src/neurobench_age/training/   optional train-only extensions
 src/neurobench_age/analysis/   reproducible metrics and figures
-configs/article/               frozen article configurations
+configs/article/               frozen configurations
 scripts/                       portable entry-point wrappers
 tests/                         contract and regression tests
 docs/research/                 protocol and experiment registry
-results/canonical/             compact article evidence only
+results/canonical/             compact evidence only
 ```
 
 ## Installation
@@ -60,7 +60,7 @@ PYTHONPATH=src python -m pytest -q
 The dry run checks the crop/window geometry, channel count, R5 holdout
 invariant, regression interface, and official preprocessing contract.
 
-## Canonical article experiment
+## Canonical experiment
 
 The canonical metadata-only manifest is included at
 `results/canonical/data/age_medium_1000_nested.csv`; prepare the matching HBN
@@ -110,7 +110,7 @@ Analyze complete validation or final-test run directories with:
 
 The analysis reports Pearson, MAE, RMSE, R², per-seed variability, paired
 wins/losses, worst-seed deltas, and subject-level bootstrap intervals. It
-records the input paths and hashes so that article tables and figures are
+records the input paths and hashes so that tables and figures are
 traceable to exact runs.
 
 Before any sealed evaluation, verify the matched validation gate:

@@ -1,4 +1,4 @@
-"""Validation-only finalist gate for the article protocol."""
+"""Validation-only finalist gate for the protocol."""
 
 from __future__ import annotations
 

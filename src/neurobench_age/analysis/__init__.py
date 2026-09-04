@@ -1,1 +1,1 @@
-"""Reproducible article evidence analysis."""
+"""Reproducible evidence analysis."""

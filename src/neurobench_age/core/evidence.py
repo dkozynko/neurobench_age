@@ -1,4 +1,4 @@
-"""Schema-versioned evidence primitives for article-ready experiments."""
+"""Schema-versioned evidence primitives for experiments."""
 
 from __future__ import annotations
 

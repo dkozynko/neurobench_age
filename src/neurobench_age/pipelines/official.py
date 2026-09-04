@@ -85,7 +85,7 @@ def _sha256_bytes(data: bytes) -> str:
 
 
 def configure_determinism() -> None:
-    """Enable the strict reproducibility settings used by article runs."""
+    """Enable the strict reproducibility settings used by runs."""
 
     import torch
 
@@ -2564,7 +2564,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--deterministic",
         action="store_true",
-        help="enable strict deterministic PyTorch/CUDA settings for reproducible article runs",
+        help="enable strict deterministic PyTorch/CUDA settings for reproducible runs",
     )
     parser.add_argument(
         "--smoke-head",

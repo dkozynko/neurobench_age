@@ -1,1 +1,1 @@
-"""Official and independent article pipelines."""
+"""Official and independent pipelines."""

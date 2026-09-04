@@ -983,7 +983,7 @@ def _run_metadata_paths(experiment: Any, canonical_run_dir: Path) -> list[Path]:
 
     NeuralBench can omit its internal UID directory for a later seed in a
     multi-seed process.  The canonical seed directory must therefore always
-    receive a copy of the metadata used by the article-ready evidence audit.
+    receive a copy of the metadata used by the evidence audit.
     """
 
     paths: list[Path] = []

@@ -1,4 +1,4 @@
-# Canonical article evidence
+# Canonical evidence
 
 This directory contains only compact evidence used by the paper. Start with
 [`index.json`](index.json), then follow the claim-to-result mapping in

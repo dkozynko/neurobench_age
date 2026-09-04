@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the reproducible article evidence analysis from a checkout."""
+"""Run the reproducible evidence analysis from a checkout."""
 
 from __future__ import annotations
 

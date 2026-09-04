@@ -1,1 +1,1 @@
-"""Optional encoder-training extensions used by article screens."""
+"""Optional encoder-training extensions used by screens."""

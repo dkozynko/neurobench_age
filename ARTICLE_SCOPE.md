@@ -1,4 +1,4 @@
-# Article scope
+# scope
 
 This repository is the reproducible research package for the paper:
 
@@ -23,7 +23,7 @@ enough to support an article-level claim?
 - compact metrics, tables, figures, and negative results needed to support the
   paper's conclusions.
 
-## What is not part of the article package
+## What is not part of the package
 
 Raw HBN data, pretrained weights, checkpoints, large prediction dumps, launch
 logs, dated retry scripts, and obsolete exploratory run directories are kept

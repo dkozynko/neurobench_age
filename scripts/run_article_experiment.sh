@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Portable validation-only launcher for the article pipeline.  Final-test
+# Portable validation-only launcher for the pipeline.  Final-test
 # evaluation is deliberately a separate, manually reviewed operation.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-MANIFEST="${MANIFEST:?Set MANIFEST to the canonical article manifest}"
+MANIFEST="${MANIFEST:?Set MANIFEST to the canonical manifest}"
 DATA_ROOT="${DATA_ROOT:?Set DATA_ROOT to the prepared HBN root}"
 PHASE="${PHASE:-baseline}"
 HEAD_VARIANT="${HEAD_VARIANT:-mean_linear}"
@@ -20,7 +20,7 @@ case "$PHASE" in
     DEFAULT_CONFIG="$REPO_ROOT/configs/article/confirmation.json"
     ;;
   *)
-    echo "unsupported article validation phase: $PHASE" >&2
+    echo "unsupported validation phase: $PHASE" >&2
     exit 2
     ;;
 esac

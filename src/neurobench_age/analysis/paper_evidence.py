@@ -1,4 +1,4 @@
-"""Audit and summarize article-ready NeuroBench evidence directories."""
+"""Audit and summarize NeuroBench evidence directories."""
 
 from __future__ import annotations
 
