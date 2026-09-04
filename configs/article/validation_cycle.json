@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "article_validation_cycle",
+  "evaluation_mode": "validation_only",
+  "test_access": "sealed",
+  "seeds": [33, 34, 35],
+  "baseline_head": "mean_linear",
+  "protocol": "strict",
+  "manifest": "canonical_1000_subject_nested",
+  "purpose": "matched baseline and candidate screening"
+}

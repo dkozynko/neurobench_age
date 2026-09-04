@@ -1,0 +1,3 @@
+"""Article-ready REVE age probing research package."""
+
+__version__ = "0.1.0"

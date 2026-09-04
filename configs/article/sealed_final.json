@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "article_sealed_final",
+  "evaluation_mode": "final_test",
+  "test_access": "explicit_only",
+  "seeds": [33, 34, 35],
+  "baseline_head": "mean_linear",
+  "protocol": "strict",
+  "manifest": "canonical_1000_subject_nested",
+  "purpose": "single frozen finalist evaluation"
+}

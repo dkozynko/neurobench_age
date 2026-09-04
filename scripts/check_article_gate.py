@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the reproducible article evidence analysis from a checkout."""
+"""Check a validation-only finalist gate from a checkout."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from neurobench_age.analysis.paper_evidence import main
+from neurobench_age.analysis.gate import main
 
 
 if __name__ == "__main__":

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "name": "article_confirmation",
+  "evaluation_mode": "validation_only",
+  "test_access": "sealed",
+  "seeds": [34, 35],
+  "baseline_head": "mean_linear",
+  "protocol": "strict",
+  "manifest": "canonical_1000_subject_nested",
+  "purpose": "held-back confirmation after seed-33 screening"
+}
