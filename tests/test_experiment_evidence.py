@@ -21,6 +21,7 @@ def _recorder(tmp_path: Path, *, evaluation_mode: str = "validation_only") -> Ev
         task="age",
         dataset_manifest="manifest-sha",
         split_fingerprint="split-sha",
+        encoder_checkpoint="brain-bzh/reve-base",
         seed=33,
         resolved_config={"head_variant": "mean_linear"},
         command_line="python run.py --head-variant mean_linear",
@@ -54,6 +55,7 @@ def test_recorder_writes_schema_versioned_running_manifest_and_finalizes(tmp_pat
     assert persisted["source_tree_sha256"]
     assert persisted["protocol_digest"]
     assert persisted["comparison_config_hash"]
+    assert persisted["encoder_checkpoint"] == "brain-bzh/reve-base"
     assert persisted["deterministic_policy"] == "best_effort"
 
 
@@ -230,6 +232,7 @@ def test_phase_records_elapsed_time_throughput_and_gpu_resource_snapshot(tmp_pat
         task="age",
         dataset_manifest="manifest-sha",
         split_fingerprint="split-sha",
+        encoder_checkpoint="brain-bzh/reve-base",
         seed=33,
         resolved_config={"head_variant": "mean_linear"},
         command_line="python run.py",

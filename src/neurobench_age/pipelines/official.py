@@ -46,6 +46,7 @@ from ..core.evidence import (
     write_json_atomic,
     write_jsonl_atomic,
 )
+from ..core.baseline import REVE_MODEL
 from ..core.predictions import (
     PredictionEvidenceError,
     aggregate_subject_predictions,
@@ -78,6 +79,82 @@ class DataSource:
     manifest_sha256: str | None
     acquisition_provenance_path: Path | None = None
     acquisition_provenance_sha256: str | None = None
+
+
+@dataclass(frozen=True)
+class ArticlePhaseConfig:
+    """Validated human-readable phase declaration used by the launcher."""
+
+    path: Path
+    payload: Mapping[str, Any]
+    sha256: str
+
+
+def _load_article_phase_config(path: Path) -> ArticlePhaseConfig:
+    path = Path(path)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"could not read article phase config: {path}") from error
+    if not isinstance(raw, Mapping):
+        raise ValueError("article phase config must contain a JSON object")
+    required = {
+        "schema_version",
+        "name",
+        "evaluation_mode",
+        "test_access",
+        "seeds",
+        "baseline_head",
+        "protocol",
+        "manifest",
+        "purpose",
+    }
+    unknown = sorted(set(raw) - required)
+    missing = sorted(required - set(raw))
+    if unknown:
+        raise ValueError(f"article phase config has unknown fields: {unknown}")
+    if missing:
+        raise ValueError(f"article phase config is missing fields: {missing}")
+    if raw["schema_version"] != 1:
+        raise ValueError("article phase config schema_version must be 1")
+    for field in ("name", "manifest", "purpose"):
+        if not isinstance(raw[field], str) or not raw[field].strip():
+            raise ValueError(f"article phase config {field} must be a non-empty string")
+    if raw["evaluation_mode"] != "validation_only" or raw["test_access"] != "sealed":
+        raise ValueError("article phase config must keep validation_only test access sealed")
+    if raw["protocol"] != "strict":
+        raise ValueError("article phase config protocol must be strict")
+    if raw["baseline_head"] != "mean_linear":
+        raise ValueError("article phase config baseline_head must be mean_linear")
+    seeds = raw["seeds"]
+    if (
+        not isinstance(seeds, list)
+        or not seeds
+        or any(isinstance(seed, bool) or not isinstance(seed, int) for seed in seeds)
+        or len(set(seeds)) != len(seeds)
+    ):
+        raise ValueError("article phase config seeds must be unique integers")
+    return ArticlePhaseConfig(path=path.resolve(), payload=dict(raw), sha256=_sha256_file(path))
+
+
+def _enforce_article_phase_config(args: Any, config: ArticlePhaseConfig) -> None:
+    expected = {
+        "evaluation_mode": config.payload["evaluation_mode"],
+        "evaluation_protocol": config.payload["protocol"],
+        "seeds": tuple(config.payload["seeds"]),
+    }
+    actual = {
+        "evaluation_mode": args.evaluation_mode,
+        "evaluation_protocol": args.evaluation_protocol,
+        "seeds": tuple(args.seeds),
+    }
+    mismatches = [
+        f"{field}: config={expected[field]!r} runtime={actual[field]!r}"
+        for field in expected
+        if expected[field] != actual[field]
+    ]
+    if mismatches:
+        raise ValueError("article phase config mismatch: " + "; ".join(mismatches))
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -2554,7 +2631,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--data-root", type=Path)
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--config", type=Path)
+    parser.add_argument(
+        "--phase-config",
+        type=Path,
+        help="strict article phase declaration; generic diagnostic runs may omit it",
+    )
     parser.add_argument(
         "--gpu-hourly-rate-usd",
         type=float,
@@ -2814,7 +2895,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     required = {
         "--data-root": args.data_root,
         "--output-dir": args.output_dir,
-        "--config": args.config,
     }
     missing = [name for name, value in required.items() if value is None]
     if missing:
@@ -2822,6 +2902,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     source_modes = int(args.manifest is not None) + int(args.full_data) + int(args.selective_task)
     if source_modes != 1:
         parser.error("exactly one of --manifest, --full-data, or --selective-task is required")
+
+    article_phase_metadata: dict[str, Any] = {}
+    if args.phase_config is not None:
+        try:
+            article_phase_config = _load_article_phase_config(args.phase_config)
+            _enforce_article_phase_config(args, article_phase_config)
+        except ValueError as error:
+            parser.error(str(error))
+        article_phase_metadata = {
+            "article_phase_config_path": str(article_phase_config.path),
+            "article_phase_config_sha256": article_phase_config.sha256,
+            "article_phase_config_name": article_phase_config.payload["name"],
+        }
 
     resolved_seeds = validate_seeds(args.seeds)
     for name, value in (
@@ -2940,6 +3033,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             seed_metadata = {
                 **metadata,
+                **article_phase_metadata,
                 "seed": seed,
                 "data_seed": 33,
                 "provenance_path": (
@@ -3049,6 +3143,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 task="age",
                 dataset_manifest=(source.manifest_sha256 or source.data_mode),
                 split_fingerprint=(source.manifest_sha256 or f"{source.data_mode}-split"),
+                encoder_checkpoint=REVE_MODEL.pretrained_name,
                 seed=seed,
                 resolved_config=seed_metadata,
                 command_line=launch_command,

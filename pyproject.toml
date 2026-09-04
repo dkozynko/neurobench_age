@@ -7,7 +7,7 @@ name = "neurobench-age"
 version = "0.1.0"
 description = "REVE age probing experiments and evidence tools"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
   "numpy>=1.23",
 ]
@@ -29,6 +29,10 @@ reve = [
   "neuralbench==0.2.3",
   "safetensors==0.5.3",
 ]
+external = [
+  "mne>=1.8",
+  "mne-bids>=0.16",
+]
 
 [project.scripts]
 neurobench-baseline = "neurobench_age.core.baseline:main"
@@ -43,3 +47,4 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+pythonpath = ["src"]

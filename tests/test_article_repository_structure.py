@@ -38,7 +38,13 @@ def test_package_layout_and_article_entry_points_are_declared() -> None:
 
 
 def test_repository_root_has_no_experiment_implementation_files() -> None:
-    allowed_files = {".gitignore", "ARTICLE_SCOPE.md", "README.md", "pyproject.toml"}
+    allowed_files = {
+        ".gitignore",
+        "ARTICLE_SCOPE.md",
+        "README.md",
+        "pyproject.toml",
+        "uv.lock",
+    }
     root_files = {path.name for path in ROOT.iterdir() if path.is_file()}
 
     assert root_files <= allowed_files

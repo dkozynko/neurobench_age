@@ -54,7 +54,7 @@ def test_confirmation_phase_selects_confirmation_config_by_default(tmp_path: Pat
     subprocess.run(["bash", str(launcher)], cwd=ROOT, env=env, check=True)
 
     args = args_file.read_text(encoding="utf-8").splitlines()
-    config_index = args.index("--config") + 1
+    config_index = args.index("--phase-config") + 1
     assert args[config_index].endswith("configs/article/confirmation.json")
     assert args[args.index("--evaluation-mode") + 1] == "validation_only"
     assert args[args.index("--seeds") + 1 :] == ["34", "35"]
@@ -85,3 +85,53 @@ def test_validation_launcher_rejects_final_test_overrides(tmp_path: Path) -> Non
 
     assert result.returncode == 2
     assert "final-test" in result.stderr
+
+
+def test_validation_launcher_requires_explicit_output_root(tmp_path: Path) -> None:
+    launcher = ROOT / "scripts" / "run_article_experiment.sh"
+    env = os.environ.copy()
+    env.pop("OUTPUT_ROOT", None)
+    env.update(
+        {
+            "MANIFEST": "external-manifest.csv",
+            "DATA_ROOT": "external-data",
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", str(launcher)],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "OUTPUT_ROOT" in result.stderr
+
+
+def test_validation_launcher_rejects_canonical_results_output(tmp_path: Path) -> None:
+    launcher = ROOT / "scripts" / "run_article_experiment.sh"
+    fake_python = tmp_path / "fake-python"
+    fake_python.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+    env = os.environ.copy()
+    env.update(
+        {
+            "MANIFEST": "external-manifest.csv",
+            "DATA_ROOT": "external-data",
+            "OUTPUT_ROOT": str(ROOT / "results" / "canonical" / "runs" / "unsafe"),
+            "PYTHON_BIN": str(fake_python),
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", str(launcher)],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "results/canonical" in result.stderr

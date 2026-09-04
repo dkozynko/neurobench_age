@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "study_id": "reve_age_external_frozen_probe_v1",
+  "status": "draft",
+  "datasets": {
+    "development": {
+      "name": "HBN",
+      "use": "train_validation_only",
+      "test_access": "forbidden_for_selection"
+    },
+    "external": {
+      "name": "MIPDB",
+      "nemar_id": "nm000153",
+      "release": "NEMAR nm000153 pinned at study sealing",
+      "pilot_size": 10,
+      "pilot_salt": "mipdb-engineering-pilot-v1",
+      "primary_cohort": "within_hbn_training_age_support",
+      "extrapolation_cohort": "outside_hbn_training_age_support",
+      "minimum_primary_subjects": 50
+    }
+  },
+  "encoder": {
+    "checkpoint": "brain-bzh/reve-base",
+    "frozen": true,
+    "eval_mode": true,
+    "inference_mode": true,
+    "layer_indices": [-2, -1]
+  },
+  "preprocessing": {
+    "sample_rate_hz": 200.0,
+    "bandpass_hz": [0.5, 99.5],
+    "notch_hz": null,
+    "scaler": "StandardScaler",
+    "clamp": 15.0,
+    "window_seconds": 2.0,
+    "stride_seconds": 2.0,
+    "max_seconds_per_subject": 120.0,
+    "cross_block_windows": false,
+    "spatial_interpolation": false,
+    "subject_aggregation": "arithmetic_mean"
+  },
+  "heads": [
+    {"name": "mean_linear", "layer_index": -1, "aggregation": "mean"},
+    {"name": "mean_layer_linear", "layer_index": -2, "aggregation": "mean"},
+    {"name": "mean_rich_stats_residual", "layer_index": -1, "aggregation": "rich_statistics_residual"},
+    {"name": "multi_query_rich_stats", "layer_index": -1, "aggregation": "multi_query_rich_statistics"}
+  ],
+  "training": {
+    "seeds": [33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
+    "optimizer": "AdamW",
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "batch_size": 64,
+    "max_epochs": 100,
+    "patience": 15,
+    "loss": "MSELoss",
+    "checkpoint_metric": "validation_pearson",
+    "metric_mode": "max"
+  },
+  "statistics": {
+    "bootstrap_iterations": 10000,
+    "bootstrap_seed": 20260903,
+    "confidence": 0.95,
+    "randomization_tail": "greater",
+    "holm_order": ["mean_layer_linear", "mean_rich_stats_residual", "multi_query_rich_stats"],
+    "alpha": 0.05,
+    "minimum_seed_wins": 8,
+    "minimum_worst_seed_delta": -0.01,
+    "require_ci_above_zero": true
+  }
+}

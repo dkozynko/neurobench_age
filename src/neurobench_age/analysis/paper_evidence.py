@@ -5,14 +5,24 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+from importlib.metadata import PackageNotFoundError, version
 import json
 import math
+import platform
 import shlex
+import shutil
+import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 
+from .comparison import (
+    EXACT_RUN_PROVENANCE_FIELDS,
+    ComparisonRecord,
+    match_exact_records,
+)
 from ..core.evidence import (
     SCHEMA_VERSION,
     add_declared_head_bucket,
@@ -98,6 +108,9 @@ def audit_run(run_dir: Path) -> dict[str, Any]:
     ):
         errors.append("run_manifest.json has an invalid comparison factor key list")
     deterministic_policy = manifest.get("deterministic_policy") if manifest else None
+    deterministic_settings = manifest.get("deterministic_settings") if manifest else None
+    if not isinstance(deterministic_settings, Mapping) or not deterministic_settings:
+        errors.append("run_manifest.json is missing deterministic settings")
     if deterministic_policy not in {"strict", "best_effort"}:
         errors.append("run_manifest.json has an invalid deterministic policy")
     elif deterministic_policy == "strict":
@@ -105,6 +118,9 @@ def audit_run(run_dir: Path) -> dict[str, Any]:
             errors.append("strict deterministic policy is not satisfied")
     else:
         warnings.append("run uses best-effort, not strict bitwise determinism")
+    encoder_checkpoint = manifest.get("encoder_checkpoint") if manifest else None
+    if not isinstance(encoder_checkpoint, str) or not encoder_checkpoint:
+        errors.append("run_manifest.json is missing encoder checkpoint identity")
 
     buckets = complexity.get("parameter_buckets") if complexity else None
     head_complexity = complexity.get("head_complexity") if complexity else None
@@ -333,8 +349,10 @@ def audit_run(run_dir: Path) -> dict[str, Any]:
         "protocol_digest": protocol_digest,
         "comparison_config_hash": comparison_config_digest,
         "comparison_factor_keys": comparison_factor_keys,
+        "encoder_checkpoint": encoder_checkpoint,
         "deterministic_policy": deterministic_policy,
         "deterministic_policy_satisfied": manifest.get("deterministic_policy_satisfied"),
+        "deterministic_settings": deterministic_settings,
         "evaluation_mode": manifest.get("evaluation_mode"),
         "test_access": manifest.get("test_access"),
         "selected_epoch": selection.get("selected_epoch"),
@@ -535,59 +553,31 @@ def _audits_by_seed(run_dirs: Sequence[Path], group_name: str) -> dict[int, dict
     return audits_by_seed
 
 
-def _validate_matched_pair(
-    candidate: Mapping[str, Any], baseline: Mapping[str, Any], *, seed: int
-) -> None:
-    for field in (
-        "task",
-        "dataset_manifest",
-        "split_fingerprint",
-        "source_tree_sha256",
-        "protocol_digest",
-        "comparison_config_hash",
-        "comparison_factor_keys",
-        "evaluation_mode",
-        "test_access",
-    ):
-        if candidate.get(field) != baseline.get(field):
-            label = {
-                "comparison_config_hash": "comparison config",
-                "comparison_factor_keys": "comparison factor declaration",
-                "protocol_digest": "protocol digest",
-                "source_tree_sha256": "source tree",
-            }.get(field, field)
-            raise ValueError(
-                f"matched comparison has different {label} for seed {seed}: "
-                f"candidate={candidate.get(field)!r} baseline={baseline.get(field)!r}"
-            )
-    candidate_map = _prediction_map(candidate.get("predictions", []))
-    baseline_map = _prediction_map(baseline.get("predictions", []))
-    if set(candidate_map) != set(baseline_map):
-        raise ValueError(
-            f"matched comparison requires exactly the same validation subject IDs for seed {seed}"
-        )
-    for subject_id in sorted(candidate_map):
-        if candidate_map[subject_id][0] != baseline_map[subject_id][0]:
-            raise ValueError(
-                f"matched comparison requires identical true ages for subject {subject_id!r}"
-            )
-
-
 def _matched_audits(
     candidate_dirs: Sequence[Path], baseline_dirs: Sequence[Path]
 ) -> list[tuple[int, dict[str, Any], dict[str, Any]]]:
     candidates = _audits_by_seed(candidate_dirs, "candidate")
     baselines = _audits_by_seed(baseline_dirs, "baseline")
-    shared_seeds = sorted(set(candidates) & set(baselines))
-    if not shared_seeds:
-        raise ValueError("candidate and baseline have no shared seeds")
-    matched: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
-    for seed in shared_seeds:
-        candidate = candidates[seed]
-        baseline = baselines[seed]
-        _validate_matched_pair(candidate, baseline, seed=seed)
-        matched.append((seed, candidate, baseline))
-    return matched
+
+    def record(audit: dict[str, Any]) -> ComparisonRecord:
+        rows = audit.get("predictions", [])
+        return ComparisonRecord(
+            seed=int(audit["seed"]),
+            provenance={field: audit.get(field) for field in EXACT_RUN_PROVENANCE_FIELDS},
+            subject_ids=tuple(str(row["subject_id"]) for row in rows),
+            true_targets=tuple(float(row["true_age"]) for row in rows),
+            payload=audit,
+        )
+
+    pairs = match_exact_records(
+        [record(audit) for audit in baselines.values()],
+        [record(audit) for audit in candidates.values()],
+        provenance_fields=EXACT_RUN_PROVENANCE_FIELDS,
+    )
+    return [
+        (pair.seed, pair.candidate.payload, pair.baseline.payload)
+        for pair in pairs
+    ]
 
 
 def complexity_adjusted_comparison(
@@ -629,14 +619,90 @@ def complexity_adjusted_comparison(
 
 def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not rows:
-        path.write_text("\n", encoding="utf-8")
-        return
-    fields = sorted({key for row in rows for key in row})
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows({key: row.get(key) for key in fields} for row in rows)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            newline="",
+            encoding="utf-8",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            if not rows:
+                handle.write("\n")
+            else:
+                fields = sorted({key for row in rows for key in row})
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows({key: row.get(key) for key in fields} for row in rows)
+        temporary_path.replace(path)
+    except Exception:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def _generate_figures(audits: Sequence[Mapping[str, Any]], output_dir: Path) -> list[Path]:
+    import matplotlib.pyplot as plt
+
+    if not audits or not all(audit["predictions"] for audit in audits):
+        return []
+
+    specifications = (
+        (
+            "predicted_vs_true.png",
+            "Predicted age",
+            lambda row: row["predicted_age"],
+            False,
+        ),
+        (
+            "residuals.png",
+            "Residual (predicted − true)",
+            lambda row: row["predicted_age"] - row["true_age"],
+            True,
+        ),
+    )
+    temporary_paths: list[tuple[Path, Path]] = []
+    try:
+        for filename, ylabel, y_value, zero_line in specifications:
+            figure, axis = plt.subplots(figsize=(6, 5))
+            try:
+                for audit in audits:
+                    rows = audit["predictions"]
+                    axis.scatter(
+                        [row["true_age"] for row in rows],
+                        [y_value(row) for row in rows],
+                        label=f"{audit.get('head_variant')} seed{audit.get('seed')}",
+                        alpha=0.7,
+                    )
+                if zero_line:
+                    axis.axhline(0.0, color="black", linewidth=0.8)
+                axis.set_xlabel("True age")
+                axis.set_ylabel(ylabel)
+                axis.legend(fontsize="small")
+                figure.tight_layout()
+                final_path = output_dir / filename
+                temporary_path = output_dir / f".{filename}.tmp"
+                figure.savefig(temporary_path, dpi=160, format="png")
+                temporary_paths.append((temporary_path, final_path))
+            finally:
+                plt.close(figure)
+        for temporary_path, final_path in temporary_paths:
+            temporary_path.replace(final_path)
+        return [final_path for _, final_path in temporary_paths]
+    except Exception:
+        for temporary_path, _ in temporary_paths:
+            temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def _installed_version(distribution: str) -> str | None:
+    try:
+        return version(distribution)
+    except PackageNotFoundError:
+        return None
 
 
 def analyze_runs(
@@ -648,6 +714,52 @@ def analyze_runs(
     baseline_run_dirs: Sequence[Path] = (),
     bootstrap_iterations: int = BOOTSTRAP_ITERATIONS,
     seed: int = BOOTSTRAP_SEED,
+    plot_policy: str = "required",
+) -> dict[str, Any]:
+    """Create one fresh analysis directory as an all-or-nothing transaction."""
+
+    if plot_policy not in {"required", "optional", "off"}:
+        raise ValueError("plot_policy must be one of: required, optional, off")
+    final_output_dir = Path(output_dir)
+    if final_output_dir.exists() and any(final_output_dir.iterdir()):
+        raise ValueError(f"analysis output directory is not empty: {final_output_dir}")
+    final_output_dir.parent.mkdir(parents=True, exist_ok=True)
+    if final_output_dir.exists():
+        final_output_dir.rmdir()
+    transaction_dir = Path(
+        tempfile.mkdtemp(
+            prefix=f".{final_output_dir.name}.transaction-",
+            dir=final_output_dir.parent,
+        )
+    )
+    try:
+        result = _analyze_runs_into(
+            run_dirs,
+            output_dir=transaction_dir,
+            train_age_reference=train_age_reference,
+            baseline_variant=baseline_variant,
+            baseline_run_dirs=baseline_run_dirs,
+            bootstrap_iterations=bootstrap_iterations,
+            seed=seed,
+            plot_policy=plot_policy,
+        )
+        transaction_dir.replace(final_output_dir)
+        return result
+    except Exception:
+        shutil.rmtree(transaction_dir, ignore_errors=True)
+        raise
+
+
+def _analyze_runs_into(
+    run_dirs: Sequence[Path],
+    *,
+    output_dir: Path,
+    train_age_reference: Path | None = None,
+    baseline_variant: str = "mean_linear",
+    baseline_run_dirs: Sequence[Path] = (),
+    bootstrap_iterations: int = BOOTSTRAP_ITERATIONS,
+    seed: int = BOOTSTRAP_SEED,
+    plot_policy: str,
 ) -> dict[str, Any]:
     """Write deterministic analysis tables, figures, and an analysis manifest."""
 
@@ -807,49 +919,14 @@ def analyze_runs(
         write_json_atomic(output_dir / "candidate_vs_baseline.json", comparison)
         _write_csv(output_dir / "complexity_comparison.csv", comparison["complexity"])
 
-    figure_paths: list[Path] = []
-    try:
-        import matplotlib.pyplot as plt
-
-        if audits and all(audit["predictions"] for audit in audits):
-            figure, axis = plt.subplots(figsize=(6, 5))
-            for audit in audits:
-                rows = audit["predictions"]
-                axis.scatter(
-                    [row["true_age"] for row in rows],
-                    [row["predicted_age"] for row in rows],
-                    label=f"{audit.get('head_variant')} seed{audit.get('seed')}",
-                    alpha=0.7,
-                )
-            axis.set_xlabel("True age")
-            axis.set_ylabel("Predicted age")
-            axis.legend(fontsize="small")
-            figure.tight_layout()
-            path = output_dir / "predicted_vs_true.png"
-            figure.savefig(path, dpi=160)
-            plt.close(figure)
-            figure_paths.append(path)
-
-            figure, axis = plt.subplots(figsize=(6, 5))
-            for audit in audits:
-                rows = audit["predictions"]
-                axis.scatter(
-                    [row["true_age"] for row in rows],
-                    [row["predicted_age"] - row["true_age"] for row in rows],
-                    label=f"{audit.get('head_variant')} seed{audit.get('seed')}",
-                    alpha=0.7,
-                )
-            axis.axhline(0.0, color="black", linewidth=0.8)
-            axis.set_xlabel("True age")
-            axis.set_ylabel("Residual (predicted − true)")
-            axis.legend(fontsize="small")
-            figure.tight_layout()
-            path = output_dir / "residuals.png"
-            figure.savefig(path, dpi=160)
-            plt.close(figure)
-            figure_paths.append(path)
-    except Exception:
-        pass
+    warnings: list[dict[str, str]] = []
+    if plot_policy != "off":
+        try:
+            _generate_figures(audits, output_dir)
+        except Exception as error:
+            if plot_policy == "required":
+                raise
+            warnings.append({"stage": "plotting", "error": str(error)})
 
     output_files = [path for path in output_dir.iterdir() if path.is_file() and path.name != "analysis_manifest.json"]
     manifest = {
@@ -860,6 +937,13 @@ def analyze_runs(
         "command_line": shlex.join([sys.executable, *sys.argv]),
         "rng_seed": seed,
         "bootstrap_iterations": bootstrap_iterations,
+        "plot_policy": plot_policy,
+        "warnings": warnings,
+        "software": {
+            "python": platform.python_version(),
+            "numpy": np.__version__,
+            "matplotlib": _installed_version("matplotlib"),
+        },
         "outputs": {
             str(path.relative_to(output_dir)): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in sorted(output_files)
@@ -890,6 +974,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--baseline-run", type=Path, action="append", default=[])
     parser.add_argument("--bootstrap-iterations", type=int, default=BOOTSTRAP_ITERATIONS)
     parser.add_argument("--seed", type=int, default=BOOTSTRAP_SEED)
+    parser.add_argument(
+        "--plot-policy",
+        choices=("required", "optional", "off"),
+        default="required",
+    )
     args = parser.parse_args(argv)
     result = analyze_runs(
         args.run_dirs,
@@ -899,6 +988,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         baseline_run_dirs=args.baseline_run,
         bootstrap_iterations=args.bootstrap_iterations,
         seed=args.seed,
+        plot_policy=args.plot_policy,
     )
     print(json.dumps(result["analysis_manifest"], indent=2, sort_keys=True))
     return 0

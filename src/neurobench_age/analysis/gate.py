@@ -6,7 +6,15 @@ import argparse
 import json
 import math
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
+
+from .comparison import (
+    EXACT_RUN_PROVENANCE_FIELDS,
+    ComparisonContractError,
+    ComparisonRecord,
+    match_exact_records,
+)
+from ..core.predictions import PredictionEvidenceError, read_prediction_jsonl
 
 
 class GateError(ValueError):
@@ -23,7 +31,7 @@ def _read_object(path: Path) -> dict[str, Any]:
     return value
 
 
-def _validation_score(run_dir: Path) -> tuple[int, float]:
+def _validation_record(run_dir: Path) -> ComparisonRecord:
     manifest = _read_object(run_dir / "run_manifest.json")
     selection = _read_object(run_dir / "selection.json")
     report = _read_object(run_dir / "report.json")
@@ -50,17 +58,22 @@ def _validation_score(run_dir: Path) -> tuple[int, float]:
         raise GateError(f"validation run has no integer seed: {run_dir}")
     if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(float(score)):
         raise GateError(f"validation run has no finite selected score: {run_dir}")
-    return seed, float(score)
-
-
-def _paired_scores(run_dirs: Iterable[Path], *, label: str) -> dict[int, float]:
-    scores: dict[int, float] = {}
-    for run_dir in run_dirs:
-        seed, score = _validation_score(Path(run_dir))
-        if seed in scores:
-            raise GateError(f"duplicate {label} seed {seed}")
-        scores[seed] = score
-    return scores
+    try:
+        predictions = read_prediction_jsonl(
+            run_dir / "predictions" / "validation.jsonl",
+            expected_split="validation",
+        )
+    except PredictionEvidenceError as exc:
+        raise GateError(f"invalid validation predictions: {run_dir}") from exc
+    if len(predictions) < 2:
+        raise GateError(f"validation run requires at least two subjects: {run_dir}")
+    return ComparisonRecord(
+        seed=seed,
+        provenance={field: manifest.get(field) for field in EXACT_RUN_PROVENANCE_FIELDS},
+        subject_ids=tuple(str(row["subject_id"]) for row in predictions),
+        true_targets=tuple(float(row["true_age"]) for row in predictions),
+        payload=float(score),
+    )
 
 
 def evaluate_validation_gate(
@@ -75,19 +88,23 @@ def evaluate_validation_gate(
 
     if minimum_wins < 1:
         raise ValueError("minimum_wins must be positive")
-    baseline = _paired_scores(baseline_runs, label="baseline")
-    candidate = _paired_scores(candidate_runs, label="candidate")
-    if not baseline or set(baseline) != set(candidate):
-        raise GateError("baseline and candidate must contain the same non-empty seed set")
+    try:
+        matched = match_exact_records(
+            [_validation_record(Path(path)) for path in baseline_runs],
+            [_validation_record(Path(path)) for path in candidate_runs],
+            provenance_fields=EXACT_RUN_PROVENANCE_FIELDS,
+        )
+    except ComparisonContractError as exc:
+        raise GateError(str(exc)) from exc
 
     rows = [
         {
-            "seed": seed,
-            "baseline_selected_val_pearsonr": baseline[seed],
-            "candidate_selected_val_pearsonr": candidate[seed],
-            "delta": candidate[seed] - baseline[seed],
+            "seed": pair.seed,
+            "baseline_selected_val_pearsonr": float(pair.baseline.payload),
+            "candidate_selected_val_pearsonr": float(pair.candidate.payload),
+            "delta": float(pair.candidate.payload) - float(pair.baseline.payload),
         }
-        for seed in sorted(baseline)
+        for pair in matched
     ]
     deltas = [row["delta"] for row in rows]
     wins = sum(delta > 0.0 for delta in deltas)

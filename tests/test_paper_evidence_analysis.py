@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from neurobench_age.analysis import paper_evidence
 from neurobench_age.analysis.paper_evidence import (
     audit_run,
     analyze_runs,
@@ -43,6 +44,8 @@ def _write_run(
         "test_access": "sealed",
         "comparison_config_hash": "comparison-sha",
         "comparison_factor_keys": ["head_variant"],
+        "encoder_checkpoint": "brain-bzh/reve-base",
+        "deterministic_settings": {"algorithms": True, "cudnn_benchmark": False},
         "hardware": {"hardware_class": hardware_class},
         "missing": [],
     }
@@ -369,6 +372,29 @@ def test_stability_rejects_duplicate_candidate_seed(tmp_path: Path) -> None:
         summarize_seed_stability(candidate, baseline)
 
 
+def test_stability_rejects_missing_candidate_seed(tmp_path: Path) -> None:
+    baseline = [
+        _write_run(tmp_path, variant="mean_linear", seed=33),
+        _write_run(tmp_path, variant="mean_linear", seed=34),
+    ]
+    candidate = [_write_run(tmp_path, variant="candidate", seed=33)]
+
+    with pytest.raises(ValueError, match="seed_inventory"):
+        summarize_seed_stability(candidate, baseline)
+
+
+def test_stability_rejects_mismatched_encoder_checkpoint(tmp_path: Path) -> None:
+    baseline = [_write_run(tmp_path, variant="mean_linear", seed=33)]
+    candidate = _write_run(tmp_path, variant="candidate", seed=33)
+    manifest_path = candidate / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["encoder_checkpoint"] = "different-checkpoint"
+    manifest_path.write_text(json.dumps(manifest) + "\n")
+
+    with pytest.raises(ValueError, match="encoder_checkpoint"):
+        summarize_seed_stability([candidate], baseline)
+
+
 def test_stability_rejects_mismatched_dataset_or_split(tmp_path: Path) -> None:
     baseline = [_write_run(tmp_path, variant="mean_linear", seed=33)]
     candidate = _write_run(tmp_path, variant="candidate", seed=33)
@@ -424,6 +450,73 @@ def test_analyze_runs_rejects_partial_evidence_package(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="not complete"):
         analyze_runs([run_dir], output_dir=tmp_path / "analysis")
+
+
+def test_analyze_runs_rejects_nonempty_output_directory(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, variant="mean_linear", seed=33)
+    output_dir = tmp_path / "analysis"
+    output_dir.mkdir()
+    (output_dir / "stale.txt").write_text("old result\n")
+
+    with pytest.raises(ValueError, match="not empty"):
+        analyze_runs([run_dir], output_dir=output_dir, plot_policy="off")
+
+
+def test_required_plot_failure_is_visible_and_transactional(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _write_run(tmp_path, variant="mean_linear", seed=33)
+    output_dir = tmp_path / "analysis"
+
+    def fail_plot(*args: object, **kwargs: object) -> list[Path]:
+        raise RuntimeError("plot backend failed")
+
+    monkeypatch.setattr(paper_evidence, "_generate_figures", fail_plot, raising=False)
+
+    with pytest.raises(RuntimeError, match="plot backend failed"):
+        analyze_runs([run_dir], output_dir=output_dir, plot_policy="required")
+
+    assert not output_dir.exists()
+
+
+def test_optional_plot_failure_is_recorded_in_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_dir = _write_run(tmp_path, variant="mean_linear", seed=33)
+    output_dir = tmp_path / "analysis"
+
+    def fail_plot(*args: object, **kwargs: object) -> list[Path]:
+        raise RuntimeError("plot backend failed")
+
+    monkeypatch.setattr(paper_evidence, "_generate_figures", fail_plot, raising=False)
+
+    result = analyze_runs(
+        [run_dir],
+        output_dir=output_dir,
+        plot_policy="optional",
+    )
+
+    assert result["analysis_manifest"]["warnings"] == [
+        {"stage": "plotting", "error": "plot backend failed"}
+    ]
+
+
+def test_analysis_manifest_lists_only_current_transaction_outputs(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, variant="mean_linear", seed=33)
+    output_dir = tmp_path / "analysis"
+
+    result = analyze_runs([run_dir], output_dir=output_dir, plot_policy="off")
+
+    outputs = result["analysis_manifest"]["outputs"]
+    assert set(outputs) == {
+        "age_group_metrics.csv",
+        "analysis_spec.json",
+        "complexity_metrics.csv",
+        "per_run_metrics.csv",
+    }
+    assert result["analysis_manifest"]["plot_policy"] == "off"
+    assert result["analysis_manifest"]["software"]["python"]
+    assert result["analysis_manifest"]["software"]["numpy"]
 
 
 def test_complexity_adjusted_comparison_is_null_for_nonpositive_parameter_delta(

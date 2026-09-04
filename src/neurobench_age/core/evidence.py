@@ -652,6 +652,7 @@ class EvidenceRecorder:
         task: str,
         dataset_manifest: str,
         split_fingerprint: str,
+        encoder_checkpoint: str,
         seed: int,
         resolved_config: Mapping[str, Any],
         command_line: str,
@@ -664,6 +665,8 @@ class EvidenceRecorder:
             raise ValueError(f"unsupported evaluation mode: {evaluation_mode}")
         if deterministic_policy not in _DETERMINISTIC_POLICIES:
             raise ValueError(f"unsupported deterministic policy: {deterministic_policy}")
+        if not isinstance(encoder_checkpoint, str) or not encoder_checkpoint.strip():
+            raise ValueError("encoder_checkpoint must be a non-empty string")
         comparison_factor_keys = _comparison_factor_keys(resolved_config)
         self.run_dir = Path(run_dir)
         self.run_id = run_id
@@ -683,6 +686,7 @@ class EvidenceRecorder:
             "task": task,
             "dataset_manifest": dataset_manifest,
             "split_fingerprint": split_fingerprint,
+            "encoder_checkpoint": encoder_checkpoint,
             "seed": seed,
             "config_hash": sha256_json(resolved_config),
             "protocol_digest": sha256_json(resolved_config.get("protocol", {})),

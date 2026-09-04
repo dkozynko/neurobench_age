@@ -9,8 +9,18 @@ MANIFEST="${MANIFEST:?Set MANIFEST to the canonical manifest}"
 DATA_ROOT="${DATA_ROOT:?Set DATA_ROOT to the prepared HBN root}"
 PHASE="${PHASE:-baseline}"
 HEAD_VARIANT="${HEAD_VARIANT:-mean_linear}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/results/canonical/runs/$PHASE}"
+OUTPUT_ROOT="${OUTPUT_ROOT:?Set OUTPUT_ROOT to an external, untracked run directory}"
 SEEDS_TEXT="${SEEDS:-33 34 35}"
+
+OUTPUT_ROOT_ABS="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$OUTPUT_ROOT")"
+CANONICAL_RESULTS_ABS="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$REPO_ROOT/results/canonical")"
+case "$OUTPUT_ROOT_ABS/" in
+  "$CANONICAL_RESULTS_ABS/"*)
+    echo "OUTPUT_ROOT must be outside results/canonical: $OUTPUT_ROOT_ABS" >&2
+    exit 2
+    ;;
+esac
+OUTPUT_ROOT="$OUTPUT_ROOT_ABS"
 
 case "$PHASE" in
   baseline|screen)
@@ -48,7 +58,7 @@ exec "$PYTHON_BIN" -m neurobench_age.pipelines.official \
   --manifest "$MANIFEST" \
   --data-root "$DATA_ROOT" \
   --output-dir "$OUTPUT_ROOT" \
-  --config "$CONFIG" \
+  --phase-config "$CONFIG" \
   --head-variant "$HEAD_VARIANT" \
   --evaluation-protocol strict \
   --deterministic \
