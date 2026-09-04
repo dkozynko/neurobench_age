@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "claim": "Increasing representation-head complexity does not guarantee a stable age-probing improvement.",
+  "baseline": "mean_linear",
+  "accepted_or_completed": [
+    {
+      "name": "positions_fixed_head_comparison",
+      "source": "head_comparison.json",
+      "interpretation": "mean_rich_stats_residual is the best completed historical candidate, but the gain is modest and below the predeclared strict five-percent target."
+    },
+    {
+      "name": "augmentation_consistency_finalist",
+      "source": "finalist/final_comparison.json",
+      "interpretation": "The matched test gain is positive on average but mixed across seeds; it is not a new state-of-the-art claim."
+    }
+  ],
+  "rejected_or_inconclusive": [
+    {
+      "name": "mean_layer_linear",
+      "source": "layer_selection.json",
+      "interpretation": "A small validation/test signal was not uniform across seeds and remained inconclusive."
+    },
+    {
+      "name": "mean_layer_mix_last2",
+      "source": "layer_mix_confirmation.json",
+      "interpretation": "The candidate won two validation seeds but did not establish a reliable promotion case."
+    },
+    {
+      "name": "multi_query_rich_stats",
+      "source": "multi_query_confirmation.json",
+      "interpretation": "The seed-33 screen did not replicate on the held-back confirmation seeds."
+    },
+    {
+      "name": "two_stage_multi_query",
+      "source": "two_stage_multi_query_screen.json",
+      "interpretation": "All tested schedules were below their matched mean_linear controls."
+    }
+  ],
+  "raw_evidence_policy": "The referenced compact records preserve decisions and metrics; raw checkpoints, predictions, and logs are external."
+}

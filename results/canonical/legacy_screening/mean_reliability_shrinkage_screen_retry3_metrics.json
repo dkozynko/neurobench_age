@@ -1,0 +1,81 @@
+{
+  "run_id": "strict-mean-reliability-shrinkage-screen-retry3-20260825",
+  "card_id": "proj_reliability_shrinkage_gate",
+  "head_variant": "mean_reliability_shrinkage",
+  "head_architecture": "mean_linear_input_conditioned_reliability_shrinkage",
+  "evaluation_protocol": "strict",
+  "strict_final_test": false,
+  "test_status": "withheld",
+  "test_evaluations": 0,
+  "seed": 33,
+  "dataset": {
+    "manifest": "age_medium_500_resting_manifest.csv",
+    "manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+    "rows": 500,
+    "positions_fixed": true
+  },
+  "selection": {
+    "monitor": "val/pearsonr",
+    "mode": "max",
+    "selected_epoch": 1,
+    "selected_val_pearsonr": 0.6021367907524109,
+    "validation_history": [
+      {"epoch": 1, "val/pearsonr": 0.6021367907524109}
+    ]
+  },
+  "gate_audit": {
+    "validation_gate_mean": 0.009022699465664724,
+    "validation_gate_std": 0.0000005128886031182485,
+    "validation_low_saturation_fraction": 0.0,
+    "validation_high_saturation_fraction": 0.0,
+    "validation_combined_saturation_fraction": 0.0,
+    "validation_nonfinite_count": 0,
+    "training_eta_squared": 0.8478137100664233,
+    "training_eta_valid": true,
+    "training_eta_group_count": 150,
+    "training_eta_sample_count": 371,
+    "training_fixed_state_replay": true,
+    "early_stop_reasons": [
+      "validation_gate_std_below_floor",
+      "training_identity_proxy_above_threshold"
+    ]
+  },
+  "comparison": {
+    "strict_mean_linear_seed33_val_pearsonr": 0.5894968509674072,
+    "strict_mean_rich_stats_seed33_val_pearsonr": 0.6415786147117615,
+    "delta_vs_mean_linear": 0.012639939785003662,
+    "delta_percent_vs_mean_linear": 2.144191230921866,
+    "delta_vs_mean_rich_stats": -0.039441823959350586,
+    "delta_percent_vs_mean_rich_stats": -6.14762136002155
+  },
+  "provenance": {
+    "remote_host": "root@175.155.64.231:19338",
+    "source_dir": "<external-workspace>/neurobench_age_h2_reliability_20260825_v1",
+    "remote_output_dir": "<external-workspace>/hbn_subset/external-results/reve_head_experiments_reliability_shrinkage_screen_retry3_20260825",
+    "source_files_sha256": {
+      "reve_contract.py": "eeb9f4d037feb89aa6f0db36a84ab18ca5b0f43623c03f99bd0103159914af8c",
+      "reve_head_math.py": "c53b596d83c4116f1b789db7a1d7ea412f922ee92ed9934ba0395b276502ebdd",
+      "reve_upstream_heads.py": "d9d0631a6bca45f56465337e5d28eafe103080926b9f6ce36ab0fda55e80b72a",
+      "reve_last_tuned.py": "5c4c1b683f930dd7594a23e746b883da136a82541c21e50177021901f781962e",
+      "official_reve_runtime.py": "23e9618aa6ca8fc053fd7f66b3d34c033632b1a40c5f7eb40d1a02ef204d0ee6",
+      "official_reve_subset.py": "44b4994cc2abc0ae6d5d4b31fff932c74c3b54ccb846ae72a07a820fc7b51afc",
+      "selective_hbn_download.py": "a8673ce2f6bd74c813de58ff5b903a89b0edd6e9b1564a972eb4bff172428f48"
+    },
+    "supervisor_config_sha256": "f52a7aa3f7f0c4853a408a1df48f80aeaa5c9a2e9ac743f8d6ef21af4d4ca698",
+    "remote_artifacts_sha256": {
+      "summary.json": "47f639652a9296a960e71cc07aa682865569a12ac88f49e11238e3f301eba525",
+      "report.json": "bd5ec82b2069286acb343842fec9631ac78f25c80afec64685c388cd2c65efb1",
+      "selection.json": "2b88a4df3d7e8720eea4e3488fcb0a456c9d9a6115953abca7053fd2f0b0ef9e",
+      "config.yaml": "a6f312d13482a208bdec409c7b14969ac933fa338e7ce13d4eb385c696670781",
+      "run_metadata.json": "b1fedfb44e587a7b1b468c168c66cd7c5dd3eeada468e3bc41b955dec740e144",
+      "best.ckpt": "6da3d65170cf13ab9a5c6e441c5daa780f90cc67df6b9b7feb753deb9406a77b",
+      "epoch_validation_metrics.jsonl": "ffcdc8863e5451c6d0876775ff6939b34af270b0e54261584ace99849c27799d",
+      "gate_validation_audit.jsonl": "6a7d5e90ceb520010b8b5fafe9e65ae6be4adcd278b7c430bb13e583d029e5d2"
+    }
+  },
+  "decision": {
+    "outcome": "rejected",
+    "reason": "The seed-33 strict validation screen was stopped by the predeclared safeguards: validation gate standard deviation was below 1e-3 and the fixed-state training-only identity proxy eta_squared exceeded 0.50. The selected validation score was below the matched mean_rich_stats reference, so seeds 34/35 confirmation and a strict final test are not justified.",
+    "next_step": "Do not promote or run confirmation seeds; choose a different catalog head after coordination."
+  }
+}

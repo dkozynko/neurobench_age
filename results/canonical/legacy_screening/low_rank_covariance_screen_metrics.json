@@ -1,0 +1,76 @@
+{
+  "run_id": "strict-low-rank-covariance-screen-20260825",
+  "card_id": "proj_low_rank_covariance",
+  "head_variant": "mean_covariance_residual",
+  "evaluation_protocol": "strict",
+  "integrity_status": "clean",
+  "screen_status": "completed_rejected",
+  "seed": 33,
+  "frozen_config": {
+    "covariance_mode": "diagonal",
+    "covariance_features": "diagonal_sample_variance",
+    "projection_rank": 4,
+    "correction_scale": 0.5,
+    "factorization": "down_then_up",
+    "up_initialization": "zero",
+    "channel_positions": "fixed",
+    "strict_final_test": false
+  },
+  "validation_history": [
+    {"epoch": 1, "val_pearsonr": 0.5865072011947632},
+    {"epoch": 2, "val_pearsonr": 0.6232912540435791},
+    {"epoch": 3, "val_pearsonr": 0.5032494068145752},
+    {"epoch": 4, "val_pearsonr": 0.553730309009552},
+    {"epoch": 5, "val_pearsonr": 0.5707223415374756},
+    {"epoch": 6, "val_pearsonr": 0.5080210566520691},
+    {"epoch": 7, "val_pearsonr": 0.4652784466743469},
+    {"epoch": 8, "val_pearsonr": 0.48233872652053833},
+    {"epoch": 9, "val_pearsonr": 0.44359564781188965}
+  ],
+  "selection": {
+    "selected_epoch": 2,
+    "selected_val_pearsonr": 0.6232912540435791,
+    "selection_monitor": "val/pearsonr",
+    "selection_mode": "max",
+    "checkpoint_sha256": "546064b0840c72596e1d21e314f58dfea842cb2ae761252f95751cf5345565ab",
+    "validation_history_sha256": "d058a96b474691b781300c4dcfc36ffd40c6d47ee16447757913659caf73c1e8",
+    "official_config_sha256": "2a2ea107cb0c14d03c8610bc3730a78afb1380750ac05dcf57c87fb6f7644d0a"
+  },
+  "matched_baseline": {
+    "run_id": "strict-mean-rich-stats-20260824-v1",
+    "selected_val_pearsonr": 0.6415786147117615,
+    "delta_val_pearsonr": -0.018287360668182373
+  },
+  "mean_linear_reference": {
+    "run_id": "strict-mean-linear-20260824-v3",
+    "selected_val_pearsonr": 0.5894968509674072,
+    "delta_val_pearsonr": 0.0337944030761719
+  },
+  "provenance": {
+    "remote_host": "root@175.155.64.231:19338",
+    "dataset_manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+    "input_config_sha256": "a8f8e6690aa120f11634c80abfc952b9c84354e0cb36fe01cc7bdf635ba4e60d",
+    "source_tree": "<external-workspace>/neurobench_age_low_rank_covariance_20260825_v1",
+    "output_dir": "<external-workspace>/hbn_subset/external-results/reve_head_experiments_low_rank_covariance_screen_20260825",
+    "source_file_sha256": {
+      "reve_contract.py": "92c72edbecc7c5e568ab76c98d7025417f7c22119630fefebd1a25bbae1189bb",
+      "reve_head_math.py": "42f2caff825f27584045b7a7e367ca4d0283ff6a35b907464c56681b47d0bc8c",
+      "reve_upstream_heads.py": "cdae3ab9738f4adfda1ef8b2ba6991107dd6f53be8acd2ade721d2b31769d0a5",
+      "reve_last_tuned.py": "5c4c1b683f930dd7594a23e746b883da136a82541c21e50177021901f781962e",
+      "official_reve_runtime.py": "0783daa1f9e7dc570a723ff763cd14ddc4374e4ae28c50ea3b6851ac1437e9c1",
+      "official_reve_subset.py": "dc672a78b4e9706541065022943919ad43e24457a2a9630c9fd69d620cba6537"
+    }
+  },
+  "audit": {
+    "checkpoint_hash_match": true,
+    "validation_history_hash_match": true,
+    "manifest_hash_match": true,
+    "official_config_hash_match": true,
+    "failure_json_present": false,
+    "test_markers": [],
+    "test_evaluations": 0,
+    "test_status": "withheld"
+  },
+  "decision": "rejected",
+  "conclusion": "The clean validation-only screen exceeded the strict mean_linear reference but remained below the matched strict mean_rich_stats reference; no confirmation or strict test is justified."
+}

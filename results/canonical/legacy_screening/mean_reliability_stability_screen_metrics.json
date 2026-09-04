@@ -1,0 +1,81 @@
+{
+  "run_id": "strict-mean-reliability-stability-screen-20260825",
+  "card_id": "proj_stability_gate",
+  "head_variant": "mean_reliability_stable",
+  "matched_control": "mean_reliability_shrinkage",
+  "evaluation_protocol": "strict",
+  "strict_final_test": false,
+  "seed_set": [33],
+  "selected_epoch_by_seed": {
+    "33": 1
+  },
+  "selected_val_pearson_by_seed": {
+    "33": 0.6021367907524109
+  },
+  "gate_consistency_by_seed": {
+    "33": 3.1483098824706495e-17
+  },
+  "weighted_gate_consistency_by_seed": {
+    "33": 3.148309882470649e-20
+  },
+  "lambda_gate": 0.001,
+  "noise_scale": 0.01,
+  "augmentation": "identity_plus_bounded_gaussian_noise",
+  "noise_seed_rule": "run_seed+1009*one_based_epoch+batch_idx",
+  "training_batch_count_by_seed": {
+    "33": 375
+  },
+  "training_sample_count_by_seed": {
+    "33": 24000
+  },
+  "validation_gate_mean_by_seed": {
+    "33": 0.009022699465664724
+  },
+  "validation_gate_std_by_seed": {
+    "33": 5.128886031182485e-07
+  },
+  "training_gate_mean_by_seed": {
+    "33": 0.009022733545862138
+  },
+  "training_gate_std_by_seed": {
+    "33": 4.175208535432887e-07
+  },
+  "training_identity_eta_squared_by_seed": {
+    "33": 0.8478137100664233
+  },
+  "early_stop_reasons_by_seed": {
+    "33": [
+      "validation_gate_std_below_floor",
+      "training_identity_proxy_above_threshold"
+    ]
+  },
+  "test_status": "withheld",
+  "test_evaluations_by_seed": {
+    "33": 0
+  },
+  "decision": "rejected",
+  "decision_reason": "The gate-consistency penalty was finite but effectively zero because the gate remained near-constant; validation matched the H2 control and the existing gate-degeneracy early-stop criteria fired. No seeds 34/35 confirmation or strict test is justified.",
+  "remote_output_dir": "<external-workspace>/hbn_subset/external-results/reve_head_experiments_h6_gate_stability_screen_20260825",
+  "remote_source_tree": "<external-workspace>/neurobench_age_h6_gate_stability_20260825_v1",
+  "remote_supervisor_config": "/etc/supervisor/conf.d/neurobench-h6-gate-stability-screen-20260825.conf",
+  "source_file_sha256": {
+    "official_reve_runtime.py": "8d59ed9a8ca78a784419d081e7e0d09b3904b153c4767a6fcfd701446cbbe5f1",
+    "official_reve_subset.py": "539bb7adfe1a7c59130b71656c97e73b1b282112135006bfabf77a97b8a91c06",
+    "reve_contract.py": "c18396b280c975c70d9ea28aabc23a6e6eae7e930336975bbd49b96c59905098",
+    "reve_head_math.py": "9223e0445fea1402bf617f025215890f3150f8f5b49214ead393bd82c83e9341",
+    "reve_upstream_heads.py": "d9d0631a6bca45f56465337e5d28eafe103080926b9f6ce36ab0fda55e80b72a",
+    "reve_last_tuned.py": "5c4c1b683f930dd7594a23e746b883da136a82541c21e50177021901f781962e",
+    "selective_hbn_download.py": "a8673ce2f6bd74c813de58ff5b903a89b0edd6e9b1564a972eb4bff172428f48"
+  },
+  "dataset_manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+  "resolved_config_sha256": "b78abbdcba79d2e3bb6b537e189547890a1378535c92006cc6457a2e2f8714cd",
+  "official_config_sha256": "ddff6ca343f6bd7e69e9ca6ef8eaa9ac4323759f613128f1e21be1fdb3c45ebc",
+  "supervisor_config_sha256": "c6466bd3017a7905db2b6d5002f2511d5870727d88de81e8a2a02184ba2fa659",
+  "checkpoint_sha256": "6da3d65170cf13ab9a5c6e441c5daa780f90cc67df6b9b7feb753deb9406a77b",
+  "selection_sha256": "3aa08eb98bc3a5450d5da02ed63d6691baf8085a71801ee4d0bb87c877e72683",
+  "validation_history_sha256": "ffcdc8863e5451c6d0876775ff6939b34af270b0e54261584ace99849c27799d",
+  "gate_consistency_sha256": "5fc7c8750752b4b01539429842c31a6b4f9defc28b9f6e57ea4d080554713a2b",
+  "gate_audit_sha256": "6a7d5e90ceb520010b8b5fafe9e65ae6be4adcd278b7c430bb13e583d029e5d2",
+  "report_sha256": "ea4f917118bec3924bf3eedf586843d3f8c53a9538d9264368a8af231cf7a7ed",
+  "summary_sha256": "8d1168d7126b5bdf7f41581eaac02d8221e9d8dc661b295823aa77e4ebce7d95"
+}

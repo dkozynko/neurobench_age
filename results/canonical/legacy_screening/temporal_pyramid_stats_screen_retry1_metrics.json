@@ -1,0 +1,72 @@
+{
+  "run_id": "strict-temporal-pyramid-stats-screen-20260825-retry1",
+  "card_id": "proj_temporal_pyramid_stats",
+  "head_variant": "temporal_pyramid_stats",
+  "evaluation_protocol": "strict",
+  "integrity_status": "clean",
+  "screen_status": "completed_rejected",
+  "seed": 33,
+  "frozen_config": {
+    "segments": 2,
+    "statistics": ["std", "range", "mad", "mean_abs"],
+    "correction_rank": 8,
+    "correction_scale": 0.5,
+    "factorization": "down_then_up",
+    "up_initialization": "zero",
+    "channel_positions": "fixed",
+    "strict_final_test": false
+  },
+  "validation_history": [
+    {"epoch": 1, "val_pearsonr": 0.5745024681091309},
+    {"epoch": 2, "val_pearsonr": 0.5612038969993591},
+    {"epoch": 3, "val_pearsonr": 0.08820263296365738},
+    {"epoch": 4, "val_pearsonr": 0.5323775410652161},
+    {"epoch": 5, "val_pearsonr": 0.5833930969238281},
+    {"epoch": 6, "val_pearsonr": 0.5985115766525269},
+    {"epoch": 7, "val_pearsonr": 0.5365643501281738},
+    {"epoch": 8, "val_pearsonr": 0.5265862941741943},
+    {"epoch": 9, "val_pearsonr": 0.442338764667511},
+    {"epoch": 10, "val_pearsonr": 0.45686888694763184},
+    {"epoch": 11, "val_pearsonr": 0.5081416368484497},
+    {"epoch": 12, "val_pearsonr": 0.4992394745349884},
+    {"epoch": 13, "val_pearsonr": 0.4052598476409912}
+  ],
+  "selection": {
+    "selected_epoch": 6,
+    "selected_val_pearsonr": 0.5985115766525269,
+    "selection_monitor": "val/pearsonr",
+    "selection_mode": "max",
+    "checkpoint_sha256": "ba3059379fa3b909f8176667d4753b89a38a2270e2d64e84e1fa256cbd7d4504",
+    "selection_sha256": "113daa87579efe0cde05ba689c8ffd580cab066787f9895293b24de6a8033aa3",
+    "validation_history_sha256": "63aee4336b7d4b8242ab3aec9e5f9ddfc1578b8cbcd3657551bd8f0959fab35c"
+  },
+  "matched_baseline": {
+    "run_id": "strict-mean-rich-stats-20260824-v1",
+    "selected_val_pearsonr": 0.6415786147117615,
+    "delta_val_pearsonr": -0.04306703805923462
+  },
+  "mean_linear_reference": {
+    "run_id": "strict-mean-linear-20260824-v3",
+    "selected_val_pearsonr": 0.5894968509674072,
+    "delta_val_pearsonr": 0.009014725685119629
+  },
+  "provenance": {
+    "dataset_manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+    "input_config_sha256": "a8f8e6690aa120f11634c80abfc952b9c84354e0cb36fe01cc7bdf635ba4e60d",
+    "official_config_sha256": "255369976db471d2cebe2e85932f39581c553e8fd99b9e819729b4f0fc1bfeb4",
+    "source_tree": "<external-workspace>/neurobench_age_temporal_pyramid_stats_20260825_v1",
+    "output_dir": "<external-workspace>/hbn_subset/external-results/reve_head_experiments_temporal_pyramid_stats_screen_20260825_retry1"
+  },
+  "audit": {
+    "checkpoint_hash_match": true,
+    "validation_history_hash_match": true,
+    "manifest_hash_match": true,
+    "official_config_hash_match": true,
+    "failure_json_present": false,
+    "test_markers": [],
+    "test_evaluations": 0,
+    "test_status": "withheld"
+  },
+  "decision": "rejected",
+  "conclusion": "The clean validation-only retry exceeded the mean_linear reference but remained below the matched mean_rich_stats baseline; no confirmation or strict test is justified."
+}

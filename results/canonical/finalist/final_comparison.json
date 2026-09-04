@@ -1,0 +1,113 @@
+{
+  "schema_version": "1.0",
+  "run_id": "article-ready-medium-lambda-sealed-final-1000-20260904",
+  "candidate": {
+    "name": "medium_lambda_augmentation_consistency",
+    "head_variant": "mean_linear",
+    "augmentation_consistency": true,
+    "augmentation_consistency_lambda": 0.02,
+    "augmentation_noise_scale": 0.005,
+    "data_mode": "manifest",
+    "manifest": "age_medium_1000_nested_20260826.csv",
+    "manifest_sha256": "a5542dcbd49c0d6e0e591594c777bb66fb6cf80b61ac63f6639928d48225a7ac"
+  },
+  "matched_validation_gate": {
+    "status": "passed",
+    "per_seed": {
+      "33": {
+        "candidate_selected_val_pearsonr": 0.7408146858215332,
+        "baseline_selected_val_pearsonr": 0.72819584608078,
+        "delta": 0.012618839740753174
+      },
+      "34": {
+        "candidate_selected_val_pearsonr": 0.7605857253074646,
+        "baseline_selected_val_pearsonr": 0.7434700131416321,
+        "delta": 0.01711571216583252
+      },
+      "35": {
+        "candidate_selected_val_pearsonr": 0.714428186416626,
+        "baseline_selected_val_pearsonr": 0.7145267128944397,
+        "delta": -0.0000985264778137207
+      }
+    },
+    "mean_delta": 0.00987867514292399,
+    "wins": 2,
+    "losses": 1,
+    "worst_seed_delta": -0.0000985264778137207,
+    "test_status_before_final": "withheld"
+  },
+  "sealed_final_test": {
+    "evaluation_mode": "final_test",
+    "test_access": "single_use_predeclared",
+    "test_evaluations_per_seed": 1,
+    "candidate_official_test_pearsonr_by_seed": {
+      "33": 0.6074494123458862,
+      "34": 0.6039036512374878,
+      "35": 0.5454193353652954
+    },
+    "matched_baseline_official_test_pearsonr_by_seed": {
+      "33": 0.5748500823974609,
+      "34": 0.5940768122673035,
+      "35": 0.5637577772140503
+    },
+    "official_test_delta_by_seed": {
+      "33": 0.03259932994842529,
+      "34": 0.009826838970184326,
+      "35": -0.018338441848754883
+    },
+    "candidate_mean_test_pearsonr": 0.5855907996495565,
+    "candidate_sample_sd_test_pearsonr": 0.03483465246727323,
+    "baseline_mean_test_pearsonr": 0.5775615572929382,
+    "baseline_sample_sd_test_pearsonr": 0.015340307810526534,
+    "mean_official_test_delta": 0.008029242356618246,
+    "sample_sd_of_test_delta": 0.025516419500083258,
+    "wins": 2,
+    "losses": 1,
+    "worst_seed_delta": -0.018338441848754883
+  },
+  "subject_level_export_diagnostics": {
+    "candidate_export_pearsonr_by_seed": {
+      "33": 0.6638211878541358,
+      "34": 0.6490369427248613,
+      "35": 0.6075888557142689
+    },
+    "metric_definition": "subject-level arithmetic mean export",
+    "official_metric_definition": "official NeuralBench test metric",
+    "reconciliation": "The official metric and subject-level export are retained separately because they aggregate different prediction units; they must not be compared as if they were the same statistic.",
+    "paired_test_bootstrap_claim": false
+  },
+  "complexity": {
+    "head_variant": "mean_linear",
+    "head_parameters": 513,
+    "head_trainable_parameters": 513,
+    "encoder_parameters": 69718019,
+    "total_parameters_after_external_head_normalization": 69718532,
+    "encoder_frozen": false,
+    "hardware_class": "NVIDIA GeForce RTX 5090/32109MB",
+    "audit_note": "The runtime artifact exposed the external head separately; the audit normalized the parameter buckets using the declared head complexity contract and recorded a warning.",
+    "train_seconds_by_seed": {
+      "33": 1552.947667834931,
+      "34": 1750.9639880120521,
+      "35": 1553.0928896460682
+    },
+    "samples_per_second_by_seed": {
+      "33": 247.27169366586594,
+      "34": 246.72123639188544,
+      "35": 247.2485725483613
+    }
+  },
+  "evidence_audit": {
+    "local_audit_status": "complete",
+    "seeds": [33, 34, 35],
+    "run_manifests_completed": true,
+    "selection_records_present": true,
+    "test_started_records_present": true,
+    "test_completed_records_present": true,
+    "exactly_one_test_evaluation_per_seed": true,
+    "failure_records_present": false,
+    "checkpoint_integrity_verified": true,
+    "remote_analyzer_status": "failed_on_metric_definition_mismatch_before_local_audit_fix",
+    "local_analysis_outputs": "analysis/",
+    "interpretation": "The candidate improves the matched three-seed official test mean by 0.00803 Pearson, but the gain is mixed across seeds and the candidate remains below the official 0.721 reference value. This is evidence of a modest matched-control gain, not a new official state of the art."
+  }
+}

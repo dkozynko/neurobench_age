@@ -1,0 +1,59 @@
+{
+  "added_rows": 500,
+  "added_subjects_sha256": "2d5384805e791535bc1d0023b491dedeeca6fa14eacb24a2d89f9abe3383ac57",
+  "base_manifest": "data/age_medium_500_resting.csv",
+  "base_manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+  "base_rows": 500,
+  "candidate_count": 2597,
+  "claim_scope": "screening_only_not_official_full_data_improvement",
+  "data_mode": "historical_1000_subject_nested_screening",
+  "eligible_unique_additions": 2084,
+  "nested_base_subjects": true,
+  "openneuro_snapshots": {
+    "R1": "ds005505:1.0.1",
+    "R10": "ds005515:1.0.1",
+    "R2": "ds005506:1.0.1",
+    "R3": "ds005507:1.0.1",
+    "R4": "ds005508:1.0.1",
+    "R5": "ds005509:1.0.1",
+    "R6": "ds005510:1.0.1",
+    "R7": "ds005511:1.0.1",
+    "R8": "ds005512:1.0.1",
+    "R9": "ds005514:1.0.1"
+  },
+  "output_manifest": "data/age_medium_1000_nested.csv",
+  "output_manifest_sha256": "a5542dcbd49c0d6e0e591594c777bb66fb6cf80b61ac63f6639928d48225a7ac",
+  "release_counts": {
+    "R1": 100,
+    "R10": 100,
+    "R2": 100,
+    "R3": 100,
+    "R4": 100,
+    "R5": 100,
+    "R6": 100,
+    "R7": 100,
+    "R8": 100,
+    "R9": 100
+  },
+  "release_to_split": {
+    "R1": "train",
+    "R10": "train",
+    "R2": "train",
+    "R3": "train",
+    "R4": "train",
+    "R5": "test",
+    "R6": "train",
+    "R7": "train",
+    "R8": "val",
+    "R9": "train"
+  },
+  "schema_version": 1,
+  "selection_rule": "per-release sort by subject and recording path; midpoint indices",
+  "selection_source": "openneuro_metadata_sidecars",
+  "split_counts": {
+    "test": 100,
+    "train": 800,
+    "val": 100
+  },
+  "target_subjects": 1000
+}

@@ -1,0 +1,88 @@
+{
+  "run_id": "strict-mean-rich-stats-20260824-v1",
+  "card_id": "strict_mean_rich_stats_reference",
+  "evaluation_protocol": "strict",
+  "strict_final_test": true,
+  "test_status": "completed",
+  "test_evaluations_per_seed": 1,
+  "head_variant": "mean_rich_stats_residual",
+  "head_source": "reve_head_math.py",
+  "head_formula": "r = mean(X) + 0.5 * Linear_zero(rich_stats(X)); y = Linear_baseline(r)",
+  "dataset": {
+    "manifest_path": "<external-workspace>/hbn_subset/age_medium_500_resting_manifest.csv",
+    "manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+    "rows": 500,
+    "positions_fixed": true
+  },
+  "selection": {
+    "monitor": "val/pearsonr",
+    "mode": "max",
+    "epoch_rule": "highest validation Pearson; one-based epoch shown",
+    "selected_epoch_by_seed": {
+      "33": 2,
+      "34": 1,
+      "35": 1
+    },
+    "selected_val_pearson_by_seed": {
+      "33": 0.6415786147117615,
+      "34": 0.6530987620353699,
+      "35": 0.6527953743934631
+    },
+    "mean_selected_val_pearson": 0.6491575837135315
+  },
+  "strict_test": {
+    "test_pearson_by_seed": {
+      "33": 0.5811474323272705,
+      "34": 0.617570161819458,
+      "35": 0.6679019927978516
+    },
+    "mean_test_pearson": 0.6222065289815267,
+    "sample_sd_test_pearson": 0.043562717614458554,
+    "delta_vs_strict_mean_linear": 0.0248246987660726,
+    "delta_percent_vs_strict_mean_linear": 4.155583164810897,
+    "strict_five_percent_target": 0.627250921726227,
+    "strict_target_gap": -0.00504439274470014,
+    "checkpoint_rehashed_after_test": true,
+    "selection_frozen_before_test": true,
+    "single_use_markers_verified": true,
+    "failure_json_present": false
+  },
+  "provenance": {
+    "remote_host": "root@175.155.64.231:19338",
+    "data_root": "<external-workspace>/neurobench_data_hl2",
+    "output_dir": "<external-workspace>/hbn_subset/external-results/reve_head_experiments_strict_mean_rich_stats_20260824_v1",
+    "source_dir": "<external-workspace>/neurobench_age_strict_20260824_rich_stats_v1",
+    "source_files_sha256": {
+      "official_reve_subset.py": "b02487d74868a436e2cc8f6f1c4d95547ab91b4cea1c3c367caecc0451218f4d",
+      "official_reve_runtime.py": "dd88f0477d9ab82a7cb8addf60703eb19de65ca91abc48202f6f6e46f162f1e0",
+      "reve_upstream_heads.py": "dad911e184fbeeccbb48ecce13886d43976584ba72a1ab4b2f676f077be8e967",
+      "reve_head_math.py": "816f559fd3869097f2e221abee5c9a8be78633fcb756def16e6bb228c02156d3"
+    },
+    "remote_artifacts": {
+      "summary.json": "b20e0b293a5776b3b7bd4e7c09f032459076a5e1a52e4831e8e94c6e447cd0fe",
+      "seed33": {
+        "selection.json": "579f7c4ad5f87f944cc8f9f0eb4229f61bca056e4c74dd0cd95627ea2cf50761",
+        "report.json": "681962afa3f6374839ad68e7ab272110dd9681cfec4fcdd1dbf024874ebc1e",
+        "test_started.json": "56c6fb4e954737862b1568a5e4f2e683b3333d54c1205d2ef3f17796ecaf6f17",
+        "test_completed.json": "c775de806016f7b4e01fcb6183f84ddba9206b9880a8cdf538b88c5b16410630",
+        "epoch_validation_metrics.jsonl": "fe11c952abfe3b77809cd12a4556eafa6b7333cb94dafd233059aa37617ee6d1"
+      },
+      "seed34": {
+        "selection.json": "4db4c1fadf85c57f5a10dc8d3cb2af56356b1c31a27b81a2bea68c4bf6fc5b8c",
+        "report.json": "c94e3bdff146bcca67b2765e24656649dd27f30dbf0b8f5df295412bb2a589b3",
+        "test_started.json": "6344f6546b1cca3ae2546e5b4c3e49e921b76d93a62cf885b6df42e3ee2b1f5f",
+        "test_completed.json": "97d0590ba58eadd312f4bad131742b954278efe33cf6f656ac459eb91e250276",
+        "epoch_validation_metrics.jsonl": "1fa0c6490badc3186a3d8275c91e459af7668a0fc567d4eb47a3a5b8609ff1ac"
+      },
+      "seed35": {
+        "selection.json": "1fd10135e92d07554678027c6f53974fc2ed4ce00c4c6ef416d3e1e243caa948",
+        "report.json": "dd89e1b0599a5c3b2304f6df10bb10a73a78bac279bd2b8c9cdc02a12f7f9fc0",
+        "test_started.json": "38ec7150b6f8a6d82a8c09496081025c80fefb7b3a0654ce4fa8c72ef37a2c6d",
+        "test_completed.json": "8736939db45fdec0b617066cf9a93d3d29ba2a0eed29ae7048893f90172e8ece",
+        "epoch_validation_metrics.jsonl": "3a3ec515695712f690bac0f9f712b6dffbd6bdc1208bc21db8d080d4bf098485"
+      }
+    },
+    "raw_checkpoints_copied_to_repository": false,
+    "raw_test_predictions_copied_to_repository": false
+  }
+}

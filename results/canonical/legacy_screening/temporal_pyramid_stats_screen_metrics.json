@@ -1,0 +1,54 @@
+{
+  "run_id": "strict-temporal-pyramid-stats-screen-20260825-v1",
+  "card_id": "proj_temporal_pyramid_stats",
+  "head_variant": "temporal_pyramid_stats",
+  "evaluation_protocol": "strict",
+  "integrity_status": "contaminated_post_restart_duplicate",
+  "screen_status": "invalid_due_post_restart_duplicate",
+  "seed": 33,
+  "frozen_config": {
+    "segments": 2,
+    "statistics": ["std", "range", "mad", "mean_abs"],
+    "correction_rank": 8,
+    "correction_scale": 0.5,
+    "factorization": "down_then_up",
+    "up_initialization": "zero",
+    "channel_positions": "fixed",
+    "strict_final_test": false
+  },
+  "selection": {
+    "selected_epoch": 1,
+    "selected_val_pearsonr": 0.5745024681091309,
+    "selection_monitor": "val/pearsonr",
+    "selection_mode": "max",
+    "checkpoint_sha256": "3d0cfb974df2d949c53f785c34780565e76af6640471547b3aabbdadb471469d",
+    "selection_sha256": "440ac71831d1b5065fb3564606b5b94d1fbbc1337a4a19e869340b2ea1d72ca2",
+    "validation_history_sha256": "26a09ea09c468e1b1ce472289a40d4f4eca800a12d20f784f2caf445f130f6fe"
+  },
+  "matched_baseline": {
+    "run_id": "strict-mean-rich-stats-20260824-v1",
+    "selected_val_pearsonr": 0.6415786147117615,
+    "delta_val_pearsonr": -0.0670761466026306
+  },
+  "mean_linear_reference": {
+    "run_id": "strict-mean-linear-20260824-v3",
+    "selected_val_pearsonr": 0.5894968509674072,
+    "delta_val_pearsonr": -0.0149943828582763
+  },
+  "provenance": {
+    "dataset_manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+    "input_config_sha256": "a8f8e6690aa120f11634c80abfc952b9c84354e0cb36fe01cc7bdf635ba4e60d",
+    "official_config_sha256": "d754622628e6eb033f5837513c5fb1f09f492502ecbcfe3a218db604551cd60f",
+    "source_tree": "<external-workspace>/neurobench_age_temporal_pyramid_stats_20260825_v1",
+    "output_dir": "<external-workspace>/hbn_subset/external-results/reve_head_experiments_temporal_pyramid_stats_screen_20260825"
+  },
+  "test_status": "withheld",
+  "test_evaluations": 0,
+  "test_markers": [],
+  "post_restart_failure": {
+    "error_type": "OutOfMemoryError",
+    "cause": "Supervisor autostart reran the completed output after a host restart while strict-mean-linear-20260824-v2 occupied the GPU.",
+    "clean_final_audit": false
+  },
+  "conclusion": "The first validation screen was below the matched baseline; the shared output tree was later contaminated by an automatic post-restart OOM rerun. No confirmation or strict test was run."
+}

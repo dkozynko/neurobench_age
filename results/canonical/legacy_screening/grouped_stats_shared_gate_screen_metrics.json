@@ -1,0 +1,43 @@
+{
+  "run_id": "strict-grouped-stats-shared-gate-screen-20260824-v1",
+  "head_variant": "grouped_stats_shared_gate",
+  "evaluation_protocol": "strict",
+  "strict_final_test": false,
+  "test_status": "withheld",
+  "test_evaluations": 0,
+  "test_metrics": {},
+  "seed": 33,
+  "selected_epoch": 1,
+  "selected_val_pearsonr": 0.5917591452598572,
+  "matched_baseline_selected_val_pearsonr": 0.6415786147117615,
+  "validation_delta_vs_matched_baseline": -0.0498194694519043,
+  "validation_history": [
+    {"epoch": 1, "val/pearsonr": 0.5917591452598572},
+    {"epoch": 2, "val/pearsonr": 0.5752930045127869},
+    {"epoch": 3, "val/pearsonr": 0.49255216121673584},
+    {"epoch": 4, "val/pearsonr": 0.5391594767570496},
+    {"epoch": 5, "val/pearsonr": 0.5591478943824768},
+    {"epoch": 6, "val/pearsonr": 0.47080284357070923},
+    {"epoch": 7, "val/pearsonr": 0.4692704677581787},
+    {"epoch": 8, "val/pearsonr": 0.48453056812286377}
+  ],
+  "head_metadata": {
+    "statistic_groups": ["std", "range", "mad", "mean_abs"],
+    "correction_scale": 0.5,
+    "gate_parameterization": "shared_scalar",
+    "gate_initialization": 0.0,
+    "projection_initialization": "linspace_-1_1_roll_group_plus_row_alternating_sign_l2_normalized_zero_bias",
+    "parameter_count": 1051138
+  },
+  "hashes": {
+    "manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+    "input_config_sha256": "a8f8e6690aa120f11634c80abfc952b9c84354e0cb36fe01cc7bdf635ba4e60d",
+    "resolved_config_sha256": "48154b44370d0f7173b72194e7f55e797c8518933bea8f5770acab0c6a1eabd4",
+    "checkpoint_sha256": "9402d16d2df2a8b6777c5792f253639425ba93f7c41f1e91c7e2cc99abc7337d",
+    "validation_history_sha256": "d690f30b431ec517787a4a4fbf3dd2d3a600534a5a9b21b02cdcaa888eb30fbc",
+    "selection_sha256": "3f2eec5ed1f2ac8c99bdb4744ae030bac76c1643807c770a6201b7b607da9028"
+  },
+  "remote_artifact_root": "<external-workspace>/hbn_subset/external-results/reve_head_experiments_grouped_stats_shared_gate_screen_20260824",
+  "decision": "rejected",
+  "decision_reason": "Seed-33 validation was 0.0498194694519043 below the matched baseline and below the declared -0.02 worst-seed threshold; no test access was used."
+}

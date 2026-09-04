@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30",
+  "experiment": "two_stage_finetune_1000_20260830",
+  "claim_scope": "historical_1000_subject_nested_screening_only",
+  "dataset": {
+    "task": "task-RestingState",
+    "data_mode": "historical_1000_subject_nested_screening",
+    "manifest": "data/age_medium_1000_nested.csv",
+    "manifest_sha256": "a5542dcbd49c0d6e0e591594c777bb66fb6cf80b61ac63f6639928d48225a7ac",
+    "timeline_count": 1000,
+    "release_counts": {
+      "R1": 100,
+      "R2": 100,
+      "R3": 100,
+      "R4": 100,
+      "R5": 100,
+      "R6": 100,
+      "R7": 100,
+      "R8": 100,
+      "R9": 100,
+      "R10": 100
+    },
+    "split_timelines": {
+      "train": 800,
+      "val": 100,
+      "test": 100
+    },
+    "segments": {
+      "train": 48000,
+      "val": 6000,
+      "test": 6000
+    },
+    "window_duration_s": 2.0,
+    "window_stride_s": 2.0,
+    "sampling_frequency_hz": 200.0,
+    "channels": 129
+  },
+  "protocol": {
+    "name": "two-stage fine-tuning screen",
+    "source_tree": "<external-workspace>/neurobench_age_1000_20260830",
+    "remote_host": "root@184.144.255.144:14335",
+    "warmup_epochs": 3,
+    "unfrozen_encoder_blocks": 1,
+    "encoder_gradient_scale": 0.1,
+    "selection_metric": "val/pearsonr",
+    "evaluation_protocol": "strict",
+    "strict_final_test": false,
+    "seeds": [33]
+  },
+  "runs": [
+    {
+      "run_id": "two-stage-1000-mean-linear-20260830",
+      "head_variant": "mean_linear",
+      "head_source": "neuralbench_default",
+      "role": "matched_control",
+      "seed": 33,
+      "selected_epoch": 7,
+      "selected_val_pearsonr": 0.7528091073036194,
+      "max_val_pearsonr": 0.7528091073036194,
+      "epochs_recorded": 14,
+      "validation_history": [
+        {"epoch": 1, "val_pearsonr": 0.12070894241333008},
+        {"epoch": 2, "val_pearsonr": 0.30141109228134155},
+        {"epoch": 3, "val_pearsonr": 0.43320006132125854},
+        {"epoch": 4, "val_pearsonr": 0.6940959095954895},
+        {"epoch": 5, "val_pearsonr": 0.7104673385620117},
+        {"epoch": 6, "val_pearsonr": 0.7361142039299011},
+        {"epoch": 7, "val_pearsonr": 0.7528091073036194},
+        {"epoch": 8, "val_pearsonr": 0.7459564805030823},
+        {"epoch": 9, "val_pearsonr": 0.7508132457733154},
+        {"epoch": 10, "val_pearsonr": 0.7478218674659729},
+        {"epoch": 11, "val_pearsonr": 0.7355077862739563},
+        {"epoch": 12, "val_pearsonr": 0.7307900786399841},
+        {"epoch": 13, "val_pearsonr": 0.730327844619751},
+        {"epoch": 14, "val_pearsonr": 0.727595865726471}
+      ],
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/two_stage_finetune_mean_linear_1000_20260830"
+    },
+    {
+      "run_id": "two-stage-1000-mean-linear-copy-parity-20260830",
+      "head_variant": "mean_linear_copy",
+      "head_source": "local_upstream_reve_head",
+      "role": "implementation_parity_control",
+      "seed": 33,
+      "selected_epoch": 7,
+      "selected_val_pearsonr": 0.7528091073036194,
+      "max_val_pearsonr": 0.7528091073036194,
+      "epochs_recorded": 14,
+      "trajectory_matches_official_mean_linear": true,
+      "validation_history": [
+        {"epoch": 1, "val_pearsonr": 0.12070894241333008},
+        {"epoch": 2, "val_pearsonr": 0.30141109228134155},
+        {"epoch": 3, "val_pearsonr": 0.43320006132125854},
+        {"epoch": 4, "val_pearsonr": 0.6940959095954895},
+        {"epoch": 5, "val_pearsonr": 0.7104673385620117},
+        {"epoch": 6, "val_pearsonr": 0.7361142039299011},
+        {"epoch": 7, "val_pearsonr": 0.7528091073036194},
+        {"epoch": 8, "val_pearsonr": 0.7459564805030823},
+        {"epoch": 9, "val_pearsonr": 0.7508132457733154},
+        {"epoch": 10, "val_pearsonr": 0.7478218674659729},
+        {"epoch": 11, "val_pearsonr": 0.7355077862739563},
+        {"epoch": 12, "val_pearsonr": 0.7307900786399841},
+        {"epoch": 13, "val_pearsonr": 0.730327844619751},
+        {"epoch": 14, "val_pearsonr": 0.727595865726471}
+      ],
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/two_stage_finetune_mean_linear_copy_1000_20260830"
+    },
+    {
+      "run_id": "two-stage-1000-mean-rich-stats-residual-20260830-retry4",
+      "head_variant": "mean_rich_stats_residual",
+      "head_source": "local_upstream_reve_head",
+      "role": "candidate",
+      "seed": 33,
+      "selected_epoch": 6,
+      "selected_val_pearsonr": 0.7276525497436523,
+      "max_val_pearsonr": 0.7276525497436523,
+      "epochs_recorded": 13,
+      "delta_vs_mean_linear": -0.02515655755996704,
+      "delta_percent_vs_mean_linear": -3.341691448190865,
+      "delta_vs_mean_linear_copy": -0.02515655755996704,
+      "head_parameters": {
+        "baseline_mean_linear": 513,
+        "correction": 2048,
+        "total": 2561
+      },
+      "correction_features": ["std", "range", "MAD", "mean_abs"],
+      "correction_feature_dimension": "4D",
+      "correction_weights_zero_initialized": true,
+      "validation_history": [
+        {"epoch": 1, "val_pearsonr": 0.27689316868782043},
+        {"epoch": 2, "val_pearsonr": 0.38185083866119385},
+        {"epoch": 3, "val_pearsonr": 0.5031247735023499},
+        {"epoch": 4, "val_pearsonr": 0.7028154134750366},
+        {"epoch": 5, "val_pearsonr": 0.722791314125061},
+        {"epoch": 6, "val_pearsonr": 0.7276525497436523},
+        {"epoch": 7, "val_pearsonr": 0.7234476208686829},
+        {"epoch": 8, "val_pearsonr": 0.7209163904190063},
+        {"epoch": 9, "val_pearsonr": 0.7191312909126282},
+        {"epoch": 10, "val_pearsonr": 0.7188039422035217},
+        {"epoch": 11, "val_pearsonr": 0.7153927683830261},
+        {"epoch": 12, "val_pearsonr": 0.7145931124687195},
+        {"epoch": 13, "val_pearsonr": 0.718672513961792}
+      ],
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/two_stage_finetune_mean_rich_stats_residual_1000_20260830_retry4"
+    }
+  ],
+  "evidence": {
+    "artifact_audit": "passed",
+    "checkpoint_and_manifest_sha256_audit": "passed",
+    "failure_json": false,
+    "test_status": "withheld",
+    "test_evaluations": 0,
+    "test_started_marker": false,
+    "test_completed_marker": false,
+    "final_test_pearsonr": null
+  },
+  "conclusion": {
+    "screening_result": "mean_rich_stats_residual_did_not_beat_mean_linear",
+    "matched_control_val_pearsonr": 0.7528091073036194,
+    "candidate_val_pearsonr": 0.7276525497436523,
+    "interpretation": "mean_linear_copy exactly reproduced the official mean_linear validation trajectory; the observed gap is attributable to the rich correction branch under this two-stage protocol, not to the local wrapper implementation",
+    "official_test_improvement_claim_allowed": false,
+    "next_step": "do not promote this candidate; retain mean_linear as the control and evaluate a different predeclared mechanism"
+  }
+}

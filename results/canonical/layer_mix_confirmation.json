@@ -1,0 +1,48 @@
+{
+  "run_id": "mean-layer-mix-last2-confirmation-1000-20260903",
+  "head_variant": "mean_layer_mix",
+  "requested_layer_indices": [-2, -1],
+  "resolved_transformer_layer_indices": [21, 22],
+  "alpha_initialization": 0.0,
+  "selected_alpha_by_seed": {
+    "33": -0.00032895541517063975,
+    "34": -0.00005956682070373334,
+    "35": -0.0001506342232460156
+  },
+  "parameter_count": 514,
+  "data_mode": "historical_1000_subject_nested_screening",
+  "manifest": "age_medium_1000_nested_20260826.csv",
+  "manifest_sha256": "a5542dcbd49c0d6e0e591594c777bb66fb6cf80b61ac63f6639928d48225a7ac",
+  "evaluation_protocol": "strict",
+  "strict_final_test": false,
+  "test_status": "withheld",
+  "test_evaluations": 0,
+  "selected_val_pearson_by_seed": {
+    "33": 0.7354238629341125,
+    "34": 0.7389013171195984,
+    "35": 0.726370096206665
+  },
+  "matched_mean_linear_selected_val_pearson_by_seed": {
+    "33": 0.72819584608078,
+    "34": 0.7434700131416321,
+    "35": 0.7145267128944397
+  },
+  "candidate_mean_selected_val_pearson": 0.733565092086792,
+  "matched_mean_linear_mean_selected_val_pearson": 0.7287308573722839,
+  "mean_delta": 0.004834234714508057,
+  "mean_delta_percent": 0.6633772490353609,
+  "candidate_sample_sd": 0.006469091604647527,
+  "matched_mean_linear_sample_sd": 0.014479065408765483,
+  "candidate_wins": 2,
+  "candidate_losses": 1,
+  "decision_outcome": "inconclusive",
+  "decision_reason": "The candidate improved the three-seed validation mean and won seeds 33 and 35, but selected alpha stayed effectively zero in every seed; the gain cannot be attributed to penultimate-layer mixing without a matched local mean-linear control.",
+  "remote_output_dir": "<external-workspace>/external-results/layer_mix_last2_confirmation_1000_20260903",
+  "repository_artifacts": [
+    "external-results/layer_mix_last2_confirmation_1000_20260903_metrics.json",
+    "external-results/layer_mix_last2_confirmation_1000_20260903/summary.json",
+    "external-results/layer_mix_last2_confirmation_1000_20260903/mean_layer_mix/seed34",
+    "external-results/layer_mix_last2_confirmation_1000_20260903/mean_layer_mix/seed35"
+  ],
+  "checkpoint_copy_policy": "large checkpoints remain on remote workspace"
+}

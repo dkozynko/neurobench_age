@@ -1,0 +1,271 @@
+{
+  "run_date": "2026-09-02",
+  "purpose": "Matched 1000-subject validation-only control and mean-layer-linear screen",
+  "data": {
+    "subjects": 1000,
+    "data_mode": "manifest",
+    "manifest": "data/age_medium_1000_nested.csv",
+    "manifest_sha256": "a5542dcbd49c0d6e0e591594c777bb66fb6cf80b61ac63f6639928d48225a7ac",
+    "evaluation_protocol": "strict",
+    "strict_final_test": false,
+    "test_status": "withheld",
+    "seeds": [33, 34, 35]
+  },
+  "matched_mean_linear_control": {
+    "remote_output_dir": "<external-workspace>/external-results/layer_selection_1000_20260902/mean_linear",
+    "head_variant": "mean_linear",
+    "selected_epoch_by_seed": {
+      "33": 2,
+      "34": 2,
+      "35": 1
+    },
+    "selected_val_pearson_by_seed": {
+      "33": 0.72819584608078,
+      "34": 0.7434700131416321,
+      "35": 0.7145267128944397
+    },
+    "mean_selected_val_pearson": 0.7287308573722839,
+    "sample_sd_selected_val_pearson": 0.014479065408765483,
+    "validation_history_paths": [
+      "external-results/layer_selection_1000_20260902/mean_linear/seed33/epoch_validation_metrics.jsonl",
+      "external-results/layer_selection_1000_20260902/mean_linear/seed34/epoch_validation_metrics.jsonl",
+      "external-results/layer_selection_1000_20260902/mean_linear/seed35/epoch_validation_metrics.jsonl"
+    ],
+    "validation_history": {
+      "33": [
+        {"epoch": 1, "val/pearsonr": 0.7213220000267029},
+        {"epoch": 2, "val/pearsonr": 0.72819584608078},
+        {"epoch": 3, "val/pearsonr": 0.688209056854248},
+        {"epoch": 4, "val/pearsonr": 0.6869800686836243},
+        {"epoch": 5, "val/pearsonr": 0.6651971936225891},
+        {"epoch": 6, "val/pearsonr": 0.6401781439781189},
+        {"epoch": 7, "val/pearsonr": 0.6302692890167236},
+        {"epoch": 8, "val/pearsonr": 0.6311851143836975},
+        {"epoch": 9, "val/pearsonr": 0.6404094696044922}
+      ],
+      "34": [
+        {"epoch": 1, "val/pearsonr": 0.7243614792823792},
+        {"epoch": 2, "val/pearsonr": 0.7434700131416321},
+        {"epoch": 3, "val/pearsonr": 0.0293853972107172},
+        {"epoch": 4, "val/pearsonr": -0.039905037730932236},
+        {"epoch": 5, "val/pearsonr": 0.16108307242393494},
+        {"epoch": 6, "val/pearsonr": 0.6377413868904114},
+        {"epoch": 7, "val/pearsonr": 0.5862672328948975},
+        {"epoch": 8, "val/pearsonr": 0.6285634636878967},
+        {"epoch": 9, "val/pearsonr": 0.5757781267166138}
+      ],
+      "35": [
+        {"epoch": 1, "val/pearsonr": 0.7145267128944397},
+        {"epoch": 2, "val/pearsonr": 0.7067953944206238},
+        {"epoch": 3, "val/pearsonr": 0.6768504977226257},
+        {"epoch": 4, "val/pearsonr": 0.6521321535110474},
+        {"epoch": 5, "val/pearsonr": 0.6903164386749268},
+        {"epoch": 6, "val/pearsonr": 0.6170161366462708},
+        {"epoch": 7, "val/pearsonr": 0.6254154443740845},
+        {"epoch": 8, "val/pearsonr": 0.5905830264091492}
+      ]
+    }
+  },
+  "mean_layer_linear_screen": {
+    "remote_output_dir": "<external-workspace>/external-results/layer_sweep_mean_layer_linear_1000_20260902",
+    "head_variant": "mean_layer_linear",
+    "screen_seeds": [33],
+    "layer_index_convention": "positive_1_based_or_negative_final_relative",
+    "positional_input_excluded": true,
+    "layers": {
+      "-2": {
+        "resolved_transformer_layer_index": 21,
+        "selected_epoch": 2,
+        "selected_val_pearsonr": 0.7384355068206787,
+        "delta_vs_seed33_mean_linear": 0.010239660739898682,
+        "delta_percent_vs_seed33_mean_linear": 1.4061685184019546,
+        "validation_history_path": "external-results/layer_sweep_mean_layer_linear_1000_20260902/layer_2/mean_layer_linear/seed33/epoch_validation_metrics.jsonl",
+        "validation_history": [
+          {"epoch": 1, "val/pearsonr": 0.7246524095535278},
+          {"epoch": 2, "val/pearsonr": 0.7384355068206787},
+          {"epoch": 3, "val/pearsonr": 0.7108997702598572},
+          {"epoch": 4, "val/pearsonr": 0.7145317792892456},
+          {"epoch": 5, "val/pearsonr": 0.7203459739685059},
+          {"epoch": 6, "val/pearsonr": 0.7014583349227905},
+          {"epoch": 7, "val/pearsonr": 0.6704441905021667},
+          {"epoch": 8, "val/pearsonr": 0.637942910194397},
+          {"epoch": 9, "val/pearsonr": 0.6535460352897644}
+        ]
+      },
+      "-3": {
+        "resolved_transformer_layer_index": 20,
+        "selected_epoch": 1,
+        "selected_val_pearsonr": 0.7114447951316833,
+        "delta_vs_seed33_mean_linear": -0.01675105094909668,
+        "delta_percent_vs_seed33_mean_linear": -2.300349698402215,
+        "validation_history_path": "external-results/layer_sweep_mean_layer_linear_1000_20260902/layer_3/mean_layer_linear/seed33/epoch_validation_metrics.jsonl",
+        "validation_history": [
+          {"epoch": 1, "val/pearsonr": 0.7114447951316833},
+          {"epoch": 2, "val/pearsonr": 0.7033153176307678},
+          {"epoch": 3, "val/pearsonr": 0.6510129570960999},
+          {"epoch": 4, "val/pearsonr": 0.6640390157699585},
+          {"epoch": 5, "val/pearsonr": 0.6507934331893921},
+          {"epoch": 6, "val/pearsonr": 0.5995209813117981},
+          {"epoch": 7, "val/pearsonr": 0.6084665656089783},
+          {"epoch": 8, "val/pearsonr": 0.6223912835121155}
+        ]
+      },
+      "-4": {
+        "resolved_transformer_layer_index": 19,
+        "selected_epoch": 2,
+        "selected_val_pearsonr": 0.7338695526123047,
+        "delta_vs_seed33_mean_linear": 0.005673706531524658,
+        "delta_percent_vs_seed33_mean_linear": 0.7791456875318764,
+        "validation_history_path": "external-results/layer_sweep_mean_layer_linear_1000_20260902/layer_4/mean_layer_linear/seed33/epoch_validation_metrics.jsonl",
+        "validation_history": [
+          {"epoch": 1, "val/pearsonr": 0.7295065522193909},
+          {"epoch": 2, "val/pearsonr": 0.7338695526123047},
+          {"epoch": 3, "val/pearsonr": 0.6955451369285583},
+          {"epoch": 4, "val/pearsonr": 0.6757214665412903},
+          {"epoch": 5, "val/pearsonr": 0.5997486710548401},
+          {"epoch": 6, "val/pearsonr": 0.6714167594909668},
+          {"epoch": 7, "val/pearsonr": 0.5902023315429688},
+          {"epoch": 8, "val/pearsonr": 0.6338319778442383},
+          {"epoch": 9, "val/pearsonr": 0.5623056888580322}
+        ]
+      }
+    },
+    "screen_winner": "-2",
+    "screen_winner_selected_val_pearson": 0.7384355068206787,
+    "promotion_status": "confirmed_validation_signal",
+    "next_step": "Do not claim an official improvement yet; decide whether the modest, higher-variance signal merits one predeclared strict finalist test"
+  },
+  "mean_layer_linear_confirmation": {
+    "remote_output_dir": "<external-workspace>/external-results/layer_confirmation_mean_layer_linear_1000_20260903",
+    "head_variant": "mean_layer_linear",
+    "layer_index": -2,
+    "resolved_transformer_layer_index": 21,
+    "seeds": [34, 35],
+    "selected_epoch_by_seed": {
+      "34": 1,
+      "35": 1
+    },
+    "selected_val_pearson_by_seed": {
+      "34": 0.7554095387458801,
+      "35": 0.7088574171066284
+    },
+    "matched_mean_linear_by_seed": {
+      "34": 0.7434700131416321,
+      "35": 0.7145267128944397
+    },
+    "delta_vs_matched_mean_linear_by_seed": {
+      "34": 0.011939525604248,
+      "35": -0.005669295787811279
+    },
+    "delta_percent_vs_matched_mean_linear_by_seed": {
+      "34": 1.605919,
+      "35": -0.793434
+    },
+    "candidate_mean_selected_val_pearson": 0.7321334779262543,
+    "matched_baseline_mean_selected_val_pearson": 0.7289983630180359,
+    "mean_delta": 0.003135114908218384,
+    "mean_delta_percent": 0.430058,
+    "candidate_wins": 1,
+    "candidate_losses": 1,
+    "all_three_seed_candidate_mean_selected_val_pearson": 0.7342341542243958,
+    "all_three_seed_matched_mean_linear_mean_selected_val_pearson": 0.7287308573722839,
+    "all_three_seed_mean_delta": 0.005503296852111816,
+    "all_three_seed_mean_delta_percent": 0.755189,
+    "all_three_seed_candidate_sample_sd": 0.023558725135449116,
+    "all_three_seed_matched_control_sample_sd": 0.014479065408765483,
+    "all_three_seed_candidate_wins": 2,
+    "all_three_seed_candidate_losses": 1,
+    "validation_history_paths": [
+      "external-results/layer_confirmation_mean_layer_linear_1000_20260903/mean_layer_linear/seed34/epoch_validation_metrics.jsonl",
+      "external-results/layer_confirmation_mean_layer_linear_1000_20260903/mean_layer_linear/seed35/epoch_validation_metrics.jsonl"
+    ],
+    "promotion_status": "not_promoted",
+    "interpretation": "The layer -2 signal survives confirmation as a small positive paired mean, but it loses seed 35 and has higher across-seed variability than the matched control. It is not strong enough to call an official improvement without a deliberate strict-test decision."
+  },
+  "strict_finalist_comparison": {
+    "run_date": "2026-09-03",
+    "candidate": "mean_layer_linear",
+    "layer_index": -2,
+    "resolved_transformer_layer_index": 21,
+    "data_mode": "manifest",
+    "manifest": "data/age_medium_1000_nested.csv",
+    "manifest_sha256": "a5542dcbd49c0d6e0e591594c777bb66fb6cf80b61ac63f6639928d48225a7ac",
+    "evaluation_protocol": "strict",
+    "strict_final_test": true,
+    "seeds": [33, 34, 35],
+    "selected_epoch_by_seed": {"33": 2, "34": 1, "35": 1},
+    "selected_val_pearson_by_seed": {
+      "33": 0.7384355068206787,
+      "34": 0.7554095387458801,
+      "35": 0.7088574171066284
+    },
+    "mean_selected_val_pearson": 0.7342341542243958,
+    "matched_mean_linear_selected_val_pearson_by_seed": {
+      "33": 0.72819584608078,
+      "34": 0.7434700131416321,
+      "35": 0.7145267128944397
+    },
+    "matched_mean_linear_mean_selected_val_pearson": 0.7287308573722839,
+    "selected_val_mean_delta": 0.005503296852111816,
+    "selected_val_mean_delta_percent": 0.755189,
+    "test_pearson_by_seed": {
+      "33": 0.5935644507408142,
+      "34": 0.5890522599220276,
+      "35": 0.5637818574905396
+    },
+    "matched_mean_linear_test_pearson_by_seed": {
+      "33": 0.5748500823974609,
+      "34": 0.5940768122673035,
+      "35": 0.5637577772140503
+    },
+    "mean_test_pearson": 0.5821328560511271,
+    "matched_mean_linear_mean_test_pearson": 0.5775615572929382,
+    "test_mean_delta": 0.0045712987581888465,
+    "test_mean_delta_percent": 0.7914825182643304,
+    "test_wins": 2,
+    "test_losses": 1,
+    "candidate_sample_sd_test_pearson": 0.016051770233351234,
+    "matched_control_sample_sd_test_pearson": 0.015340307810526534,
+    "baseline_remote_output_dir": "<external-workspace>/external-results/layer_finalist_mean_linear_1000_20260903",
+    "candidate_remote_output_dir": "<external-workspace>/external-results/layer_finalist_mean_layer_linear_1000_20260903",
+    "repo_artifact_policy": "compact JSON/JSONL metrics, selections, reports, summaries, and configs copied; checkpoints and raw predictions left remote",
+    "evidence_audit": {
+      "baseline_completed_seed_count": 3,
+      "candidate_completed_seed_count": 3,
+      "baseline_strict_test_evaluations": 3,
+      "candidate_strict_test_evaluations": 3,
+      "failure_files": [],
+      "unexpected_test_artifacts": [],
+      "checkpoint_integrity_verified": true,
+      "selection_integrity_verified": true
+    },
+    "decision": "inconclusive",
+    "interpretation": "The predeclared layer -2 candidate improves the strict-test mean by +0.0045713 (+0.7915%) and wins seeds 33 and 35, but loses seed 34 by -0.0050246. This is a modest, mixed result rather than a uniformly reliable improvement over mean_linear.",
+    "repo_paths": {
+      "baseline": "external-results/layer_finalist_mean_linear_1000_20260903",
+      "candidate": "external-results/layer_finalist_mean_layer_linear_1000_20260903"
+    }
+  },
+  "evidence_audit": {
+    "baseline_reports_completed": true,
+    "layer_screen_reports_completed": true,
+    "layer_confirmation_reports_completed": true,
+    "failure_files_in_active_runs": [],
+    "strict_test_artifacts": [
+      "external-results/layer_finalist_mean_linear_1000_20260903",
+      "external-results/layer_finalist_mean_layer_linear_1000_20260903"
+    ],
+    "checkpoints_copied_to_repo": false,
+    "raw_artifact_policy": "Metrics, selections, reports, summaries, and configs copied; large checkpoints remain on the remote workspace"
+  },
+  "conclusions": [
+    "The 1000-subject matched mean_linear control has selected validation Pearson mean 0.7287308574 across seeds 33, 34, and 35.",
+    "On the single screening seed, layer -2 is above the matched control by 0.0102396607 Pearson, while layer -4 is above it by 0.0056737065 and layer -3 is below it by 0.0167510509.",
+    "The layer result is a screening signal only: layer selection and epoch selection were performed on validation data, and no strict test was run.",
+    "The apparent gain is not yet a claim of improvement because only seed 33 was used for the layer sweep; seeds 34 and 35 must be confirmed before a strict finalist gate."
+    ,"The confirmation on seeds 34 and 35 is complete: layer -2 has mean selected validation Pearson 0.7321334779 versus 0.7289983630 for the paired control, a modest +0.0031351149 (+0.4301%) gain."
+    ,"The confirmation is mixed rather than uniformly better: layer -2 wins seed 34 by +0.0119395256 and loses seed 35 by -0.0056692958. The candidate is therefore not promoted automatically and no strict test was run."
+    ,"The predeclared strict finalist comparison completed on all three seeds. Layer -2 achieved mean test Pearson 0.5821328561 versus 0.5775615573 for the matched mean_linear control, a +0.0045712988 (+0.7915%) paired mean gain, winning seeds 33 and 35 but losing seed 34."
+    ,"The strict result is a modest mixed signal, not a uniformly reliable improvement: candidate test SD was 0.0160517702 versus 0.0153403078 for the control. Checkpoints remained remote; compact metrics and audit artifacts were copied into the repository."
+  ]
+}

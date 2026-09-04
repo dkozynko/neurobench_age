@@ -1,0 +1,62 @@
+{
+  "run_id": "strict-mean-anchor-ensemble-screen-20260825",
+  "head_variant": "mean_anchor_ensemble",
+  "head_architecture": "mean_linear_anchored_rich_stats_expert_ensemble",
+  "evaluation_protocol": "strict",
+  "strict_final_test": false,
+  "test_status": "withheld",
+  "test_evaluations": 0,
+  "seed": 33,
+  "dataset_manifest": "age_medium_500_resting_manifest.csv",
+  "manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+  "selected_epoch": 2,
+  "selected_val_pearsonr": 0.6042661666870117,
+  "validation_history": [
+    {"epoch": 1, "val/pearsonr": 0.5861279368400574},
+    {"epoch": 2, "val/pearsonr": 0.6042661666870117},
+    {"epoch": 3, "val/pearsonr": 0.4857737720012665},
+    {"epoch": 4, "val/pearsonr": 0.513071596622467},
+    {"epoch": 5, "val/pearsonr": 0.6032708883285522},
+    {"epoch": 6, "val/pearsonr": 0.4878029227256775},
+    {"epoch": 7, "val/pearsonr": 0.4919400215148926},
+    {"epoch": 8, "val/pearsonr": 0.4994836151599884},
+    {"epoch": 9, "val/pearsonr": 0.525791585445404}
+  ],
+  "gate": {
+    "parameterization": "centered_sigmoid",
+    "initial_gate_logit": 0.0,
+    "selected_checkpoint_gate_logit": -0.00012618806795217097,
+    "selected_checkpoint_gate": -0.00006309403389237467,
+    "range": [-1.0, 1.0],
+    "expert": "mean_rich_stats_residual"
+  },
+  "parameter_count": 3075,
+  "baseline_fallback": "mean_linear_exact_at_gate_zero",
+  "provenance": {
+    "source_tree": "<external-workspace>/neurobench_age_anchor_ensemble_20260825_v1",
+    "source_sha256": {
+      "reve_contract.py": "2b194c0ccf90dbb620a9564692b8134121645562f96bfcb95b4e08ad2368fc20",
+      "reve_head_math.py": "264fadd550302c9bae1aa1a2344be690ae73869a3412a672f19af70862ab8b76",
+      "reve_upstream_heads.py": "684fefd97b2c69a00d6355f0708a8af8384039cc971e344a8c5d682f22c99f1e",
+      "reve_last_tuned.py": "5c4c1b683f930dd7594a23e746b883da136a82541c21e50177021901f781962e",
+      "official_reve_runtime.py": "7fba71dc793e8de6715f0d06dd84630565f82f17dbbbd5b3e91cf87150d7926c",
+      "official_reve_subset.py": "689cc197e16f16675f32e7b007aaa7a2d10d34ceaf41b9c19435eff7093d831a",
+      "selective_hbn_download.py": "f6bafdcedec1c057f15374f3dc67b5e6abf15c6cffaa01b36058fbc9c943ae02"
+    },
+    "official_config_sha256": "d5508a5b6e7d4b287e26b1035ea3087a97b81e3108f48c36f38dc9e2aa726c55",
+    "resolved_config_sha256": "524130b6e9d7de8b2404b7ad8f164a7d3a4abbf285e93cb29ea561e0a04554c2",
+    "selection_sha256": "a9ab5f28ec77a4b097e2350537994651cd9a4347367688f3ee7d0b66e7190017",
+    "checkpoint_sha256": "38d3bc451463cf0e492e8cb9d059afeadd9685dc58f7a8d6ef5c42bffe9d7452",
+    "validation_history_sha256": "1ca8c5777dea55fba7185405650576088c6e283e3163979f2a94b2a801f45214",
+    "supervisor_config_sha256": "c4d5efd08a455a00e2324f22c56edf0cbde00a0291f4d67c61efacb5c0cd9a60"
+  },
+  "remote_output_dir": "<external-workspace>/hbn_subset/external-results/reve_head_experiments_anchor_ensemble_screen_20260825",
+  "decision": {
+    "outcome": "rejected",
+    "reason": "The validation-selected score exceeded the strict mean_linear seed-33 reference by 0.0147693157196045 but remained 0.0373124480247498 below the matched strict mean_rich_stats reference (0.6415786147117615). The learned gate stayed effectively at zero, satisfying the early-stop rejection criterion; no seeds 34/35 confirmation or strict test is justified.",
+    "matched_strict_mean_linear_val_pearsonr": 0.5894968509674072,
+    "matched_strict_mean_rich_stats_val_pearsonr": 0.6415786147117615,
+    "delta_vs_mean_linear": 0.0147693157196045,
+    "delta_vs_mean_rich_stats": -0.0373124480247498
+  }
+}

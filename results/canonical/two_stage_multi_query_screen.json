@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-31",
+  "experiment": "two_stage_multi_query_screen_20260831",
+  "claim_scope": "historical_1000_subject_nested_screening_only",
+  "dataset": {
+    "task": "task-RestingState",
+    "manifest": "data/age_medium_1000_nested.csv",
+    "manifest_sha256": "a5542dcbd49c0d6e0e591594c777bb66fb6cf80b61ac63f6639928d48225a7ac",
+    "timeline_count": 1000,
+    "split_timelines": {"train": 800, "val": 100, "test": 100},
+    "window_duration_s": 2.0,
+    "window_stride_s": 2.0,
+    "sampling_frequency_hz": 200.0,
+    "channels": 129
+  },
+  "protocol": {
+    "name": "matched two-stage multi-query schedule screen",
+    "source_tree": "<external-workspace>/neurobench_age_1000_20260830",
+    "remote_host": "root@184.144.255.144:14335",
+    "selection_metric": "val/pearsonr",
+    "evaluation_protocol": "strict",
+    "strict_final_test": false,
+    "seeds": [33],
+    "screen_variants": [
+      {"name": "gentle", "warmup_epochs": 3, "unfreeze_last_blocks": 1, "encoder_gradient_scale": 0.01},
+      {"name": "delayed", "warmup_epochs": 7, "unfreeze_last_blocks": 1, "encoder_gradient_scale": 0.1},
+      {"name": "broad_gentle", "warmup_epochs": 3, "unfreeze_last_blocks": 2, "encoder_gradient_scale": 0.01}
+    ]
+  },
+  "runs": [
+    {
+      "schedule": "gentle",
+      "head_variant": "mean_linear",
+      "role": "matched_control",
+      "selected_epoch": 9,
+      "selected_val_pearsonr": 0.7507122755050659,
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/two_stage_multi_query_screen_gentle_mean_linear_20260831"
+    },
+    {
+      "schedule": "gentle",
+      "head_variant": "multi_query_rich_stats",
+      "role": "candidate",
+      "selected_epoch": 11,
+      "selected_val_pearsonr": 0.7236995100975037,
+      "delta_vs_matched_mean_linear": -0.027012765407562256,
+      "delta_percent_vs_matched_mean_linear": -3.598284760881064,
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/two_stage_multi_query_screen_gentle_multi_query_20260831"
+    },
+    {
+      "schedule": "delayed",
+      "head_variant": "mean_linear",
+      "role": "matched_control",
+      "selected_epoch": 16,
+      "selected_val_pearsonr": 0.7470146417617798,
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/two_stage_multi_query_screen_delayed_mean_linear_20260831"
+    },
+    {
+      "schedule": "delayed",
+      "head_variant": "multi_query_rich_stats",
+      "role": "candidate",
+      "selected_epoch": 16,
+      "selected_val_pearsonr": 0.7195594310760498,
+      "delta_vs_matched_mean_linear": -0.02745521068572998,
+      "delta_percent_vs_matched_mean_linear": -3.6753243043508306,
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/two_stage_multi_query_screen_delayed_multi_query_20260831"
+    },
+    {
+      "schedule": "broad_gentle",
+      "head_variant": "mean_linear",
+      "role": "matched_control",
+      "selected_epoch": 5,
+      "selected_val_pearsonr": 0.7378355264663696,
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/two_stage_multi_query_screen_broad_gentle_mean_linear_20260831"
+    },
+    {
+      "schedule": "broad_gentle",
+      "head_variant": "multi_query_rich_stats",
+      "role": "candidate",
+      "selected_epoch": 5,
+      "selected_val_pearsonr": 0.7119306921958923,
+      "delta_vs_matched_mean_linear": -0.025904834270477295,
+      "delta_percent_vs_matched_mean_linear": -3.510922602838104,
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/two_stage_multi_query_screen_broad_gentle_multi_query_20260831"
+    }
+  ],
+  "audit": {
+    "completed_runs": 6,
+    "failure_json_count": 0,
+    "test_started_marker_count": 0,
+    "test_completed_marker_count": 0,
+    "all_selected_metrics_present": true,
+    "strict_test_withheld": true
+  },
+  "decision": {
+    "outcome": "rejected",
+    "reason": "multi_query_rich_stats was below its matched mean_linear control for all three schedules; no schedule recovered the candidate.",
+    "next_action": "close two-stage multi-query direction and evaluate the next head design under the plain official-protocol screen"
+  }
+}

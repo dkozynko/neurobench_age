@@ -1,0 +1,293 @@
+{
+  "protocol": {
+    "name": "official NeuralBench REVE age benchmark",
+    "data": "500-subject resting-state manifest",
+    "data_mode": "historical_500_subject_screening",
+    "claim_scope": "screening_only_not_official_full_data_improvement",
+    "seeds": [33, 34, 35],
+    "selection": "best validation Pearson epoch, then official test Pearson",
+    "positions_fixed": true
+  },
+  "baseline": {
+    "head": "mean_linear",
+    "test_pearson_by_seed": {
+      "33": 0.5941864252090454,
+      "34": 0.5342379212379456,
+      "35": 0.6637211441993713
+    },
+    "mean": 0.5973818302154541,
+    "strict_five_percent_target": 0.627250921726227
+  },
+  "strict_references": {
+    "strict_mean_linear_reference": {
+      "run_id": "strict-mean-linear-20260824-v3",
+      "head": "mean_linear",
+      "evaluation_protocol": "strict",
+      "strict_final_test": true,
+      "test_status": "completed",
+      "selected_epoch_by_seed": {
+        "33": 1,
+        "34": 2,
+        "35": 1
+      },
+      "selected_validation_pearson_by_seed": {
+        "33": 0.5894968509674072,
+        "34": 0.6262269616127014,
+        "35": 0.5925416946411133
+      },
+      "test_pearson_by_seed": {
+        "33": 0.5941864252090454,
+        "34": 0.5342379212379456,
+        "35": 0.6637211441993713
+      },
+      "mean_selected_validation_pearson": 0.6027551690737406,
+      "mean_test_pearson": 0.5973818302154541,
+      "std_sample_test_pearson": 0.06480072697883729,
+      "test_evaluations_by_seed": {
+        "33": 1,
+        "34": 1,
+        "35": 1
+      },
+      "evidence": "legacy_screening/strict_mean_linear_reference_metrics.json"
+    },
+    "strict_mean_rich_stats_reference": {
+      "run_id": "strict-mean-rich-stats-20260824-v1",
+      "head": "mean_rich_stats_residual",
+      "evaluation_protocol": "strict",
+      "strict_final_test": true,
+      "test_status": "completed",
+      "selected_epoch_by_seed": {
+        "33": 2,
+        "34": 1,
+        "35": 1
+      },
+      "selected_validation_pearson_by_seed": {
+        "33": 0.6415786147117615,
+        "34": 0.6530987620353699,
+        "35": 0.6527953743934631
+      },
+      "test_pearson_by_seed": {
+        "33": 0.5811474323272705,
+        "34": 0.617570161819458,
+        "35": 0.6679019927978516
+      },
+      "mean_selected_validation_pearson": 0.6491575837135315,
+      "mean_test_pearson": 0.6222065289815267,
+      "std_sample_test_pearson": 0.043562717614458554,
+      "delta_vs_strict_mean_linear": 0.0248246987660726,
+      "delta_percent_vs_strict_mean_linear": 4.155583164810897,
+      "strict_five_percent_target": 0.627250921726227,
+      "strict_target_gap": -0.00504439274470014,
+      "test_evaluations_by_seed": {
+        "33": 1,
+        "34": 1,
+        "35": 1
+      },
+      "evidence": "legacy_screening/strict_mean_rich_stats_reference_metrics.json"
+    }
+  },
+  "matched_full_data_comparison": {
+    "data_mode": "selective_task_full_data",
+    "task": "task-RestingState",
+    "releases": ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11"],
+    "seeds": [33, 34, 35],
+    "evaluation_protocol": "strict",
+    "baseline": {
+      "head": "mean_linear",
+      "mean_selected_validation_pearson": 0.7177489399909973,
+      "mean_test_pearson": 0.732363780339559,
+      "test_pearson_by_seed": {
+        "33": 0.7330981492996216,
+        "34": 0.7345475554466248,
+        "35": 0.7294456362724304
+      },
+      "artifact": "external-results/reve_head_experiments_selective_full_20260825/matched_mean_linear_baseline.json"
+    },
+    "candidate": {
+      "head": "mean_rich_stats_residual",
+      "mean_selected_validation_pearson": 0.722068985303243,
+      "mean_test_pearson": 0.7290825843811035,
+      "test_pearson_by_seed": {
+        "33": 0.7331742644309998,
+        "34": 0.7336226105690002,
+        "35": 0.7204508781433105
+      },
+      "artifact": "external-results/reve_head_experiments_selective_full_20260825/comparison.json"
+    },
+    "delta_candidate_minus_baseline": -0.0032811959584554407,
+    "delta_percent_candidate_minus_baseline": -0.4480281584834958,
+    "promotion_status": "not_promoted_mean_linear_remains_official_winner",
+    "comparison_note": "This matched full-data comparison supersedes any claim of a 500-subject screening gain."
+  },
+  "variants": [
+    {
+      "head": "last_tuned",
+      "source_output": "reve_head_experiments_positions_fixed_20260820",
+      "test_pearson_by_seed": {
+        "33": 0.6017087697982788,
+        "34": 0.5879517793655396,
+        "35": 0.5306210517883301
+      },
+      "mean": 0.5734272003173828,
+      "std_sample": 0.0377039581523,
+      "delta_vs_mean_linear": -0.0239546298980713,
+      "delta_percent_vs_mean_linear": -4.009936
+    },
+    {
+      "head": "last_avg",
+      "source_output": "reve_head_experiments_positions_fixed_other_heads_20260820/last_avg",
+      "test_pearson_by_seed": {
+        "33": 0.541347861289978,
+        "34": 0.45640942454338074,
+        "35": 0.568010687828064
+      },
+      "mean": 0.5219226578871409,
+      "std_sample": 0.0582813382412,
+      "delta_vs_mean_linear": -0.0754591723283132,
+      "delta_percent_vs_mean_linear": -12.631648
+    },
+    {
+      "head": "last",
+      "source_output": "reve_head_experiments_positions_fixed_other_heads_20260820/last",
+      "test_pearson_by_seed": {
+        "33": 0.5236108899116516,
+        "34": 0.5238524675369263,
+        "35": 0.570409893989563
+      },
+      "mean": 0.5392910838127136,
+      "std_sample": 0.0269499508357,
+      "delta_vs_mean_linear": -0.0580907464027405,
+      "delta_percent_vs_mean_linear": -9.724224
+    },
+    {
+      "head": "all",
+      "source_output": "reve_head_experiments_positions_fixed_other_heads_20260820/all",
+      "test_pearson_by_seed": {
+        "33": 0.6091852784156799,
+        "34": 0.5082537531852722,
+        "35": 0.5800998210906982
+      },
+      "mean": 0.5658462842305502,
+      "std_sample": 0.0519534953691,
+      "delta_vs_mean_linear": -0.0315355459849039,
+      "delta_percent_vs_mean_linear": -5.278960
+    },
+    {
+      "head": "mean_anchor",
+      "source_output": "reve_head_experiments_mean_anchor_train_dummy_positions_fixed_20260821",
+      "test_pearson_by_seed": {
+        "33": 0.5992392897605896,
+        "34": 0.5570296049118042,
+        "35": 0.6668158173561096
+      },
+      "mean": 0.6076949040095011,
+      "std_sample": 0.0553793839804,
+      "delta_vs_mean_linear": 0.010313073794047,
+      "delta_percent_vs_mean_linear": 1.726379
+    },
+    {
+      "head": "global_stats_residual",
+      "source_output": "reve_head_experiments_global_stats_residual_positions_fixed_20260823_retry3-5",
+      "test_pearson_by_seed": {
+        "33": 0.5602985620498657,
+        "34": 0.5988361239433289,
+        "35": 0.6504195332527161
+      },
+      "mean": 0.6031847397486368,
+      "std_sample": 0.045217587366,
+      "delta_vs_mean_linear": 0.0058029095331827,
+      "delta_percent_vs_mean_linear": 0.971390
+    },
+    {
+      "head": "mean_stats_residual",
+      "configuration": "residual scale 0.5",
+      "source_output": "reve_head_experiments_mean_stats_residual_scale05_positions_fixed_20260821",
+      "test_pearson_by_seed": {
+        "33": 0.6280691623687744,
+        "34": 0.6321983337402344,
+        "35": 0.5746498107910156
+      },
+      "mean": 0.6116391022990082,
+      "std_sample": 0.032100128953,
+      "delta_vs_mean_linear": 0.014257272084,
+      "delta_percent_vs_mean_linear": 2.386626
+    },
+    {
+      "head": "mean_stats_attention_residual",
+      "source_output": "reve_head_experiments_mean_stats_attention_residual_retry1_positions_fixed_20260821",
+      "test_pearson_by_seed": {
+        "33": 0.616468071937561,
+        "34": 0.6378467082977295,
+        "35": 0.48485225439071655
+      },
+      "mean": 0.5797223448753357,
+      "std_sample": 0.082852351050,
+      "delta_vs_mean_linear": -0.0176594853401184,
+      "delta_percent_vs_mean_linear": -2.956147
+    },
+    {
+      "head": "mean_stats_residual_detached",
+      "source_output": "reve_head_experiments_mean_stats_residual_detached_positions_fixed_20260822_standard",
+      "test_pearson_by_seed": {
+        "33": 0.6038359999656677,
+        "34": 0.5873283743858337,
+        "35": 0.45218420028686523
+      },
+      "mean": 0.5477828582127889,
+      "std_sample": 0.083201279879,
+      "delta_vs_mean_linear": -0.0495989720026652,
+      "delta_percent_vs_mean_linear": -8.302725
+    },
+    {
+      "head": "mean_rich_stats_residual",
+      "configuration": "four per-feature token statistics; zero-initialized correction; scale 0.5",
+      "source_output": "reve_head_experiments_mean_rich_stats_residual_positions_fixed_20260824_standard",
+      "test_pearson_by_seed": {
+        "33": 0.5811474323272705,
+        "34": 0.617570161819458,
+        "35": 0.6679019927978516
+      },
+      "selected_epoch_by_seed": {
+        "33": 2,
+        "34": 1,
+        "35": 1
+      },
+      "selected_validation_pearson_by_seed": {
+        "33": 0.6415786147117615,
+        "34": 0.6530987620353699,
+        "35": 0.6527953743934631
+      },
+      "mean": 0.6222065289815267,
+      "std_sample": 0.043562717614,
+      "delta_vs_mean_linear": 0.0248246987660726,
+      "delta_percent_vs_mean_linear": 4.155583,
+      "strict_target_gap": -0.00504439274470014,
+      "strict_target_gap_percent": -0.804207
+    }
+  ],
+  "partial_or_parity_runs": [
+    {
+      "head": "mean_residual",
+      "source_output": "reve_head_experiments_mean_residual_positions_fixed_20260822_standard",
+      "available_test_pearson_by_seed": {
+        "33": 0.5877038240432739,
+        "34": 0.6019695401191711
+      },
+      "note": "seed 35 report was not present; excluded from three-seed means"
+    },
+    {
+      "head": "mean_linear_copy",
+      "source_output": "reve_head_experiments_mean_linear_copy_v2_20260820",
+      "available_test_pearson_by_seed": {
+        "33": 0.5941864252090454
+      },
+      "note": "single-seed parity check; it matches mean_linear seed 33 exactly"
+    }
+  ],
+  "interpretation": {
+    "best_completed_variant": "mean_rich_stats_residual",
+    "user_acceptance": "slightly below the strict five-percent target is acceptable",
+    "strict_target_met": false,
+    "recommended_next_step": "Use mean_rich_stats_residual as the current candidate and rerun/retune only if a strict >=5% improvement is required."
+  }
+}

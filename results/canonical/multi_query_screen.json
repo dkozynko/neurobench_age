@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30",
+  "experiment": "transferred_multi_query_attention_stats_1000_20260830",
+  "claim_scope": "historical_1000_subject_nested_screening_only",
+  "dataset": {
+    "task": "task-RestingState",
+    "data_mode": "historical_1000_subject_nested_screening",
+    "manifest": "data/age_medium_1000_nested.csv",
+    "manifest_sha256": "a5542dcbd49c0d6e0e591594c777bb66fb6cf80b61ac63f6639928d48225a7ac",
+    "timeline_count": 1000,
+    "split_timelines": {
+      "train": 800,
+      "val": 100,
+      "test": 100
+    },
+    "segments": {
+      "train": 48000,
+      "val": 6000,
+      "test": 6000
+    },
+    "window_duration_s": 2.0,
+    "window_stride_s": 2.0,
+    "sampling_frequency_hz": 200.0,
+    "channels": 129
+  },
+  "protocol": {
+    "name": "matched multi-query attention statistics screen",
+    "source_tree": "<external-workspace>/neurobench_age_1000_20260830",
+    "remote_host": "root@184.144.255.144:14335",
+    "max_epochs": 40,
+    "selection_metric": "val/pearsonr",
+    "selection_mode": "max",
+    "early_stopping_patience": 7,
+    "evaluation_protocol": "strict",
+    "strict_final_test": false,
+    "seeds": [33]
+  },
+  "runs": [
+    {
+      "run_id": "transferred-multi-query-1000-mean-linear-baseline-20260830",
+      "head_variant": "mean_linear",
+      "head_source": "neuralbench_default",
+      "role": "matched_control",
+      "seed": 33,
+      "selected_epoch": 2,
+      "selected_val_pearsonr": 0.7449429035186768,
+      "max_val_pearsonr": 0.7449429035186768,
+      "epochs_recorded": 9,
+      "validation_history": [
+        {"epoch": 1, "val_pearsonr": 0.7277097702026367},
+        {"epoch": 2, "val_pearsonr": 0.7449429035186768},
+        {"epoch": 3, "val_pearsonr": 0.712117075920105},
+        {"epoch": 4, "val_pearsonr": 0.6921082735061646},
+        {"epoch": 5, "val_pearsonr": 0.6574438214302063},
+        {"epoch": 6, "val_pearsonr": 0.6370929479598999},
+        {"epoch": 7, "val_pearsonr": 0.5748122930526733},
+        {"epoch": 8, "val_pearsonr": 0.6320176720619202},
+        {"epoch": 9, "val_pearsonr": 0.5904306769371033}
+      ],
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/multi_query_1000_mean_linear_baseline_20260830"
+    },
+    {
+      "run_id": "transferred-multi-query-1000-screen-20260830",
+      "head_variant": "multi_query_rich_stats",
+      "head_source": "local_upstream_reve_head",
+      "role": "candidate",
+      "seed": 33,
+      "selected_epoch": 1,
+      "selected_val_pearsonr": 0.7606620192527771,
+      "max_val_pearsonr": 0.7606620192527771,
+      "epochs_recorded": 8,
+      "delta_vs_mean_linear": 0.015719115734100342,
+      "delta_percent_vs_mean_linear": 2.1101101386230257,
+      "query_count": 2,
+      "temperature": 1.0,
+      "query_initialization": "signed_basis_pm_e0",
+      "correction_features": [
+        "weighted_mean",
+        "weighted_std",
+        "range",
+        "weighted_MAD",
+        "weighted_abs"
+      ],
+      "correction_feature_dimension": "10D",
+      "correction_weights_zero_initialized": true,
+      "validation_history": [
+        {"epoch": 1, "val_pearsonr": 0.7606620192527771},
+        {"epoch": 2, "val_pearsonr": 0.6844496130943298},
+        {"epoch": 3, "val_pearsonr": 0.6716006994247437},
+        {"epoch": 4, "val_pearsonr": 0.6988932490348816},
+        {"epoch": 5, "val_pearsonr": 0.6513431668281555},
+        {"epoch": 6, "val_pearsonr": 0.6551786661148071},
+        {"epoch": 7, "val_pearsonr": 0.7049803733825684},
+        {"epoch": 8, "val_pearsonr": 0.6819425821304321}
+      ],
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/multi_query_1000_20260830"
+    }
+  ],
+  "evidence": {
+    "completion_audit": "passed",
+    "manifest_identity_audit": "passed",
+    "failure_json": false,
+    "test_status": "withheld",
+    "test_evaluations": 0,
+    "test_started_marker": false,
+    "test_completed_marker": false,
+    "final_test_pearsonr": null
+  },
+  "conclusion": {
+    "screening_result": "multi_query_rich_stats_exceeded_mean_linear_on_seed_33_validation",
+    "matched_control_val_pearsonr": 0.7449429035186768,
+    "candidate_val_pearsonr": 0.7606620192527771,
+    "delta_vs_mean_linear": 0.015719115734100342,
+    "delta_percent_vs_mean_linear": 2.1101101386230257,
+    "confirmation_required": true,
+    "official_test_improvement_claim_allowed": false,
+    "next_step": "confirm on seeds 33/34/35 before making any official improvement claim"
+  }
+}

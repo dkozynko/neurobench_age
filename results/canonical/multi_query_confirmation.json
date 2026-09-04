@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-31",
+  "experiment": "plain_multi_query_confirmation_1000_20260831",
+  "claim_scope": "historical_1000_subject_nested_validation_only",
+  "dataset": {
+    "task": "task-RestingState",
+    "data_mode": "historical_1000_subject_nested_manifest",
+    "manifest": "data/age_medium_1000_nested.csv",
+    "manifest_sha256": "a5542dcbd49c0d6e0e591594c777bb66fb6cf80b61ac63f6639928d48225a7ac",
+    "timeline_count": 1000,
+    "split_timelines": {
+      "train": 800,
+      "val": 100,
+      "test": 100
+    },
+    "segments": {
+      "train": 48000,
+      "val": 6000,
+      "test": 6000
+    },
+    "window_duration_s": 2.0,
+    "window_stride_s": 2.0,
+    "sampling_frequency_hz": 200.0,
+    "channels": 129
+  },
+  "protocol": {
+    "name": "paired plain multi-query confirmation",
+    "source_tree": "<external-workspace>/neurobench_age_1000_20260830",
+    "remote_host": "root@184.144.255.144:14335",
+    "max_epochs": 40,
+    "selection_metric": "val/pearsonr",
+    "selection_mode": "max",
+    "early_stopping_patience": 7,
+    "evaluation_protocol": "strict",
+    "strict_final_test": false,
+    "seeds": [33, 34, 35],
+    "paired_control": "mean_linear",
+    "candidate": "multi_query_rich_stats",
+    "two_stage_finetune": false
+  },
+  "runs": [
+    {
+      "head_variant": "mean_linear",
+      "role": "matched_control",
+      "seed": 33,
+      "selected_epoch": 2,
+      "selected_val_pearsonr": 0.7449429035186768,
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/plain_multi_query_confirm_20260831_mean_linear"
+    },
+    {
+      "head_variant": "mean_linear",
+      "role": "matched_control",
+      "seed": 34,
+      "selected_epoch": 1,
+      "selected_val_pearsonr": 0.7491777539253235,
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/plain_multi_query_confirm_20260831_mean_linear"
+    },
+    {
+      "head_variant": "mean_linear",
+      "role": "matched_control",
+      "seed": 35,
+      "selected_epoch": 3,
+      "selected_val_pearsonr": 0.7453915476799011,
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/plain_multi_query_confirm_20260831_mean_linear"
+    },
+    {
+      "head_variant": "multi_query_rich_stats",
+      "role": "candidate",
+      "seed": 33,
+      "selected_epoch": 1,
+      "selected_val_pearsonr": 0.7606620192527771,
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/plain_multi_query_confirm_20260831_multi_query"
+    },
+    {
+      "head_variant": "multi_query_rich_stats",
+      "role": "candidate",
+      "seed": 34,
+      "selected_epoch": 1,
+      "selected_val_pearsonr": 0.7136840224266052,
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/plain_multi_query_confirm_20260831_multi_query"
+    },
+    {
+      "head_variant": "multi_query_rich_stats",
+      "role": "candidate",
+      "seed": 35,
+      "selected_epoch": 1,
+      "selected_val_pearsonr": 0.7182246446609497,
+      "remote_output_dir": "<external-workspace>/hbn_subset/external-results/plain_multi_query_confirm_20260831_multi_query"
+    }
+  ],
+  "paired_comparison": {
+    "per_seed": [
+      {
+        "seed": 33,
+        "mean_linear": 0.7449429035186768,
+        "multi_query_rich_stats": 0.7606620192527771,
+        "delta": 0.015719115734100342,
+        "delta_percent": 2.1101101386230257
+      },
+      {
+        "seed": 34,
+        "mean_linear": 0.7491777539253235,
+        "multi_query_rich_stats": 0.7136840224266052,
+        "delta": -0.03549373149871826,
+        "delta_percent": -4.737691597587961
+      },
+      {
+        "seed": 35,
+        "mean_linear": 0.7453915476799011,
+        "multi_query_rich_stats": 0.7182246446609497,
+        "delta": -0.027166903018951416,
+        "delta_percent": -3.644648655261905
+      }
+    ],
+    "mean_mean_linear": 0.7465040683746338,
+    "mean_multi_query_rich_stats": 0.7308568954467773,
+    "mean_delta": -0.015647172927856445,
+    "mean_delta_percent": -2.096059966816403,
+    "control_std": 0.0023263203162559817,
+    "candidate_std": 0.02591164538170021,
+    "paired_delta_std": 0.0274812129727158,
+    "candidate_wins": 1,
+    "candidate_losses": 2
+  },
+  "evidence": {
+    "completion_audit": "passed",
+    "manifest_identity_audit": "passed",
+    "baseline_summary_status": "completed",
+    "candidate_summary_status": "completed",
+    "baseline_seed_count": 3,
+    "candidate_seed_count": 3,
+    "failure_json_count": 0,
+    "test_status": "withheld",
+    "test_evaluations": 0,
+    "test_started_marker_count": 0,
+    "test_completed_marker_count": 0,
+    "final_test_pearsonr": null
+  },
+  "conclusion": {
+    "screening_result": "rejected_on_paired_three_seed_validation",
+    "reason": "The candidate won only seed 33 and lost seeds 34 and 35. Its mean selected validation Pearson was 0.7308568954 versus 0.7465040684 for mean_linear.",
+    "official_test_improvement_claim_allowed": false,
+    "next_step": "Do not run the final test for this candidate; close this direction and evaluate the next frozen-encoder head design."
+  }
+}

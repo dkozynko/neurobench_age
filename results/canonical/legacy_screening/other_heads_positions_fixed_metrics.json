@@ -1,0 +1,86 @@
+{
+  "metric": "test/pearsonr",
+  "checkpoint_selection": "val/pearsonr",
+  "positions_policy": "official_internal_positions_no_batch_channel_positions",
+  "remote_output_dir": "<external-workspace>/hbn_subset/external-results/reve_head_experiments_positions_fixed_other_heads_20260820",
+  "seeds": [33, 34, 35],
+  "mean_linear_reference": {
+    "pearson_by_seed": {
+      "33": 0.5941864252090454,
+      "34": 0.5342379212379456,
+      "35": 0.6637211441993713
+    },
+    "pearson_mean": 0.5973818302154541,
+    "pearson_sample_standard_deviation": 0.06480072697883729
+  },
+  "heads": {
+    "last_avg": {
+      "pearson_by_seed": {
+        "33": 0.541347861289978,
+        "34": 0.45640942454338074,
+        "35": 0.568010687828064
+      },
+      "rmse_by_seed": {
+        "33": 2.929032325744629,
+        "34": 3.3765108585357666,
+        "35": 2.86517071723938
+      },
+      "mae_by_seed": {
+        "33": 2.310519218444824,
+        "34": 2.527127504348755,
+        "35": 2.336606502532959
+      },
+      "pearson_mean": 0.5219226578871409,
+      "pearson_sample_standard_deviation": 0.058281338240602304,
+      "rmse_mean": 3.0569046338399253,
+      "mae_mean": 2.3914177417755127
+    },
+    "last": {
+      "pearson_by_seed": {
+        "33": 0.5236108899116516,
+        "34": 0.5238524675369263,
+        "35": 0.570409893989563
+      },
+      "rmse_by_seed": {
+        "33": 3.229891777038574,
+        "34": 3.075241804122925,
+        "35": 3.1096041202545166
+      },
+      "mae_by_seed": {
+        "33": 2.544785261154175,
+        "34": 2.4431493282318115,
+        "35": 2.3763599395751953
+      },
+      "pearson_mean": 0.5392910838127136,
+      "pearson_sample_standard_deviation": 0.026949950835842836,
+      "rmse_mean": 3.1382459004720054,
+      "mae_mean": 2.4547648429870605
+    },
+    "all": {
+      "pearson_by_seed": {
+        "33": 0.6091852784156799,
+        "34": 0.5082537531852722,
+        "35": 0.5800998210906982
+      },
+      "rmse_by_seed": {
+        "33": 2.700568199157715,
+        "34": 3.202651023864746,
+        "35": 2.9002606868743896
+      },
+      "mae_by_seed": {
+        "33": 2.1594080924987793,
+        "34": 2.486576557159424,
+        "35": 2.2326889038085938
+      },
+      "pearson_mean": 0.5658462842305502,
+      "pearson_sample_standard_deviation": 0.051953495369434076,
+      "rmse_mean": 2.93449330329895,
+      "mae_mean": 2.292891184488932
+    }
+  },
+  "pearson_mean_minus_mean_linear": {
+    "last_avg": -0.07545917232831323,
+    "last": -0.05809074640274048,
+    "all": -0.031535545984903934
+  }
+}

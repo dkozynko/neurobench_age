@@ -1,0 +1,83 @@
+{
+  "run_id": "strict-mean-linear-20260824-v3",
+  "card_id": "strict_mean_linear_reference",
+  "evaluation_protocol": "strict",
+  "strict_final_test": true,
+  "test_status": "completed",
+  "test_evaluations_per_seed": 1,
+  "head_variant": "mean_linear",
+  "head_source": "neuralbench_default",
+  "dataset": {
+    "manifest_path": "<external-workspace>/hbn_subset/age_medium_500_resting_manifest.csv",
+    "manifest_sha256": "66f9a041d1ed398bfc2723d7f129c3950681bf7b0adf4346edc038c5bc25e04a",
+    "rows": 500,
+    "positions_fixed": true
+  },
+  "selection": {
+    "monitor": "val/pearsonr",
+    "mode": "max",
+    "epoch_rule": "highest validation Pearson; one-based epoch shown",
+    "selected_epoch_by_seed": {
+      "33": 1,
+      "34": 2,
+      "35": 1
+    },
+    "selected_val_pearson_by_seed": {
+      "33": 0.5894968509674072,
+      "34": 0.6262269616127014,
+      "35": 0.5925416946411133
+    },
+    "mean_selected_val_pearson": 0.6027551690737406
+  },
+  "strict_test": {
+    "test_pearson_by_seed": {
+      "33": 0.5941864252090454,
+      "34": 0.5342379212379456,
+      "35": 0.6637211441993713
+    },
+    "mean_test_pearson": 0.5973818302154541,
+    "sample_sd_test_pearson": 0.06480072697883729,
+    "checkpoint_rehashed_after_test": true,
+    "selection_frozen_before_test": true,
+    "single_use_markers_verified": true,
+    "failure_json_present": false
+  },
+  "provenance": {
+    "remote_host": "root@175.155.64.231:19338",
+    "data_root": "<external-workspace>/neurobench_data_hl2",
+    "output_dir": "<external-workspace>/hbn_subset/external-results/reve_head_experiments_strict_mean_linear_20260824_v3",
+    "source_dir": "<external-workspace>/neurobench_age_strict_20260824_v3",
+    "source_files_sha256": {
+      "official_reve_subset.py": "b02487d74868a436e2cc8f6f1c4d95547ab91b4cea1c3c367caecc0451218f4d",
+      "official_reve_runtime.py": "dd88f0477d9ab82a7cb8addf60703eb19de65ca91abc48202f6f6e46f162f1e0",
+      "reve_upstream_heads.py": "dad911e184fbeeccbb48ecce13886d43976584ba72a1ab4b2f676f077be8e967",
+      "reve_head_math.py": "816f559fd3869097f2e221abee5c9a8be78633fcb756def16e6bb228c02156d3"
+    },
+    "remote_artifacts": {
+      "summary.json": "a74c8e3ddbb67a09d69564acd48f553c8d73209cee2630471071895a3d2624f8",
+      "seed33": {
+        "selection.json": "1aaa6db793d89f0a0ca46343389a3e86d3aed64db417f05f464fdc3ad51ee2a3",
+        "report.json": "c2f543c5298958c096049a52bcca2da5b73c7db1dbfdc0ada43b5751f250870f",
+        "test_started.json": "2aa9d93e4e779a835d2e6caca4d78750d23f1783c5dc6baac978e90f6a69c9b4",
+        "test_completed.json": "a9ef772ca7c5e685bd4f664e7d73c933b20958974ba814e6e8ee281ec8cdbc22",
+        "epoch_validation_metrics.jsonl": "559eec4f328b89c9f956bc67b2bc4df0e0de883d5631953f2e7431f28ed35e0d"
+      },
+      "seed34": {
+        "selection.json": "6ccc5f8acc633a492478c86f27b9702c2e856ad102bbbc3a3de62403ab97152f",
+        "report.json": "67eaf14f698dbd45fa3486e4300c8b946f438740b94e00443b9b00613daa6dee",
+        "test_started.json": "f7ad5edbf2af6ba8da4d60ee50d79f4a9287a024d04c51c9a44258270e2f27ec",
+        "test_completed.json": "0d783853482329b2bd027a9825c20e1ad0434573a980061e00aea5fd6b6332e8",
+        "epoch_validation_metrics.jsonl": "2b5c7b84f250306cf8376f54791fbf2724437a879f534721ea5628155afc71de"
+      },
+      "seed35": {
+        "selection.json": "6469a36e78ba467d387098e3e347dabd9d087f2a77e673157b4d6c565fea77ae",
+        "report.json": "28060240b9ea8647ca21425ab4afd6fbdd84b3a281dbf0e66b13db0a8181201d",
+        "test_started.json": "d024efbfee2061a4f34b10b7d8dad13756e567e532738a6ffa0016a689cbb1b9",
+        "test_completed.json": "fdc7b9a7a768663a04dee203df265168b9bdd579d50e5e7c4958715e5ec12817",
+        "epoch_validation_metrics.jsonl": "4be831652fae8e86d6462a14d35036c8e0d647a5d5367af7c0c35bb5ba10a19e"
+      }
+    },
+    "raw_checkpoints_copied_to_repository": false,
+    "raw_test_predictions_copied_to_repository": false
+  }
+}

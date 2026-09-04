@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "gate": {
+    "mean_delta_positive": true,
+    "minimum_wins": 2,
+    "minimum_worst_seed_delta": -0.02
+  },
+  "mean_delta": 0.00987867514292399,
+  "wins": 2,
+  "losses": 1,
+  "worst_seed_delta": -9.85264778137207e-05,
+  "per_seed": [
+    {
+      "seed": 33,
+      "baseline_selected_val_pearsonr": 0.72819584608078,
+      "candidate_selected_val_pearsonr": 0.7408146858215332,
+      "delta": 0.012618839740753174
+    },
+    {
+      "seed": 34,
+      "baseline_selected_val_pearsonr": 0.7434700131416321,
+      "candidate_selected_val_pearsonr": 0.7605857253074646,
+      "delta": 0.01711571216583252
+    },
+    {
+      "seed": 35,
+      "baseline_selected_val_pearsonr": 0.7145267128944397,
+      "candidate_selected_val_pearsonr": 0.714428186416626,
+      "delta": -9.85264778137207e-05
+    }
+  ],
+  "errors": [],
+  "finalist": "medium_lambda",
+  "test_status_before_final": "withheld"
+}
