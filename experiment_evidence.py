@@ -16,6 +16,112 @@ from typing import Any, Iterable, Mapping, Protocol
 SCHEMA_VERSION = "1.0"
 _STATUSES = {"running", "completed", "failed", "partial"}
 _EVALUATION_MODES = {"validation_only", "final_test"}
+_DETERMINISTIC_POLICIES = {"strict", "best_effort"}
+_SOURCE_SUFFIXES = {
+    ".bash",
+    ".cfg",
+    ".ini",
+    ".json",
+    ".md",
+    ".py",
+    ".sh",
+    ".toml",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
+_EXCLUDED_SOURCE_DIRECTORIES = {
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".venv",
+    "__pycache__",
+    "artifacts",
+    "results",
+}
+_DEFAULT_COMPARISON_FACTOR_KEYS = frozenset(
+    {
+        "head_variant",
+        "head_complexity",
+        "head_dropout",
+        "layer_index",
+        "layer_indices",
+        "layer_mix_alpha",
+        "mean_gradient_scale",
+        "correction_gradient_scale",
+        "swa_window",
+        "correlation_loss_lambda",
+        "correlation_loss_objective",
+        "robust_loss",
+        "target_scaler_mode",
+        "two_stage_finetune",
+        "two_stage_warmup_epochs",
+        "two_stage_unfreeze_last_blocks",
+        "two_stage_encoder_gradient_scale",
+        "augmentation_consistency",
+        "augmentation_consistency_lambda",
+        "augmentation_noise_scale",
+        "augmentation_consistency_batch_size",
+        "augmentation_space",
+        "augmentation_scope",
+        "augmentation_pairing",
+        "continued_pretraining",
+        "pretraining_epochs",
+        "pretraining_mask_fraction",
+        "pretraining_mask_block_samples",
+        "pretraining_learning_rate",
+        "pretraining_weight_decay",
+        "pretraining_max_batches",
+        "pretraining_source_split",
+        "pretraining_objective",
+        "pretraining_age_labels_used",
+        "H7_HEAD_VARIANT",
+        "H7_LAYER_INDEX",
+        "H7_LAYER_INDICES",
+        "H7_LAYER_MIX_ALPHA",
+        "H7_MEAN_GRADIENT_SCALE",
+        "H7_CORRECTION_GRADIENT_SCALE",
+        "SWA_WINDOW",
+        "CORRELATION_LOSS_LAMBDA",
+        "CORRELATION_LOSS_OBJECTIVE",
+        "ROBUST_LOSS",
+        "TARGET_SCALER_MODE",
+        "TWO_STAGE_FINETUNE",
+        "TWO_STAGE_WARMUP_EPOCHS",
+        "TWO_STAGE_UNFREEZE_LAST_BLOCKS",
+        "TWO_STAGE_ENCODER_GRADIENT_SCALE",
+        "AUGMENTATION_CONSISTENCY",
+        "AUGMENTATION_CONSISTENCY_LAMBDA",
+        "AUGMENTATION_NOISE_SCALE",
+        "AUGMENTATION_CONSISTENCY_BATCH_SIZE",
+        "AUGMENTATION_SPACE",
+        "AUGMENTATION_SCOPE",
+        "CONTINUED_PRETRAINING",
+        "PRETRAINING_EPOCHS",
+        "PRETRAINING_MASK_FRACTION",
+        "PRETRAINING_MASK_BLOCK_SAMPLES",
+        "PRETRAINING_LEARNING_RATE",
+        "PRETRAINING_WEIGHT_DECAY",
+        "PRETRAINING_MAX_BATCHES",
+        "PRETRAINING_SOURCE_SPLIT",
+        "PRETRAINING_OBJECTIVE",
+        "PRETRAINING_AGE_LABELS_USED",
+    }
+)
+_RUNTIME_ONLY_CONFIG_KEYS = frozenset(
+    {
+        "acquisition_provenance_path",
+        "command_line",
+        "gpu_hourly_rate_usd",
+        "launch_command",
+        "output_dir",
+        "provenance_path",
+        "run_dir",
+        "CACHE_DIR",
+        "DATA_DIR",
+        "SAVE_DIR",
+    }
+)
 
 
 class ResourceProbe(Protocol):
@@ -121,10 +227,93 @@ def sha256_json(payload: Any) -> str:
     return hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
 
 
+def source_tree_sha256(source_root: Path) -> str:
+    """Hash reproducible source/config files while excluding runtime outputs."""
+
+    root = Path(source_root).resolve()
+    if not root.is_dir():
+        raise NotADirectoryError(root)
+    digest = hashlib.sha256()
+    files: list[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.is_symlink() or path.suffix.lower() not in _SOURCE_SUFFIXES:
+            continue
+        relative = path.relative_to(root)
+        if any(part in _EXCLUDED_SOURCE_DIRECTORIES for part in relative.parts):
+            continue
+        files.append(path)
+    for path in sorted(files, key=lambda item: item.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _comparison_factor_keys(resolved_config: Mapping[str, Any]) -> frozenset[str]:
+    declared = resolved_config.get("comparison_factor_keys")
+    if declared is None:
+        return _DEFAULT_COMPARISON_FACTOR_KEYS
+    if not isinstance(declared, (list, tuple, set, frozenset)):
+        raise ValueError("comparison_factor_keys must be a sequence of strings")
+    if any(not isinstance(key, str) or not key for key in declared):
+        raise ValueError("comparison_factor_keys must contain non-empty strings")
+    return frozenset(declared)
+
+
+def _remove_config_keys(value: Any, keys: frozenset[str]) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            key: _remove_config_keys(item, keys)
+            for key, item in value.items()
+            if key not in keys
+        }
+    if isinstance(value, list):
+        return [_remove_config_keys(item, keys) for item in value]
+    if isinstance(value, tuple):
+        return [_remove_config_keys(item, keys) for item in value]
+    return value
+
+
+def comparison_config_hash(resolved_config: Mapping[str, Any]) -> str:
+    """Hash config fields that must remain equal in matched comparisons."""
+
+    factor_keys = _comparison_factor_keys(resolved_config)
+    return sha256_json(
+        _remove_config_keys(
+            resolved_config,
+            factor_keys | _RUNTIME_ONLY_CONFIG_KEYS | {"comparison_factor_keys"},
+        )
+    )
+
+
+def deterministic_policy_status(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Return whether settings satisfy the strict reproducibility contract."""
+
+    required = {
+        "torch_deterministic_algorithms": True,
+        "cudnn_deterministic": True,
+        "cudnn_benchmark": False,
+        "cuda_matmul_allow_tf32": False,
+        "cudnn_allow_tf32": False,
+    }
+    violations = [
+        f"{key}={settings.get(key)!r}, expected={expected!r}"
+        for key, expected in required.items()
+        if settings.get(key) != expected
+    ]
+    return {"satisfied": not violations, "violations": violations}
+
+
 def _git_metadata() -> dict[str, Any]:
     """Capture repository state without making a run depend on Git."""
 
     repo_root = Path(__file__).resolve().parent
+    try:
+        source_digest = source_tree_sha256(repo_root)
+    except (OSError, ValueError):
+        source_digest = None
     try:
         commit = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -150,8 +339,18 @@ def _git_metadata() -> dict[str, Any]:
             ).stdout.strip()
         )
     except (OSError, subprocess.SubprocessError):
-        return {"commit": None, "branch": None, "dirty": None}
-    return {"commit": commit or None, "branch": branch or None, "dirty": dirty}
+        return {
+            "commit": None,
+            "branch": None,
+            "dirty": None,
+            "source_tree_sha256": source_digest,
+        }
+    return {
+        "commit": commit or None,
+        "branch": branch or None,
+        "dirty": dirty,
+        "source_tree_sha256": source_digest,
+    }
 
 
 def _software_metadata() -> dict[str, Any]:
@@ -250,6 +449,69 @@ def validate_parameter_buckets(buckets: Mapping[str, Any]) -> None:
     actual = _counts(buckets["total"], label="total")
     if actual != expected:
         raise ValueError(f"parameter total does not match buckets: expected {expected}, got {actual}")
+
+
+def add_declared_head_bucket(
+    buckets: Mapping[str, Any],
+    *,
+    parameter_count: int,
+    trainable_parameter_count: int | None = None,
+) -> dict[str, Any]:
+    """Add an externally wrapped head to model-level parameter accounting.
+
+    Some NeuralBench versions expose the encoder as ``BrainModule.model``
+    while the downstream head is configured separately.  In that shape a
+    model-only count reports a zero-sized head even though the run metadata
+    has an authoritative head complexity contract.  This helper completes
+    that accounting without changing already-correct measured buckets.
+    """
+
+    validate_parameter_buckets(buckets)
+    if isinstance(parameter_count, bool) or not isinstance(parameter_count, int) or parameter_count < 0:
+        raise ValueError("declared head parameter_count must be a non-negative integer")
+    if trainable_parameter_count is None:
+        trainable_parameter_count = parameter_count
+    if (
+        isinstance(trainable_parameter_count, bool)
+        or not isinstance(trainable_parameter_count, int)
+        or trainable_parameter_count < 0
+        or trainable_parameter_count > parameter_count
+    ):
+        raise ValueError("declared head trainable parameter count is invalid")
+
+    current_head = _counts(buckets["head"], label="head")
+    if current_head[0] not in {0, parameter_count}:
+        raise ValueError(
+            "measured head parameter count does not match declared head complexity: "
+            f"measured={current_head[0]} declared={parameter_count}"
+        )
+    if current_head[0] == parameter_count:
+        return {
+            "encoder": dict(buckets["encoder"]),
+            "head": dict(buckets["head"]),
+            "auxiliary": [dict(item) for item in buckets.get("auxiliary", [])],
+            "total": dict(buckets["total"]),
+        }
+
+    encoder = dict(buckets["encoder"])
+    auxiliary = [dict(item) for item in buckets.get("auxiliary", [])]
+    head = {
+        "total": parameter_count,
+        "trainable": trainable_parameter_count,
+        "frozen": parameter_count - trainable_parameter_count,
+    }
+    auxiliary_totals = [
+        _counts(item, label=f"auxiliary[{index}]") for index, item in enumerate(auxiliary)
+    ]
+    encoder_counts = _counts(encoder, label="encoder")
+    total = {
+        "total": encoder_counts[0] + head["total"] + sum(item[0] for item in auxiliary_totals),
+        "trainable": encoder_counts[1] + head["trainable"] + sum(item[1] for item in auxiliary_totals),
+        "frozen": encoder_counts[2] + head["frozen"] + sum(item[2] for item in auxiliary_totals),
+    }
+    completed = {"encoder": encoder, "head": head, "auxiliary": auxiliary, "total": total}
+    validate_parameter_buckets(completed)
+    return completed
 
 
 def estimate_head_parameter_count(variant: str, *, embed_dim: int, n_outputs: int) -> int:
@@ -379,11 +641,15 @@ class EvidenceRecorder:
         resolved_config: Mapping[str, Any],
         command_line: str,
         evaluation_mode: str = "validation_only",
+        deterministic_policy: str = "best_effort",
         resource_probe: ResourceProbe | None = None,
         gpu_hourly_rate_usd: float | None = None,
     ) -> None:
         if evaluation_mode not in _EVALUATION_MODES:
             raise ValueError(f"unsupported evaluation mode: {evaluation_mode}")
+        if deterministic_policy not in _DETERMINISTIC_POLICIES:
+            raise ValueError(f"unsupported deterministic policy: {deterministic_policy}")
+        comparison_factor_keys = _comparison_factor_keys(resolved_config)
         self.run_dir = Path(run_dir)
         self.run_id = run_id
         self.evaluation_mode = evaluation_mode
@@ -394,6 +660,7 @@ class EvidenceRecorder:
         self._head_complexity: dict[str, Any] = {}
         self._optimizer: dict[str, Any] = {}
         self._throughput: dict[str, Any] = {}
+        git_metadata = _git_metadata()
         self._manifest: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "run_id": run_id,
@@ -403,7 +670,11 @@ class EvidenceRecorder:
             "split_fingerprint": split_fingerprint,
             "seed": seed,
             "config_hash": sha256_json(resolved_config),
-            "git": _git_metadata(),
+            "protocol_digest": sha256_json(resolved_config.get("protocol", {})),
+            "comparison_config_hash": comparison_config_hash(resolved_config),
+            "comparison_factor_keys": sorted(comparison_factor_keys),
+            "git": git_metadata,
+            "source_tree_sha256": git_metadata.get("source_tree_sha256"),
             "hardware": {
                 "host": socket.gethostname(),
                 "gpu_model": None,
@@ -417,6 +688,9 @@ class EvidenceRecorder:
             "resolved_config": dict(resolved_config),
             "command_line": command_line,
             "deterministic_settings": {},
+            "deterministic_policy": deterministic_policy,
+            "deterministic_policy_satisfied": None,
+            "deterministic_policy_violations": [],
             "precision": (
                 resolved_config.get("protocol", {}).get("precision")
                 if isinstance(resolved_config.get("protocol"), Mapping)
@@ -451,6 +725,13 @@ class EvidenceRecorder:
         self._monotonic_start = time.perf_counter()
         self.resource_probe.reset_peak_memory_stats()
         self._manifest["deterministic_settings"] = _deterministic_metadata()
+        policy_status = deterministic_policy_status(self._manifest["deterministic_settings"])
+        self._manifest["deterministic_policy_satisfied"] = (
+            True
+            if self._manifest["deterministic_policy"] == "best_effort"
+            else policy_status["satisfied"]
+        )
+        self._manifest["deterministic_policy_violations"] = policy_status["violations"]
         self._update_hardware(self.resource_probe.snapshot())
         self._write_manifest()
         return dict(self._manifest)
@@ -478,6 +759,7 @@ class EvidenceRecorder:
         allowed = {
             "git", "software", "deterministic_settings", "precision", "analysis_spec_hash",
             "test_access", "config_hash", "dataset_manifest", "split_fingerprint",
+            "source_tree_sha256", "protocol_digest", "comparison_config_hash",
             "train_age_reference_path", "train_age_reference_sha256",
         }
         unknown = sorted(set(metadata) - allowed)

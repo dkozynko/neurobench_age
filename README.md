@@ -329,11 +329,14 @@ metadata only; it is never fed back as a replacement iterator. Use the same
 command with `--head-variant mean_linear` to produce the full-data reference
 for comparison with the rich-statistics head.
 
-### Article-ready evidence analysis
+### Research-ready evidence analysis
 
 Every strict seed run now records a schema-versioned manifest, normalized
 configuration, parameter accounting, observed optimizer and throughput,
-subject-level validation predictions, and a train-only age reference. Analyze
+subject-level validation predictions, a source-tree digest, protocol/config
+identity, and a train-only age reference. Article-ready runs should pass
+`--deterministic` so the manifest records the strict reproducibility policy.
+Analyze
 matched candidate and baseline seeds with:
 
 ```bash
@@ -353,6 +356,15 @@ age-group tables, complexity-adjusted comparisons, and prediction/residual
 plots. A final-test artifact is included automatically when the run was
 explicitly launched with `--evaluation-mode final_test
 --allow-sealed-test-evaluation`.
+
+The official NeuralBench selection/test Pearson and the subject-level export
+Pearson are recorded as separate metric tracks: the former is used for the
+benchmark comparison, while the latter supports subject-level bootstrap,
+age-group, and residual analyses. The audit reconciles each export with its
+own declared export metrics and does not incorrectly require equality with the
+native official metric. The completed 1000-subject augmentation-consistency
+comparison is preserved in
+`results/article_ready_sealed_final_medium_1000_20260904/final_comparison.json`.
 
 This gated run creates durable `test_started.json` and `test_completed.json`
 markers, verifies that the selected checkpoint hash did not change, and records

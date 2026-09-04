@@ -17,12 +17,19 @@ import numpy as np
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from experiment_evidence import SCHEMA_VERSION, sha256_json, validate_parameter_buckets, write_json_atomic
+from experiment_evidence import (
+    SCHEMA_VERSION,
+    add_declared_head_bucket,
+    sha256_json,
+    validate_parameter_buckets,
+    write_json_atomic,
+)
 from prediction_evidence import PredictionEvidenceError, compute_regression_metrics, read_prediction_jsonl
 
 
 BOOTSTRAP_SEED = 20260903
 BOOTSTRAP_ITERATIONS = 10_000
+SELECTION_SCORE_TOLERANCE = 1e-8
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -48,6 +55,7 @@ def audit_run(run_dir: Path) -> dict[str, Any]:
     run_dir = Path(run_dir)
     errors: list[str] = []
     missing: list[str] = []
+    warnings: list[str] = []
     manifest: dict[str, Any] = {}
     complexity: dict[str, Any] = {}
     try:
@@ -62,8 +70,73 @@ def audit_run(run_dir: Path) -> dict[str, Any]:
     for name, payload in (("run_manifest.json", manifest), ("complexity.json", complexity)):
         if payload and payload.get("schema_version") != SCHEMA_VERSION:
             errors.append(f"{name} has schema_version {payload.get('schema_version')!r}")
+    if manifest and manifest.get("status") != "completed":
+        errors.append(
+            f"run_manifest.json has status {manifest.get('status')!r}, expected 'completed'"
+        )
+    reported_missing = manifest.get("missing") if manifest else None
+    if reported_missing:
+        if isinstance(reported_missing, list):
+            errors.append(
+                "run_manifest.json reports missing evidence: "
+                + "; ".join(str(item) for item in reported_missing)
+            )
+        else:
+            errors.append("run_manifest.json has an invalid missing-evidence list")
+
+    git_metadata = manifest.get("git") if manifest else None
+    source_tree_digest = manifest.get("source_tree_sha256") if manifest else None
+    if source_tree_digest is None and isinstance(git_metadata, Mapping):
+        source_tree_digest = git_metadata.get("source_tree_sha256")
+    if not isinstance(source_tree_digest, str) or not source_tree_digest:
+        errors.append("run_manifest.json is missing source tree SHA-256 provenance")
+    protocol_digest = manifest.get("protocol_digest") if manifest else None
+    if not isinstance(protocol_digest, str) or not protocol_digest:
+        errors.append("run_manifest.json is missing protocol digest")
+    comparison_config_digest = manifest.get("comparison_config_hash") if manifest else None
+    if not isinstance(comparison_config_digest, str) or not comparison_config_digest:
+        errors.append("run_manifest.json is missing comparison config hash")
+    comparison_factor_keys = manifest.get("comparison_factor_keys") if manifest else None
+    if not isinstance(comparison_factor_keys, list) or any(
+        not isinstance(key, str) or not key for key in comparison_factor_keys
+    ):
+        errors.append("run_manifest.json has an invalid comparison factor key list")
+    deterministic_policy = manifest.get("deterministic_policy") if manifest else None
+    if deterministic_policy not in {"strict", "best_effort"}:
+        errors.append("run_manifest.json has an invalid deterministic policy")
+    elif deterministic_policy == "strict":
+        if manifest.get("deterministic_policy_satisfied") is not True:
+            errors.append("strict deterministic policy is not satisfied")
+    else:
+        warnings.append("run uses best-effort, not strict bitwise determinism")
 
     buckets = complexity.get("parameter_buckets") if complexity else None
+    head_complexity = complexity.get("head_complexity") if complexity else None
+    declared_head_count = (
+        head_complexity.get("parameter_count")
+        if isinstance(head_complexity, Mapping)
+        else None
+    )
+    raw_head_bucket = buckets.get("head") if isinstance(buckets, Mapping) else None
+    raw_head_total = raw_head_bucket.get("total") if isinstance(raw_head_bucket, Mapping) else None
+    if (
+        isinstance(buckets, Mapping)
+        and isinstance(declared_head_count, int)
+        and not isinstance(declared_head_count, bool)
+        and declared_head_count > 0
+        and raw_head_total == 0
+    ):
+        try:
+            buckets = add_declared_head_bucket(
+                buckets,
+                parameter_count=declared_head_count,
+            )
+        except (KeyError, ValueError) as error:
+            errors.append(f"external head parameter accounting: {error}")
+        else:
+            warnings.append(
+                "parameter buckets normalized using the external head complexity contract"
+            )
     if isinstance(buckets, Mapping):
         try:
             validate_parameter_buckets(buckets)
@@ -71,6 +144,20 @@ def audit_run(run_dir: Path) -> dict[str, Any]:
             errors.append(f"parameter accounting: {error}")
     else:
         missing.append("complexity.parameter_buckets")
+    if isinstance(head_complexity, Mapping) and "parameter_count" in head_complexity:
+        declared_head_count = head_complexity.get("parameter_count")
+        measured_head_count = buckets.get("head", {}).get("total") if isinstance(buckets, Mapping) else None
+        if (
+            isinstance(declared_head_count, bool)
+            or not isinstance(declared_head_count, int)
+            or declared_head_count < 0
+        ):
+            errors.append("head complexity has an invalid parameter_count")
+        elif measured_head_count != declared_head_count:
+            errors.append(
+                "head complexity parameter count does not match parameter bucket: "
+                f"declared={declared_head_count} measured={measured_head_count}"
+            )
 
     prediction_path = run_dir / "predictions" / "validation.jsonl"
     rows: list[dict[str, Any]] = []
@@ -101,14 +188,72 @@ def audit_run(run_dir: Path) -> dict[str, Any]:
             selection = _read_json(selection_path)
         except ValueError as error:
             errors.append(str(error))
-    elif manifest.get("evaluation_mode") == "validation_only":
+    elif manifest.get("evaluation_mode") in {"validation_only", "final_test"}:
         missing.append("selection.json")
+
+    if selection:
+        selected_epoch = selection.get("selected_epoch")
+        if isinstance(selected_epoch, bool) or not isinstance(selected_epoch, int) or selected_epoch < 1:
+            errors.append("selection.json has an invalid selected_epoch")
+        selected_score = selection.get("selected_val_pearsonr")
+        selected_score_valid = (
+            isinstance(selected_score, (int, float))
+            and not isinstance(selected_score, bool)
+            and math.isfinite(float(selected_score))
+        )
+        if isinstance(selected_score, bool) or not isinstance(selected_score, (int, float)):
+            errors.append("selection.json has an invalid selected_val_pearsonr")
+        elif not selected_score_valid:
+            errors.append("selection.json has a non-finite selected_val_pearsonr")
+        validation_history_path = run_dir / "epoch_validation_metrics.jsonl"
+        if not validation_history_path.is_file():
+            missing.append("epoch_validation_metrics.jsonl")
+        elif isinstance(selected_epoch, int) and not isinstance(selected_epoch, bool):
+            try:
+                history_rows = jsonl_rows(validation_history_path)
+            except (OSError, json.JSONDecodeError, ValueError) as error:
+                errors.append(f"validation history: {error}")
+            else:
+                matching_rows = [row for row in history_rows if row.get("epoch") == selected_epoch]
+                if len(matching_rows) != 1:
+                    errors.append("selection epoch does not match exactly one validation history record")
+                else:
+                    history_score = matching_rows[0].get("val/pearsonr")
+                    if selected_score_valid and isinstance(history_score, (int, float)) and not isinstance(history_score, bool):
+                        if not math.isclose(
+                            float(history_score), float(selected_score),
+                            rel_tol=SELECTION_SCORE_TOLERANCE,
+                            abs_tol=SELECTION_SCORE_TOLERANCE,
+                        ):
+                            errors.append("selection Pearson does not match validation history")
+                    else:
+                        errors.append("selected validation history record has an invalid Pearson score")
 
     test_marker: dict[str, Any] = {}
     test_rows: list[dict[str, Any]] = []
     test_metrics: dict[str, Any] = {}
+    official_test_pearsonr: float | None = None
     test_completed_path = run_dir / "test_completed.json"
     test_prediction_path = run_dir / "predictions" / "test.jsonl"
+    evaluation_mode = manifest.get("evaluation_mode")
+    if evaluation_mode == "validation_only":
+        if manifest.get("test_access") != "sealed":
+            errors.append("validation_only run must declare test_access=sealed")
+        for test_artifact in (
+            run_dir / "test_started.json",
+            test_completed_path,
+            test_prediction_path,
+            run_dir / "epoch_test_metrics.jsonl",
+        ):
+            if test_artifact.is_file():
+                errors.append(
+                    f"validation_only run contains test artifact: {test_artifact.name}"
+                )
+    elif evaluation_mode == "final_test":
+        if manifest.get("test_access") != "single_use_predeclared":
+            errors.append("final_test run must declare test_access=single_use_predeclared")
+        if not (run_dir / "test_started.json").is_file():
+            missing.append("test_started.json")
     if test_completed_path.is_file():
         try:
             test_marker = _read_json(test_completed_path)
@@ -121,6 +266,8 @@ def audit_run(run_dir: Path) -> dict[str, Any]:
                 errors.append("test_completed.json has an invalid test_pearsonr")
             elif not math.isfinite(float(marker_score)):
                 errors.append("test_completed.json has a non-finite test_pearsonr")
+            else:
+                official_test_pearsonr = float(marker_score)
         except ValueError as error:
             errors.append(str(error))
         if not test_prediction_path.is_file():
@@ -132,14 +279,42 @@ def audit_run(run_dir: Path) -> dict[str, Any]:
                     [row["true_age"] for row in test_rows],
                     [row["predicted_age"] for row in test_rows],
                 )
-                marker_score = test_marker.get("test_pearsonr")
-                if isinstance(marker_score, (int, float)) and abs(
-                    float(marker_score) - float(test_metrics["pearsonr"])
-                ) > 1e-10:
+                export_payload = test_marker.get("prediction_export")
+                export_metrics = (
+                    export_payload.get("metrics")
+                    if isinstance(export_payload, Mapping)
+                    else None
+                )
+                export_score = (
+                    export_metrics.get("pearsonr")
+                    if isinstance(export_metrics, Mapping)
+                    else None
+                )
+                if export_score is not None:
+                    if isinstance(export_score, bool) or not isinstance(export_score, (int, float)):
+                        errors.append("prediction export has an invalid Pearson")
+                    elif not math.isclose(
+                        float(export_score),
+                        float(test_metrics["pearsonr"]),
+                        rel_tol=SELECTION_SCORE_TOLERANCE,
+                        abs_tol=SELECTION_SCORE_TOLERANCE,
+                    ):
+                        errors.append("prediction export Pearson does not match test predictions")
+                elif (
+                    official_test_pearsonr is not None
+                    and not math.isclose(
+                        official_test_pearsonr,
+                        float(test_metrics["pearsonr"]),
+                        rel_tol=SELECTION_SCORE_TOLERANCE,
+                        abs_tol=SELECTION_SCORE_TOLERANCE,
+                    )
+                ):
+                    # Legacy artifacts did not declare a separate export metric;
+                    # retain the strict consistency check for that format.
                     errors.append("test marker Pearson does not match test predictions")
             except PredictionEvidenceError as error:
                 errors.append(f"test predictions: {error}")
-    elif manifest.get("evaluation_mode") == "final_test":
+    elif evaluation_mode == "final_test":
         missing.append("test_completed.json")
 
     status = "invalid" if errors else "partial" if missing else "complete"
@@ -150,20 +325,32 @@ def audit_run(run_dir: Path) -> dict[str, Any]:
         "status": status,
         "errors": errors,
         "missing": missing,
+        "warnings": warnings,
         "seed": manifest.get("seed"),
+        "task": manifest.get("task"),
         "head_variant": manifest.get("resolved_config", {}).get("head_variant")
         if isinstance(manifest.get("resolved_config"), Mapping)
         else None,
         "dataset_manifest": manifest.get("dataset_manifest"),
         "split_fingerprint": manifest.get("split_fingerprint"),
+        "source_tree_sha256": source_tree_digest,
+        "protocol_digest": protocol_digest,
+        "comparison_config_hash": comparison_config_digest,
+        "comparison_factor_keys": comparison_factor_keys,
+        "deterministic_policy": deterministic_policy,
+        "deterministic_policy_satisfied": manifest.get("deterministic_policy_satisfied"),
         "evaluation_mode": manifest.get("evaluation_mode"),
         "test_access": manifest.get("test_access"),
         "selected_epoch": selection.get("selected_epoch"),
         "selected_val_pearsonr": selection.get("selected_val_pearsonr"),
+        "validation_metric_source": "epoch_validation_metrics",
+        "validation_prediction_pearsonr": metrics.get("pearsonr"),
         "test_status": "completed" if test_marker else (
             "withheld" if manifest.get("evaluation_mode") == "validation_only" else "missing"
         ),
         "test_metrics": test_metrics,
+        "official_test_pearsonr": official_test_pearsonr,
+        "test_metric_source": "official_test_marker",
         "test_predictions": test_rows,
         "hardware_class": hardware.get("hardware_class"),
         "hardware_mixed": False,
@@ -196,7 +383,11 @@ def paired_bootstrap_delta(
 ) -> dict[str, Any]:
     """Compute candidate-minus-baseline paired subject bootstrap evidence."""
 
-    subject_ids = sorted(set(candidate) & set(baseline))
+    candidate_subject_ids = set(candidate)
+    baseline_subject_ids = set(baseline)
+    if candidate_subject_ids != baseline_subject_ids:
+        raise ValueError("paired bootstrap requires exactly the same subject IDs")
+    subject_ids = sorted(candidate_subject_ids)
     if len(subject_ids) < 2:
         raise ValueError("paired bootstrap requires at least two matched subjects")
     if any(candidate[subject][0] != baseline[subject][0] for subject in subject_ids):
@@ -283,21 +474,14 @@ def summarize_seed_stability(
 ) -> dict[str, Any]:
     """Summarize per-seed candidate-versus-baseline validation stability."""
 
-    candidate_audits = [audit_run(Path(path)) for path in candidate_dirs]
-    baseline_audits = [audit_run(Path(path)) for path in baseline_dirs]
-    candidate_by_seed = {audit["seed"]: audit for audit in candidate_audits}
-    baseline_by_seed = {audit["seed"]: audit for audit in baseline_audits}
-    shared_seeds = sorted(set(candidate_by_seed) & set(baseline_by_seed))
-    if not shared_seeds:
-        raise ValueError("candidate and baseline have no shared seeds")
+    matched = _matched_audits(candidate_dirs, baseline_dirs)
+    shared_seeds = [seed for seed, _, _ in matched]
     per_seed: list[dict[str, Any]] = []
-    for seed in shared_seeds:
-        candidate = candidate_by_seed[seed]
-        baseline = baseline_by_seed[seed]
-        candidate_score = float(candidate["metrics"]["pearsonr"])
-        baseline_score = float(baseline["metrics"]["pearsonr"])
-        candidate_test = candidate.get("test_metrics", {}).get("pearsonr")
-        baseline_test = baseline.get("test_metrics", {}).get("pearsonr")
+    for seed, candidate, baseline in matched:
+        candidate_score = float(candidate["selected_val_pearsonr"])
+        baseline_score = float(baseline["selected_val_pearsonr"])
+        candidate_test = candidate.get("official_test_pearsonr")
+        baseline_test = baseline.get("official_test_pearsonr")
         per_seed.append(
             {
                 "seed": seed,
@@ -305,8 +489,12 @@ def summarize_seed_stability(
                 "baseline_pearsonr": baseline_score,
                 "candidate_selected_val_pearsonr": candidate.get("selected_val_pearsonr"),
                 "baseline_selected_val_pearsonr": baseline.get("selected_val_pearsonr"),
+                "candidate_validation_prediction_pearsonr": candidate.get("validation_prediction_pearsonr"),
+                "baseline_validation_prediction_pearsonr": baseline.get("validation_prediction_pearsonr"),
                 "candidate_test_pearsonr": candidate_test,
                 "baseline_test_pearsonr": baseline_test,
+                "candidate_test_prediction_pearsonr": candidate.get("test_metrics", {}).get("pearsonr"),
+                "baseline_test_prediction_pearsonr": baseline.get("test_metrics", {}).get("pearsonr"),
                 "pearsonr_delta": candidate_score - baseline_score,
                 "candidate_status": candidate["status"],
                 "baseline_status": baseline["status"],
@@ -316,7 +504,8 @@ def summarize_seed_stability(
     scores = np.asarray([row["candidate_pearsonr"] for row in per_seed], dtype=np.float64)
     hardware_classes = {
         audit["hardware_class"]
-        for audit in candidate_audits + baseline_audits
+        for _, candidate, baseline in matched
+        for audit in (candidate, baseline)
         if audit.get("hardware_class") is not None
     }
     return {
@@ -332,17 +521,86 @@ def summarize_seed_stability(
     }
 
 
+def _audits_by_seed(run_dirs: Sequence[Path], group_name: str) -> dict[int, dict[str, Any]]:
+    audits_by_seed: dict[int, dict[str, Any]] = {}
+    for path in run_dirs:
+        audit = audit_run(Path(path))
+        if audit["status"] != "complete":
+            raise ValueError(
+                f"{group_name} run {audit['run_dir']} is not complete: "
+                f"errors={audit['errors']} missing={audit['missing']}"
+            )
+        seed = audit.get("seed")
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            raise ValueError(f"{group_name} run {audit['run_dir']} has an invalid seed")
+        if seed in audits_by_seed:
+            raise ValueError(f"{group_name} group contains duplicate seed {seed}")
+        audits_by_seed[seed] = audit
+    return audits_by_seed
+
+
+def _validate_matched_pair(
+    candidate: Mapping[str, Any], baseline: Mapping[str, Any], *, seed: int
+) -> None:
+    for field in (
+        "task",
+        "dataset_manifest",
+        "split_fingerprint",
+        "source_tree_sha256",
+        "protocol_digest",
+        "comparison_config_hash",
+        "comparison_factor_keys",
+        "evaluation_mode",
+        "test_access",
+    ):
+        if candidate.get(field) != baseline.get(field):
+            label = {
+                "comparison_config_hash": "comparison config",
+                "comparison_factor_keys": "comparison factor declaration",
+                "protocol_digest": "protocol digest",
+                "source_tree_sha256": "source tree",
+            }.get(field, field)
+            raise ValueError(
+                f"matched comparison has different {label} for seed {seed}: "
+                f"candidate={candidate.get(field)!r} baseline={baseline.get(field)!r}"
+            )
+    candidate_map = _prediction_map(candidate.get("predictions", []))
+    baseline_map = _prediction_map(baseline.get("predictions", []))
+    if set(candidate_map) != set(baseline_map):
+        raise ValueError(
+            f"matched comparison requires exactly the same validation subject IDs for seed {seed}"
+        )
+    for subject_id in sorted(candidate_map):
+        if candidate_map[subject_id][0] != baseline_map[subject_id][0]:
+            raise ValueError(
+                f"matched comparison requires identical true ages for subject {subject_id!r}"
+            )
+
+
+def _matched_audits(
+    candidate_dirs: Sequence[Path], baseline_dirs: Sequence[Path]
+) -> list[tuple[int, dict[str, Any], dict[str, Any]]]:
+    candidates = _audits_by_seed(candidate_dirs, "candidate")
+    baselines = _audits_by_seed(baseline_dirs, "baseline")
+    shared_seeds = sorted(set(candidates) & set(baselines))
+    if not shared_seeds:
+        raise ValueError("candidate and baseline have no shared seeds")
+    matched: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
+    for seed in shared_seeds:
+        candidate = candidates[seed]
+        baseline = baselines[seed]
+        _validate_matched_pair(candidate, baseline, seed=seed)
+        matched.append((seed, candidate, baseline))
+    return matched
+
+
 def complexity_adjusted_comparison(
     candidate_dirs: Sequence[Path], baseline_dirs: Sequence[Path]
 ) -> list[dict[str, Any]]:
     """Compare matched seeds while exposing the raw parameter denominator."""
 
-    candidates = {audit["seed"]: audit for audit in (audit_run(Path(path)) for path in candidate_dirs)}
-    baselines = {audit["seed"]: audit for audit in (audit_run(Path(path)) for path in baseline_dirs)}
     rows: list[dict[str, Any]] = []
-    for seed in sorted(set(candidates) & set(baselines)):
-        candidate = candidates[seed]
-        baseline = baselines[seed]
+    for seed, candidate, baseline in _matched_audits(candidate_dirs, baseline_dirs):
         candidate_head = (candidate.get("parameter_buckets") or {}).get("head", {})
         baseline_head = (baseline.get("parameter_buckets") or {}).get("head", {})
         candidate_parameters = candidate_head.get("total")
@@ -353,8 +611,8 @@ def complexity_adjusted_comparison(
             denominator = candidate_parameters - baseline_parameters
             if denominator > 0:
                 ratio = (
-                    float(candidate["metrics"]["pearsonr"])
-                    - float(baseline["metrics"]["pearsonr"])
+                    float(candidate["selected_val_pearsonr"])
+                    - float(baseline["selected_val_pearsonr"])
                 ) / denominator
         rows.append(
             {
@@ -363,8 +621,8 @@ def complexity_adjusted_comparison(
                 "baseline_head_parameters": baseline_parameters,
                 "head_parameter_delta": denominator,
                 "pearsonr_delta": (
-                    float(candidate["metrics"]["pearsonr"])
-                    - float(baseline["metrics"]["pearsonr"])
+                    float(candidate["selected_val_pearsonr"])
+                    - float(baseline["selected_val_pearsonr"])
                 ),
                 "delta_per_extra_head_parameter": ratio,
                 "hardware_mixed": candidate.get("hardware_class") != baseline.get("hardware_class"),
@@ -400,8 +658,11 @@ def analyze_runs(
     output_dir.mkdir(parents=True, exist_ok=True)
     audits = [audit_run(Path(path)) for path in run_dirs]
     for audit in audits:
-        if audit["status"] == "invalid":
-            raise ValueError(f"invalid run {audit['run_dir']}: {audit['errors']}")
+        if audit["status"] != "complete":
+            raise ValueError(
+                f"run {audit['run_dir']} is not complete: "
+                f"errors={audit['errors']} missing={audit['missing']}"
+            )
 
     reference: dict[str, float] = {}
     reference_source_sha256: str | None = None
@@ -442,8 +703,12 @@ def analyze_runs(
                 "hardware_class": audit.get("hardware_class"),
                 "hardware_mixed": audit.get("hardware_mixed"),
                 "selected_val_pearsonr": audit.get("selected_val_pearsonr"),
+                "selection_metric_source": audit.get("validation_metric_source"),
                 "test_status": audit.get("test_status"),
-                "test_pearsonr": (audit.get("test_metrics") or {}).get("pearsonr"),
+                "test_pearsonr": audit.get("official_test_pearsonr"),
+                "test_metric_source": audit.get("test_metric_source"),
+                "test_prediction_pearsonr": (audit.get("test_metrics") or {}).get("pearsonr"),
+                "audit_warnings": "; ".join(audit.get("warnings", [])),
                 **metrics,
             }
         )
@@ -505,18 +770,14 @@ def analyze_runs(
         comparison = summarize_seed_stability(run_dirs, baseline_run_dirs)
         comparison["baseline_variant"] = baseline_variant
         comparison["complexity"] = complexity_adjusted_comparison(run_dirs, baseline_run_dirs)
-        baseline_audits = [audit_run(Path(path)) for path in baseline_run_dirs]
-        candidate_by_seed = {audit.get("seed"): audit for audit in audits}
-        baseline_by_seed = {audit.get("seed"): audit for audit in baseline_audits}
+        matched = _matched_audits(run_dirs, baseline_run_dirs)
         bootstrap_rows: dict[str, list[dict[str, Any]]] = {}
         for split_name, candidate_key, baseline_key in (
             ("validation", "predictions", "predictions"),
             ("test", "test_predictions", "test_predictions"),
         ):
             rows_for_split: list[dict[str, Any]] = []
-            for seed_value in sorted(set(candidate_by_seed) & set(baseline_by_seed)):
-                candidate_audit = candidate_by_seed[seed_value]
-                baseline_audit = baseline_by_seed[seed_value]
+            for seed_value, candidate_audit, baseline_audit in matched:
                 if not candidate_audit.get(candidate_key) or not baseline_audit.get(baseline_key):
                     continue
                 candidate_map = _prediction_map(candidate_audit[candidate_key])

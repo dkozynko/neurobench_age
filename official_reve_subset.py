@@ -41,6 +41,7 @@ from experiment_evidence import (
     EvidenceRecorder,
     SCHEMA_VERSION,
     parameter_buckets_from_model,
+    comparison_config_hash,
     sha256_json,
     write_json_atomic,
     write_jsonl_atomic,
@@ -81,6 +82,19 @@ class DataSource:
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def configure_determinism() -> None:
+    """Enable the strict reproducibility settings used by article runs."""
+
+    import torch
+
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
 
 
 def _replace_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
@@ -2554,6 +2568,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="optional provider GPU hourly rate used to estimate run cost",
     )
     parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="enable strict deterministic PyTorch/CUDA settings for reproducible article runs",
+    )
+    parser.add_argument(
         "--smoke-head",
         choices=("mean_linear_copy", "mean_linear_detached", "mean_linear_warmup", "mean_linear_gradient_scaled", "mean_linear_probe_scaled", "mean_anchor", "mean_residual", "mean_vector_anchor", "mean_mlp_residual", "mean_stats_residual", "mean_stats_residual_detached", "mean_stats_residual_gradient_scaled", "mean_stats_probe_scaled", "mean_stats_attention_residual", "mean_attention_gated", "global_stats_residual", "mean_rich_stats_residual", "mean_rich_stats_gradient_routes", "mean_anchor_ensemble", "mean_reliability_shrinkage", "mean_reliability_stable", "grouped_rich_stats_shrinkage", "grouped_stats_shared_gate", "temporal_pyramid_stats", "mean_covariance_residual", "multi_query_rich_stats", "mean_layer_linear", "mean_layer_mix", "mean_layer_mix_fixed", "last_avg", "last", "all", "last_tuned"),
         help="run a data-free smoke test using the installed official stack",
@@ -2710,6 +2729,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.evaluation_mode == "validation_only" and args.allow_sealed_test_evaluation:
         parser.error("--allow-sealed-test-evaluation requires --evaluation-mode final_test")
     args.strict_final_test = args.evaluation_mode == "final_test"
+
+    deterministic_policy = "strict" if args.deterministic else "best_effort"
+    if args.deterministic:
+        try:
+            configure_determinism()
+        except (ImportError, RuntimeError) as error:
+            parser.error(f"strict deterministic mode is unavailable: {error}")
 
     try:
         args.evaluation_protocol, args.strict_final_test = validate_evaluation_options(
@@ -3021,6 +3047,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "evaluation_mode": args.evaluation_mode,
                 "allow_sealed_test_evaluation": bool(args.allow_sealed_test_evaluation),
                 "gpu_hourly_rate_usd": args.gpu_hourly_rate_usd,
+                "deterministic_policy": deterministic_policy,
             }
             evidence_recorder = EvidenceRecorder(
                 run_dir,
@@ -3032,6 +3059,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 resolved_config=seed_metadata,
                 command_line=launch_command,
                 evaluation_mode=args.evaluation_mode,
+                deterministic_policy=deterministic_policy,
                 gpu_hourly_rate_usd=args.gpu_hourly_rate_usd,
             )
             head_complexity = seed_metadata.get("head_complexity")
@@ -3099,7 +3127,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "config": config_payload,
                     },
                 )
-                evidence_recorder.set_manifest_metadata(config_hash=sha256_json(config_payload))
+                evidence_recorder.set_manifest_metadata(
+                    config_hash=sha256_json(config_payload),
+                    comparison_config_hash=comparison_config_hash(config_payload),
+                )
                 try:
                     reference_sha256 = _write_train_age_reference(run_dir, source)
                 except (OSError, ValueError) as reference_error:

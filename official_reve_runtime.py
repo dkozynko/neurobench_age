@@ -20,9 +20,9 @@ import torch
 from torch import nn
 
 try:
-    from .experiment_evidence import parameter_buckets_from_model
+    from .experiment_evidence import add_declared_head_bucket, parameter_buckets_from_model
 except ImportError:
-    from experiment_evidence import parameter_buckets_from_model
+    from experiment_evidence import add_declared_head_bucket, parameter_buckets_from_model
 
 _CONFIGURE_OPTIMIZERS_ABSENT = object()
 _TRAINING_STEP_ABSENT = object()
@@ -979,6 +979,27 @@ def _replace_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
 
     data = (json.dumps(payload, indent=2, default=str) + "\n").encode("utf-8")
     _replace_bytes_atomic(path, data)
+
+
+def _run_metadata_paths(experiment: Any, canonical_run_dir: Path) -> list[Path]:
+    """Return official and canonical destinations for late-bound metadata.
+
+    NeuralBench can omit its internal UID directory for a later seed in a
+    multi-seed process.  The canonical seed directory must therefore always
+    receive a copy of the metadata used by the article-ready evidence audit.
+    """
+
+    paths: list[Path] = []
+    infra = getattr(experiment, "infra", None)
+    uid_folder = getattr(infra, "uid_folder", None)
+    if callable(uid_folder):
+        uid_path = uid_folder()
+        if uid_path is not None:
+            paths.append(Path(uid_path) / "run_metadata.json")
+    canonical_path = Path(canonical_run_dir) / "run_metadata.json"
+    if canonical_path not in paths:
+        paths.append(canonical_path)
+    return paths
 
 
 def _publish_json_create_if_absent(path: Path, payload: Mapping[str, Any]) -> None:
@@ -2166,6 +2187,24 @@ def _patch_official_components(
     tuning_metadata_by_experiment: dict[int, dict[str, Any]] = {}
     test_invocations: set[int] = set()
 
+    def persist_run_metadata(
+        experiment: Any,
+        metadata: Mapping[str, Any],
+        *,
+        replace: bool = False,
+    ) -> None:
+        """Persist metadata to every available official/canonical run path."""
+
+        for path in _run_metadata_paths(experiment, epoch_metrics_path.parent):
+            payload: dict[str, Any] = {}
+            if not replace and path.is_file():
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(loaded, Mapping):
+                    raise ValueError("run_metadata.json must contain a JSON object")
+                payload.update(loaded)
+            payload.update(metadata)
+            _replace_json_atomic(path, payload)
+
     def prepare_and_capture(data: Any) -> dict[str, Any]:
         source_study = None
         if data_mode in {"full", "selective_task"}:
@@ -2425,11 +2464,9 @@ def _patch_official_components(
         if target_scaler_mode == "zscore":
             hooks._set_frozen_experiment_field(self, "target_scaler", TrainingOnlyTargetZScore())
         result = original_setup_run(self)
-        uid_folder = self.infra.uid_folder()
-        if uid_folder is not None:
-            payload = dict(run_metadata or {})
-            payload.update(
-                {
+        payload = dict(run_metadata or {})
+        payload.update(
+            {
                     "head_variant": head_variant,
                     "head_dropout": float(head_dropout),
                     "seed": int(self.seed),
@@ -2518,26 +2555,15 @@ def _patch_official_components(
                         if evaluation_protocol == "strict"
                         else "epoch_diagnostic"
                     ),
-                }
-            )
-            _replace_json_atomic(uid_folder / "run_metadata.json", payload)
+            }
+        )
+        persist_run_metadata(self, payload, replace=True)
         return result
 
     def persist_tuning_metadata(self: Any, metadata: Mapping[str, Any]) -> None:
         """Merge late-bound query and optimizer details into run metadata."""
 
-        uid_folder = self.infra.uid_folder()
-        if uid_folder is None:
-            return
-        path = uid_folder / "run_metadata.json"
-        payload: dict[str, Any] = {}
-        if path.is_file():
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(loaded, Mapping):
-                raise ValueError("run_metadata.json must contain a JSON object")
-            payload.update(loaded)
-        payload.update(metadata)
-        _replace_json_atomic(path, payload)
+        persist_run_metadata(self, metadata)
 
     def persist_provenance_metadata(self: Any) -> None:
         if data_mode not in {"full", "selective_task"}:
@@ -2545,18 +2571,7 @@ def _patch_official_components(
         state = provenance_state_by_data.get(id(self.data))
         if state is None:
             raise RuntimeError("non-manifest experiment has no post-prepare provenance")
-        uid_folder = self.infra.uid_folder()
-        if uid_folder is None:
-            raise RuntimeError("non-manifest run has no official uid folder")
-        path = uid_folder / "run_metadata.json"
-        payload: dict[str, Any] = {}
-        if path.is_file():
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(loaded, Mapping):
-                raise ValueError("run_metadata.json must contain a JSON object")
-            payload.update(loaded)
-        payload.update(state)
-        _replace_json_atomic(path, payload)
+        persist_run_metadata(self, state)
 
     def prepare_with_protocol(
         self: Any,
@@ -2571,6 +2586,24 @@ def _patch_official_components(
             head = getattr(model, "head", None)
             try:
                 parameter_buckets = parameter_buckets_from_model(model, head=head)
+                declared_head = (
+                    run_metadata.get("head_complexity")
+                    if isinstance(run_metadata, Mapping)
+                    else None
+                )
+                declared_head_count = (
+                    declared_head.get("parameter_count")
+                    if isinstance(declared_head, Mapping)
+                    else None
+                )
+                if (
+                    isinstance(declared_head_count, int)
+                    and not isinstance(declared_head_count, bool)
+                ):
+                    parameter_buckets = add_declared_head_bucket(
+                        parameter_buckets,
+                        parameter_count=declared_head_count,
+                    )
             except (TypeError, ValueError, RuntimeError) as accounting_error:
                 persist_tuning_metadata(
                     self,

@@ -209,6 +209,21 @@ def _masked_batch(batch: Any, masked_neuro: torch.Tensor) -> Any:
     return copied
 
 
+def _clean_teacher_embedding(module: Any, batch: Any) -> torch.Tensor:
+    """Compute the clean target without dropout or running-stat updates."""
+
+    previous_training = bool(getattr(module, "training", True))
+    module.eval()
+    try:
+        with torch.no_grad():
+            teacher = module.model_forward_embedding(batch)
+    finally:
+        module.train(previous_training)
+    if not isinstance(teacher, torch.Tensor):
+        raise TypeError("continued pretraining teacher embedding must be a tensor")
+    return teacher.detach()
+
+
 def _reset_train_loader_after_pretraining(train_loader: Any, trainer: Any | None) -> None:
     """Release the consumed iterator before Lightning builds its fit iterator."""
 
@@ -281,8 +296,7 @@ def run_continued_pretraining(
                     raise TypeError("continued pretraining requires batch.data['neuro']")
                 neuro = data["neuro"]
                 _validate_neuro_input(neuro)
-                with torch.no_grad():
-                    teacher = module.model_forward_embedding(batch)
+                teacher = _clean_teacher_embedding(module, batch)
                 masked_neuro, _mask = mask_neuro_input(
                     neuro,
                     run_seed=run_seed,
