@@ -32,6 +32,7 @@ reve = [
 external = [
   "mne>=1.8",
   "mne-bids>=0.16",
+  "openneuro-py>=2026.7.1,<2027",
 ]
 
 [project.scripts]

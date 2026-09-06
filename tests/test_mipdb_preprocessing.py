@@ -127,6 +127,34 @@ def test_rest_segments_discard_precondition_and_preserve_eo_ec_boundaries(
     ]
 
 
+def test_rest_segments_use_last_start_after_an_incomplete_attempt(
+    tmp_path: Path,
+) -> None:
+    events = tmp_path / "events.tsv"
+    _events(
+        events,
+        [
+            (1.0, "90"),
+            (2.0, "20"),
+            (3.0, "30"),
+            (5.0, "90"),
+            (6.0, "20"),
+            (7.0, "30"),
+            (8.0, "20"),
+        ],
+    )
+
+    segments = parse_mipdb_rest_segments(
+        events, recording_duration_s=10.0, contract=PREPROCESSING
+    )
+
+    assert [(segment.condition, segment.start_s) for segment in segments] == [
+        ("eyes_open", 6.0),
+        ("eyes_closed", 7.0),
+        ("eyes_open", 8.0),
+    ]
+
+
 @pytest.mark.parametrize(
     ("rows", "message"),
     [

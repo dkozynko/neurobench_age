@@ -279,6 +279,8 @@ def download_all(
         if release not in RELEASE_TO_DATASET:
             raise ValueError(f"unsupported release: {release}")
         selected_subjects = selected_by_release.get(release, set()) if selected_by_release else None
+        if selected_by_release is not None and not selected_subjects:
+            continue
         summary = download_release(root, release, workers, selected_subjects)
         summaries.append(summary)
         print(

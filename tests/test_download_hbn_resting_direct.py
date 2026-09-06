@@ -43,6 +43,29 @@ def test_manifest_filter_keeps_only_selected_resting_subjects():
     )
 
 
+def test_download_all_skips_releases_absent_from_filtered_manifest(tmp_path, monkeypatch):
+    manifest = tmp_path / "subjects.csv"
+    manifest.write_text(
+        "release,subject,recording_relpath\n"
+        "R1,sub-KEEP,R1/download/sub-KEEP/eeg/sub-KEEP_task-RestingState_eeg.set\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        downloader,
+        "download_release",
+        lambda root, release, workers, selected_subjects: {
+            "release": release,
+            "status": "completed",
+            "file_count": 1,
+            "total_bytes": 1,
+        },
+    )
+
+    result = downloader.download_all(tmp_path / "data", ["R1", "R5"], workers=1, manifest=manifest)
+
+    assert [summary["release"] for summary in result["releases"]] == ["R1"]
+
+
 def test_official_study_alias_points_at_download_root(tmp_path):
     downloader.ensure_official_study_alias(tmp_path)
 

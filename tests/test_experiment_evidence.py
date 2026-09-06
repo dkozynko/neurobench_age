@@ -14,7 +14,30 @@ from neurobench_age.core.evidence import (
 )
 
 
-def _recorder(tmp_path: Path, *, evaluation_mode: str = "validation_only") -> EvidenceRecorder:
+class _CpuResourceProbe:
+    def reset_peak_memory_stats(self) -> None:
+        return None
+
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "gpu_model": None,
+            "gpu_count": 0,
+            "gpu_vram_mb": None,
+            "hardware_class": None,
+            "cuda": None,
+            "driver": None,
+            "peak_allocated_mb": None,
+            "peak_reserved_mb": None,
+            "peak_cpu_rss_mb": None,
+        }
+
+
+def _recorder(
+    tmp_path: Path,
+    *,
+    evaluation_mode: str = "validation_only",
+    resource_probe: experiment_evidence.ResourceProbe | None = None,
+) -> EvidenceRecorder:
     return EvidenceRecorder(
         tmp_path / "run",
         run_id="run-33",
@@ -26,11 +49,12 @@ def _recorder(tmp_path: Path, *, evaluation_mode: str = "validation_only") -> Ev
         resolved_config={"head_variant": "mean_linear"},
         command_line="python run.py --head-variant mean_linear",
         evaluation_mode=evaluation_mode,
+        resource_probe=resource_probe,
     )
 
 
 def test_recorder_writes_schema_versioned_running_manifest_and_finalizes(tmp_path: Path) -> None:
-    recorder = _recorder(tmp_path)
+    recorder = _recorder(tmp_path, resource_probe=_CpuResourceProbe())
 
     manifest = recorder.start()
 
@@ -262,7 +286,7 @@ def test_phase_records_elapsed_time_throughput_and_gpu_resource_snapshot(tmp_pat
 
 
 def test_cpu_resource_fallback_records_explicit_missing_reason(tmp_path: Path) -> None:
-    recorder = _recorder(tmp_path)
+    recorder = _recorder(tmp_path, resource_probe=_CpuResourceProbe())
     recorder.start()
     recorder.finalize("completed")
 

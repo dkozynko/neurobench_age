@@ -143,6 +143,39 @@ def test_inventory_records_model_free_exclusions_and_power_warning(tmp_path: Pat
     assert result["underpowered"] is True
 
 
+def test_inventory_accepts_utf8_bom_in_participants_header(tmp_path: Path) -> None:
+    rows = [(f"sub-{index:03d}", "12") for index in range(12)]
+    root = tmp_path / "mipdb"
+    _dataset(root, rows, {subject for subject, _ in rows})
+    participants = root / "participants.tsv"
+    participants.write_bytes(b"\xef\xbb\xbf" + participants.read_bytes())
+
+    result = build_mipdb_inventory(
+        root, protocol=PROTOCOL, hbn_age_support=(6.0, 18.0)
+    )
+
+    assert len(result["subjects"]) == len(rows)
+
+
+def test_inventory_uses_explicit_age_source_for_redacted_bids_ages(tmp_path: Path) -> None:
+    rows = [(f"sub-{index:03d}", "n/a") for index in range(12)]
+    root = tmp_path / "mipdb"
+    _dataset(root, rows, {subject for subject, _ in rows})
+    age_source_sha256 = "a" * 64
+    overrides = {subject: 6.0 + index for index, (subject, _) in enumerate(rows)}
+
+    result = build_mipdb_inventory(
+        root,
+        protocol=PROTOCOL,
+        hbn_age_support=(6.0, 18.0),
+        age_overrides=overrides,
+        age_source_sha256=age_source_sha256,
+    )
+
+    assert result["age_source_sha256"] == age_source_sha256
+    assert {row["subject_id"] for row in result["subjects"]} == set(overrides)
+
+
 def test_inventory_counts_brainvision_header_not_binary_companion(tmp_path: Path) -> None:
     rows = [(f"sub-{index:03d}", "12") for index in range(12)]
     root = tmp_path / "mipdb"

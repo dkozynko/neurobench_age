@@ -156,6 +156,7 @@ def verify_mipdb_acquisition(
             "subjects": subjects,
             "acquisition_files": actual_files,
             "hbn_age_support": manifest["hbn_age_support"],
+            "age_source_sha256": manifest.get("age_source_sha256"),
         }
     except KeyError as error:
         raise MipdbInventoryError(
@@ -173,6 +174,8 @@ def build_mipdb_inventory(
     protocol: StudyProtocol,
     hbn_age_support: tuple[float, float],
     hbn_age_support_manifest_sha256: str | None = None,
+    age_overrides: Mapping[str, float] | None = None,
+    age_source_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Inspect BIDS metadata without loading EEG samples or model code."""
 
@@ -194,9 +197,22 @@ def build_mipdb_inventory(
         )
     ):
         raise MipdbInventoryError("HBN age-support manifest hash is invalid")
+    if age_source_sha256 is not None and (
+        len(age_source_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in age_source_sha256)
+    ):
+        raise MipdbInventoryError("MIPDB age-source hash is invalid")
+    normalized_age_overrides = {
+        str(subject): float(age) for subject, age in (age_overrides or {}).items()
+    }
+    if any(
+        not math.isfinite(age) or age <= 0
+        for age in normalized_age_overrides.values()
+    ):
+        raise MipdbInventoryError("MIPDB age overrides must be finite positive values")
 
     try:
-        with participants_path.open("r", encoding="utf-8", newline="") as handle:
+        with participants_path.open("r", encoding="utf-8-sig", newline="") as handle:
             rows = list(csv.DictReader(handle, delimiter="\t"))
     except (OSError, csv.Error) as error:
         raise MipdbInventoryError("could not parse participants.tsv") from error
@@ -214,6 +230,14 @@ def build_mipdb_inventory(
             raise MipdbInventoryError(f"duplicate participant_id: {subject_id}")
         seen.add(subject_id)
         age, age_error = _parse_age(row.get("age"))
+        if age_error == "missing_age" and subject_id in normalized_age_overrides:
+            age = normalized_age_overrides[subject_id]
+            age_error = None
+        elif age_error is None and subject_id in normalized_age_overrides:
+            if not math.isclose(age, normalized_age_overrides[subject_id], rel_tol=0.0, abs_tol=1e-9):
+                raise MipdbInventoryError(
+                    f"MIPDB age source disagrees for {subject_id}"
+                )
         recordings = _eeg_recordings(bids_root, subject_id)
         if age_error is not None:
             exclusions.append({"subject_id": subject_id, "reason": age_error})
@@ -252,6 +276,7 @@ def build_mipdb_inventory(
             "maximum": upper,
             "source_manifest_sha256": hbn_age_support_manifest_sha256,
         },
+        "age_source_sha256": age_source_sha256,
     }
     dataset_sha = _sha256_json(dataset_identity)
 
@@ -301,6 +326,7 @@ def build_mipdb_inventory(
         "protocol_sha256": protocol.sha256,
         "dataset_manifest_sha256": dataset_sha,
         "hbn_age_support": dataset_identity["hbn_age_support"],
+        "age_source_sha256": age_source_sha256,
         "subjects": normalized,
         "acquisition_files": acquisition_files,
         "exclusions": exclusions,
@@ -366,23 +392,19 @@ def parse_mipdb_rest_segments(
         relevant.append((onset, marker))
 
     starts = [item for item in relevant if item[1] == contract.external_paradigm_start_marker]
-    if len(starts) != 1:
+    if not starts:
         raise MipdbPreprocessingError(
-            "MIPDB resting stream requires exactly one paradigm-start marker"
+            "MIPDB resting stream requires a paradigm-start marker"
         )
-    start_onset = starts[0][0]
+    # Some recordings contain an incomplete first attempt followed by a
+    # restarted, complete resting stream.  The last start marker is the
+    # deterministic boundary; all earlier markers are precondition data.
+    start_onset = starts[-1][0]
     conditions = [
         (onset, marker)
         for onset, marker in relevant
         if marker in condition_by_marker and onset > start_onset
     ]
-    if any(
-        marker in condition_by_marker and onset <= start_onset
-        for onset, marker in relevant
-    ):
-        raise MipdbPreprocessingError(
-            "MIPDB condition marker occurs before the paradigm-start marker"
-        )
     for (_, previous), (_, current) in zip(conditions, conditions[1:], strict=False):
         if previous == current:
             raise MipdbPreprocessingError(
@@ -442,19 +464,57 @@ def _mipdb_recording_path(
 
 def _read_mipdb_raw(path: Path) -> object:
     try:
-        from mne_bids import get_bids_path_from_fname, read_raw_bids
+        import mne
     except ImportError as error:
         raise MipdbPreprocessingError(
             "MIPDB signal loading requires the project 'external' dependencies"
         ) from error
     try:
-        bids_path = get_bids_path_from_fname(path)
-        return read_raw_bids(
-            bids_path=bids_path,
-            extra_params={"preload": True},
-            verbose=False,
+        raw = mne.io.read_raw_brainvision(path, preload=True, verbose=False)
+        channels_path = path.with_name(
+            path.name.replace("_eeg.vhdr", "_channels.tsv")
         )
+        if not channels_path.is_file():
+            raise MipdbPreprocessingError(f"MIPDB channels are missing: {channels_path}")
+        with channels_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            rows = list(csv.DictReader(handle, delimiter="\t"))
+        required = {"name", "type", "status"}
+        if not rows or not required <= set(rows[0]):
+            raise MipdbPreprocessingError(
+                f"MIPDB channels sidecar lacks required columns: {channels_path}"
+            )
+        raw_names = [str(name) for name in raw.ch_names]
+        sidecar_names = [str(row["name"]).strip() for row in rows]
+        if sidecar_names != [name.strip() for name in raw_names]:
+            raise MipdbPreprocessingError(
+                f"MIPDB channels differ from raw data: {channels_path}"
+            )
+        type_map = {
+            "EEG": "eeg",
+            "MISC": "misc",
+            "EOG": "eog",
+            "ECG": "ecg",
+            "EMG": "emg",
+            "STIM": "stim",
+        }
+        channel_types: dict[str, str] = {}
+        bads: list[str] = []
+        for raw_name, row in zip(raw_names, rows, strict=True):
+            name = str(row["name"]).strip()
+            label = str(row["type"]).strip().upper()
+            if label not in type_map:
+                raise MipdbPreprocessingError(
+                    f"unsupported MIPDB channel type {label!r} for {name}"
+                )
+            channel_types[raw_name] = type_map[label]
+            if str(row["status"]).strip().lower() == "bad":
+                bads.append(raw_name)
+        raw.set_channel_types(channel_types, on_unit_change="ignore")
+        raw.info["bads"] = bads
+        return raw
     except Exception as error:
+        if isinstance(error, MipdbPreprocessingError):
+            raise
         raise MipdbPreprocessingError(f"could not load MIPDB recording: {path}") from error
 
 
