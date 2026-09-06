@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import importlib.util
 import json
+import sys
+from types import ModuleType
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +21,7 @@ from neurobench_age.pipelines.independent import (
     PreparedRecording,
     PreprocessedRecordingStore,
 )
+import neurobench_age.pipelines.independent as independent
 from neurobench_age.pipelines.representation_materialization import (
     materialize_hbn_representations,
 )
@@ -28,6 +31,58 @@ from neurobench_age.research.protocol import load_study_protocol
 ROOT = Path(__file__).resolve().parents[1]
 PROTOCOL_PATH = ROOT / "configs/research/external_frozen_probe.json"
 PROTOCOL = load_study_protocol(PROTOCOL_PATH)
+
+
+def test_independent_eeglab_reader_simplifies_nested_matlab_cells(monkeypatch) -> None:
+    """The HBN reader must avoid MNE's ambiguous ndarray truth-value path."""
+
+    fake_mne = ModuleType("mne")
+    fake_mne_io = ModuleType("mne.io")
+    fake_mne_eeglab = ModuleType("mne.io.eeglab")
+    fake_eeglab = ModuleType("mne.io.eeglab.eeglab")
+    fake_scipy = ModuleType("scipy")
+    fake_scipy_io = ModuleType("scipy.io")
+    original_readmat = object()
+    calls: dict[str, object] = {}
+
+    def loadmat(*args: object, **kwargs: object) -> object:
+        calls["args"] = args
+        calls["kwargs"] = kwargs
+        return {"EEG": "simplified"}
+
+    fake_eeglab._readmat = original_readmat
+    fake_scipy_io.loadmat = loadmat
+    fake_scipy.io = fake_scipy_io
+    fake_mne_eeglab.eeglab = fake_eeglab
+    fake_mne_io.eeglab = fake_mne_eeglab
+    fake_mne.io = fake_mne_io
+    for name, module in {
+        "mne": fake_mne,
+        "mne.io": fake_mne_io,
+        "mne.io.eeglab": fake_mne_eeglab,
+        "mne.io.eeglab.eeglab": fake_eeglab,
+        "scipy": fake_scipy,
+        "scipy.io": fake_scipy_io,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    with independent._simplified_eeglab_mat_reader():
+        assert fake_eeglab._readmat(
+            "record.set",
+            uint16_codec="latin1",
+            preload=True,
+        ) == {"EEG": "simplified"}
+
+    assert calls == {
+        "args": ("record.set",),
+        "kwargs": {
+            "struct_as_record": False,
+            "squeeze_me": True,
+            "simplify_cells": True,
+            "uint16_codec": "latin1",
+        },
+    }
+    assert fake_eeglab._readmat is original_readmat
 
 
 class _TinyEncoder(nn.Module):

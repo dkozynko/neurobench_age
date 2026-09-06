@@ -20,9 +20,10 @@ import importlib.util
 import json
 import random
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable, Literal, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Literal, Mapping, Sequence
 
 import numpy as np
 
@@ -540,6 +541,45 @@ def _task_info_path(recording: HbnRecording) -> Path:
     return recording.path.parents[2] / f"{recording.task}_eeg.json"
 
 
+@contextmanager
+def _simplified_eeglab_mat_reader() -> Iterator[None]:
+    """Use SciPy's cell simplifier for HBN EEGLAB files.
+
+    Some HBN ``.set`` files contain nested MATLAB cell structures.  MNE's
+    default recursive MATLAB converter can compare one of those structures as
+    a NumPy array and raise ``ValueError: The truth value of an array ...``.
+    ``simplify_cells=True`` preserves the logical MATLAB content in a form
+    that MNE can consume.  The patch is process-local and restored even when
+    reading fails, so it cannot leak into unrelated experiment code.
+    """
+
+    import scipy.io
+    import mne.io.eeglab.eeglab as eeglab
+
+    original_readmat = eeglab._readmat
+
+    def readmat(
+        fname: Any,
+        uint16_codec: str | None = None,
+        *,
+        preload: bool = False,
+    ) -> Any:
+        del preload
+        return scipy.io.loadmat(
+            fname,
+            struct_as_record=False,
+            squeeze_me=True,
+            simplify_cells=True,
+            uint16_codec=uint16_codec,
+        )
+
+    eeglab._readmat = readmat
+    try:
+        yield
+    finally:
+        eeglab._readmat = original_readmat
+
+
 def _read_hbn_raw(recording: HbnRecording) -> Any:
     """Load HBN raw EEG and apply the same reference step as Shirazi2024Hbn."""
 
@@ -548,7 +588,8 @@ def _read_hbn_raw(recording: HbnRecording) -> Any:
     except Exception as exc:  # pragma: no cover - optional dependency path
         raise IndependentPipelineError("MNE is required for the raw HBN reader; install the pipeline extra") from exc
 
-    raw = mne.io.read_raw_eeglab(recording.path, preload=True, verbose="ERROR")
+    with _simplified_eeglab_mat_reader():
+        raw = mne.io.read_raw_eeglab(recording.path, preload=True, verbose="ERROR")
     info_path = _task_info_path(recording)
     if info_path.is_file():
         task_info = json.loads(info_path.read_text())
@@ -722,7 +763,8 @@ def _raw_duration_seconds(path: Path) -> float:
         import mne
     except Exception as exc:  # pragma: no cover - optional dependency path
         raise IndependentPipelineError("MNE is required to inspect HBN recordings; install the pipeline extra") from exc
-    raw = mne.io.read_raw_eeglab(path, preload=False, verbose="ERROR")
+    with _simplified_eeglab_mat_reader():
+        raw = mne.io.read_raw_eeglab(path, preload=False, verbose="ERROR")
     return float(raw.n_times / raw.info["sfreq"])
 
 
@@ -831,7 +873,8 @@ def discover_hbn_recordings(data_root: Path) -> list[HbnRecording]:
             if len(parts) < 3:
                 continue
             subject, task = parts[0], parts[1]
-            raw = mne.io.read_raw_eeglab(path, preload=False, verbose="ERROR")
+            with _simplified_eeglab_mat_reader():
+                raw = mne.io.read_raw_eeglab(path, preload=False, verbose="ERROR")
             duration_s = float(raw.n_times / raw.info["sfreq"])
             recordings.append(HbnRecording(path=path, release=release, subject=subject, task=task, age=ages.get(subject), duration_s=duration_s))
     if not recordings:
