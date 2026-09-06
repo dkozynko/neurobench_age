@@ -14,7 +14,6 @@ from typing import Any, Callable, Mapping, Sequence
 import torch
 from torch import nn
 
-
 PREDECLARED_CHECKPOINT = "brain-bzh/reve-base"
 PREDECLARED_LAYERS = (-2, -1)
 
@@ -293,6 +292,8 @@ class RepresentationCacheIdentity:
     @property
     def key(self) -> str:
         return _canonical_sha256(asdict(self))
+
+
 
 
 def write_cached_representations(

@@ -34,11 +34,21 @@ def test_approved_protocol_loads_with_predeclared_primary_contract() -> None:
     )
     assert protocol.encoder.frozen is True
     assert protocol.encoder.layer_indices == (-2, -1)
+    assert protocol.preprocessing.external_resting_task == "block01"
+    assert protocol.preprocessing.external_paradigm_start_marker == "90"
+    assert protocol.preprocessing.external_condition_markers == (
+        ("20", "eyes_open"),
+        ("30", "eyes_closed"),
+    )
+    assert protocol.preprocessing.external_condition_selection == "acquisition_order"
+    assert protocol.preprocessing.mapped_channel_layout == "egi_hydrocel_e1_e128"
+    assert protocol.preprocessing.required_mapped_channels == 128
     assert protocol.statistics.bootstrap_iterations == 10_000
     assert protocol.statistics.bootstrap_seed == 20260903
     assert protocol.statistics.minimum_seed_wins == 8
     assert protocol.statistics.minimum_worst_seed_delta == -0.01
     assert len(protocol.sha256) == 64
+    assert len(protocol.statistics_sha256) == 64
 
 
 @pytest.mark.parametrize(
@@ -64,6 +74,21 @@ def test_protocol_rejects_unknown_fields(tmp_path: Path, mutation: object) -> No
         (lambda payload: payload["encoder"].update({"frozen": False}), "frozen"),
         (lambda payload: payload["encoder"].update({"layer_indices": [-3, -1]}), "layers -2 and -1"),
         (lambda payload: payload["statistics"].update({"bootstrap_iterations": 999}), "10,000"),
+        (lambda payload: payload["training"].update({"optimizer": "SGD"}), "AdamW"),
+        (lambda payload: payload["training"].update({"loss": "L1Loss"}), "MSELoss"),
+        (lambda payload: payload["training"].update({"learning_rate": float("nan")}), "finite"),
+        (
+            lambda payload: payload["preprocessing"].update(
+                {"external_resting_task": "block02"}
+            ),
+            "MIPDB resting-event contract",
+        ),
+        (
+            lambda payload: payload["preprocessing"].update(
+                {"required_mapped_channels": 127}
+            ),
+            "MIPDB resting-event contract",
+        ),
     ],
 )
 def test_protocol_rejects_changes_to_confirmatory_invariants(

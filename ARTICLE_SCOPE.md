@@ -1,44 +1,55 @@
-# scope
-
-This repository is the reproducible research package for the paper:
-
-> **Stability of age probing in REVE and the limits of increasingly complex
-> representation heads.**
+# Research scope
 
 ## Research question
 
-When the REVE encoder and the official NeuralBench Age protocol are held fixed,
-how stable is age probing across random seeds, and do more expressive
-representation heads improve over the matched `mean_linear` baseline reliably
-enough to support an article-level claim?
+When frozen REVE representations, HBN development data, preprocessing,
+checkpoint selection, and optimization seeds are held fixed, do increasingly
+expressive age-prediction heads improve over `mean_linear` consistently and
+transfer to an external developmental EEG cohort?
 
-## What is canonical
+The scope is the stability and limits of increasingly expressive heads under a
+fixed protocol, not the pursuit of one favorable score.
 
-- the official REVE/NeuralBench Age protocol and its independent reproduction;
-- the canonical 1000-subject nested manifest;
-- validation-only screening, three-seed confirmation, and one sealed finalist
-  test;
-- matched controls, explicit complexity accounting, subject-level predictions,
-  and provenance-rich evidence;
-- compact metrics, tables, figures, and negative results needed to support the
-  paper's conclusions.
+## Evidence taxonomy
 
-## What is not part of the package
+The primary prospective study is frozen representation probing with HBN
+train/validation development and one sealed MIPDB evaluation. MIPDB predictions
+are not available for tuning, promotion, recalibration, or exclusion decisions.
 
-Raw HBN data, pretrained weights, checkpoints, large prediction dumps, launch
-logs, dated retry scripts, and obsolete exploratory run directories are kept
-outside Git. Their compact hashes or summaries remain only when they support a
-claim in the paper.
+Official NeuralBench full fine-tuning is secondary reproduction evidence. It is
+end-to-end age prediction because the encoder is trainable.
 
-## Canonical claim boundary
+All existing HBN R5 metrics are retrospective secondary evidence. R5 has been
+opened during repeated finalist decisions, so those results must not be used for
+model or head selection and cannot be represented as untouched confirmation.
 
-The primary claim is about stability and limits, not about a single best score.
-A candidate is not promoted because of one favorable seed or one screening
-metric. Test data are opened only for a predeclared finalist after validation
-confirmation, and a non-uniform or statistically weak improvement is reported
-as inconclusive.
+## Included material
+
+- executable protocol, immutable study lifecycle, and exact comparison rules;
+- model-free content-addressed manifests and deterministic cohort assignment;
+- model-free preprocessing and QC contracts;
+- frozen representation extraction and cache-integrity checks;
+- head-only training, external inference, and confirmatory statistics;
+- compact retrospective HBN evidence with explicit provenance;
+- tests and operational documentation needed to reproduce each claim.
+
+## Excluded material
+
+Raw EEG, pretrained weights, checkpoints, representation caches, prediction
+dumps, launch logs, credentials, and obsolete exploratory run directories stay
+outside Git. Only compact hashes, summaries, and audit records belong in the
+repository.
+
+## Claim boundary
+
+The intended inference is limited to the four declared heads, REVE checkpoint,
+HBN development split, MIPDB cohorts, seeds 33 through 42, and the sealed
+protocol. A favorable single seed is insufficient. A null result means that no
+tested complex head established a stable external gain under the predeclared
+protocol; it does not establish equivalence or rule out gains from untested
+representations, heads, datasets, or training regimes.
 
 See [`docs/research/article_ready_protocol.md`](docs/research/article_ready_protocol.md)
 for the execution contract and
 [`docs/research/article_evidence_registry.md`](docs/research/article_evidence_registry.md)
-for the mapping from claims to retained evidence.
+for the claim-to-artifact mapping.

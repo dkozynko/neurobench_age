@@ -48,7 +48,7 @@ HBN_RELEASES = tuple(f"R{i}" for i in range(1, 12))
 # This version is part of the cache key.  It prevents a cache made from the
 # intended full-recording preprocessing from being reused after matching the
 # official NeuralSet chunking semantics.
-PREPROCESSING_CACHE_VERSION = "neuralset-mneraw-chunk-v1"
+PREPROCESSING_CACHE_VERSION = "neuralset-mneraw-chunk-v2-content-addressed"
 
 # These exclusions are part of the official Shirazi2024Hbn study reader.  They
 # are not an optional quality filter: omitting them changes the benchmark set.
@@ -81,6 +81,30 @@ class HbnRecording:
     task: str
     age: float | None
     duration_s: float
+
+
+def hbn_recording_source_files(recording: HbnRecording) -> tuple[Path, ...]:
+    """Return the EEGLAB entry point and any external binary sample companion."""
+
+    paths = [recording.path]
+    companion = recording.path.with_suffix(".fdt")
+    if companion.is_file():
+        paths.append(companion)
+    return tuple(paths)
+
+
+def hbn_recording_sha256(recording: HbnRecording) -> str:
+    """Hash all bytes needed to read one HBN EEGLAB recording."""
+
+    digest = hashlib.sha256()
+    for path in hbn_recording_source_files(recording):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(b"\0")
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)
@@ -574,10 +598,20 @@ class PreprocessedRecordingStore:
         if cache_dir is not None:
             cache_dir.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _recording_sha256(recording: HbnRecording) -> str:
+        return hbn_recording_sha256(recording)
+
     def _cache_paths(self, recording: HbnRecording) -> tuple[Path, Path]:
         if self.cache_dir is None:
             raise RuntimeError("cache paths requested without cache_dir")
-        fingerprint = hashlib.sha256(f"{PREPROCESSING_CACHE_VERSION}|{recording.path.resolve()}|{REVE_MODEL}".encode()).hexdigest()[:24]
+        recording_sha256 = self._recording_sha256(recording)
+        fingerprint = hashlib.sha256(
+            (
+                f"{PREPROCESSING_CACHE_VERSION}|{recording.path.resolve()}|"
+                f"{recording_sha256}|{REVE_MODEL}"
+            ).encode()
+        ).hexdigest()[:24]
         return (
             self.cache_dir / f"{fingerprint}.npy",
             self.cache_dir / f"{fingerprint}.json",
@@ -588,9 +622,15 @@ class PreprocessedRecordingStore:
             return preprocess_hbn_recording(recording)
 
         data_path, metadata_path = self._cache_paths(recording)
+        recording_sha256 = self._recording_sha256(recording)
         if data_path.is_file() and metadata_path.is_file():
             try:
                 metadata = json.loads(metadata_path.read_text())
+                if (
+                    metadata.get("cache_version") != PREPROCESSING_CACHE_VERSION
+                    or metadata.get("source_recording_sha256") != recording_sha256
+                ):
+                    raise ValueError("preprocessing cache provenance mismatch")
                 return PreparedRecording(np.load(data_path, mmap_mode="r"), tuple(metadata["channel_names"]))
             except (OSError, TypeError, ValueError, KeyError):
                 # A worker can be interrupted between the data and metadata
@@ -605,6 +645,7 @@ class PreprocessedRecordingStore:
             json.dumps(
                 {
                     "cache_version": PREPROCESSING_CACHE_VERSION,
+                    "source_recording_sha256": recording_sha256,
                     "channel_names": prepared.channel_names,
                     "recording_duration_s": float(recording.duration_s),
                 }

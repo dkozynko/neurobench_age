@@ -19,8 +19,13 @@ LOCK_FIELDS = (
     "git_dirty",
     "encoder_checkpoint",
     "encoder_checkpoint_sha256",
+    "checkpoint_inventory_sha256",
+    "environment_sha256",
     "hbn_manifest_sha256",
+    "hbn_training_manifest_sha256",
     "mipdb_manifest_sha256",
+    "mipdb_pilot_qc_sha256",
+    "mipdb_cohort_qc_sha256",
     "subject_list_sha256",
     "heads",
     "seeds",
@@ -32,8 +37,13 @@ HASH_FIELDS = (
     "protocol_sha256",
     "source_tree_sha256",
     "encoder_checkpoint_sha256",
+    "checkpoint_inventory_sha256",
+    "environment_sha256",
     "hbn_manifest_sha256",
+    "hbn_training_manifest_sha256",
     "mipdb_manifest_sha256",
+    "mipdb_pilot_qc_sha256",
+    "mipdb_cohort_qc_sha256",
     "preprocessing_sha256",
     "statistics_sha256",
 )
@@ -74,6 +84,82 @@ def _canonical_bytes(value: Mapping[str, Any]) -> bytes:
 
 def canonical_sha256(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def load_checkpoint_inventory(path: Path) -> dict[str, Any]:
+    """Validate the immutable four-head by ten-seed checkpoint inventory."""
+
+    try:
+        inventory = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise StudyLockError(f"could not read checkpoint inventory: {path}") from error
+    required = {
+        "schema_version",
+        "status",
+        "heads",
+        "seeds",
+        "run_count",
+        "runs",
+        "checkpoint_inventory_sha256",
+    }
+    if not isinstance(inventory, dict) or set(inventory) != required:
+        raise StudyLockError("checkpoint inventory fields do not match the strict schema")
+    body = {
+        key: value
+        for key, value in inventory.items()
+        if key != "checkpoint_inventory_sha256"
+    }
+    if inventory["checkpoint_inventory_sha256"] != canonical_sha256(body):
+        raise StudyLockError("checkpoint inventory digest does not match its content")
+    if (
+        inventory["schema_version"] != 1
+        or inventory["status"] != "complete"
+        or tuple(inventory["heads"]) != HEADS
+        or tuple(inventory["seeds"]) != tuple(range(33, 43))
+        or inventory["run_count"] != 40
+        or not isinstance(inventory["runs"], list)
+        or len(inventory["runs"]) != 40
+    ):
+        raise StudyLockError("checkpoint inventory is not the exact complete 40-run matrix")
+    expected_pairs = {
+        (head_name, seed) for head_name in HEADS for seed in range(33, 43)
+    }
+    actual_pairs: set[tuple[str, int]] = set()
+    run_fields = {
+        "head_name",
+        "seed",
+        "run_identity_sha256",
+        "run_manifest_sha256",
+        "checkpoint_sha256",
+        "selected_epoch",
+        "head_parameter_count",
+    }
+    for run in inventory["runs"]:
+        if not isinstance(run, dict) or set(run) != run_fields:
+            raise StudyLockError("checkpoint inventory contains an invalid run record")
+        pair = (run["head_name"], run["seed"])
+        if pair in actual_pairs:
+            raise StudyLockError("checkpoint inventory contains duplicate runs")
+        actual_pairs.add(pair)
+        for field in (
+            "run_identity_sha256",
+            "run_manifest_sha256",
+            "checkpoint_sha256",
+        ):
+            if not _is_sha256(run[field]):
+                raise StudyLockError(f"checkpoint inventory run {field} is invalid")
+        if (
+            isinstance(run["selected_epoch"], bool)
+            or not isinstance(run["selected_epoch"], int)
+            or run["selected_epoch"] <= 0
+            or isinstance(run["head_parameter_count"], bool)
+            or not isinstance(run["head_parameter_count"], int)
+            or run["head_parameter_count"] <= 0
+        ):
+            raise StudyLockError("checkpoint inventory run metadata is invalid")
+    if actual_pairs != expected_pairs:
+        raise StudyLockError("checkpoint inventory run identities are not exact")
+    return inventory
 
 
 def _is_sha256(value: object) -> bool:
@@ -293,3 +379,38 @@ def fail_study(lock_path: Path, *, error: str) -> dict[str, Any]:
     updated = {**state, "state": "failed", "updated_at_utc": failed_at}
     _atomic_replace_json(_state_path(lock_path), updated)
     return updated
+
+
+def record_resumable_failure(lock_path: Path, *, error: str) -> dict[str, Any]:
+    """Append diagnostic evidence for a started run without preventing exact resume."""
+
+    lock_path = Path(lock_path)
+    lock = load_study_lock(lock_path)
+    state = _load_state(lock_path, lock)
+    if state.get("state") != "started":
+        raise StudyLockError("resumable failure evidence requires a started study")
+    message = str(error).strip()
+    if not message:
+        raise StudyLockError("failure evidence requires a non-empty error")
+    directory = lock_path.parent / "study_failures"
+    for attempt in range(1, 10_000):
+        body = {
+            "schema_version": 1,
+            "study_id": lock["study_id"],
+            "lock_sha256": lock["lock_sha256"],
+            "state": "started",
+            "attempt": attempt,
+            "failed_at_utc": _utc_now(),
+            "error": message,
+        }
+        evidence = {**body, "failure_sha256": canonical_sha256(body)}
+        try:
+            _publish_json_create_only(
+                directory / f"attempt-{attempt:04d}.json", evidence
+            )
+        except StudyLockError as failure:
+            if "already exists" in str(failure):
+                continue
+            raise
+        return evidence
+    raise StudyLockError("resumable failure evidence inventory is exhausted")

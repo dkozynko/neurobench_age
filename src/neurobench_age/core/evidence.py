@@ -37,6 +37,8 @@ _EXCLUDED_SOURCE_DIRECTORIES = {
     ".venv",
     "__pycache__",
     "artifacts",
+    "build",
+    "dist",
     "results",
 }
 _DEFAULT_COMPARISON_FACTOR_KEYS = frozenset(
@@ -239,7 +241,10 @@ def source_tree_sha256(source_root: Path) -> str:
         if not path.is_file() or path.is_symlink() or path.suffix.lower() not in _SOURCE_SUFFIXES:
             continue
         relative = path.relative_to(root)
-        if any(part in _EXCLUDED_SOURCE_DIRECTORIES for part in relative.parts):
+        if any(
+            part in _EXCLUDED_SOURCE_DIRECTORIES or part.endswith(".egg-info")
+            for part in relative.parts
+        ):
             continue
         files.append(path)
     for path in sorted(files, key=lambda item: item.relative_to(root).as_posix()):

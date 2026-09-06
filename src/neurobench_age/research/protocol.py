@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -46,7 +47,10 @@ def _integer(value: object, path: str) -> int:
 def _number(value: object, path: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ProtocolError(f"{path} must be numeric")
-    return float(value)
+    result = float(value)
+    if not math.isfinite(result):
+        raise ProtocolError(f"{path} must be finite")
+    return result
 
 
 def _boolean(value: object, path: str) -> bool:
@@ -98,6 +102,12 @@ class PreprocessingContract:
     cross_block_windows: bool
     spatial_interpolation: bool
     subject_aggregation: str
+    external_resting_task: str
+    external_paradigm_start_marker: str
+    external_condition_markers: tuple[tuple[str, str], ...]
+    external_condition_selection: str
+    mapped_channel_layout: str
+    required_mapped_channels: int
 
 
 @dataclass(frozen=True)
@@ -154,6 +164,14 @@ class StudyProtocol:
     @property
     def head_names(self) -> tuple[str, ...]:
         return tuple(head.name for head in self.heads)
+
+    @property
+    def statistics_sha256(self) -> str:
+        payload = asdict(self.statistics)
+        canonical = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _parse_datasets(value: object) -> DatasetContract:
@@ -247,6 +265,12 @@ def _parse_preprocessing(value: object) -> PreprocessingContract:
         "cross_block_windows",
         "spatial_interpolation",
         "subject_aggregation",
+        "external_resting_task",
+        "external_paradigm_start_marker",
+        "external_condition_markers",
+        "external_condition_selection",
+        "mapped_channel_layout",
+        "required_mapped_channels",
     )
     _expect_keys(preprocessing, path="preprocessing", required=keys)
     bandpass = tuple(
@@ -259,6 +283,15 @@ def _parse_preprocessing(value: object) -> PreprocessingContract:
     notch = None if notch_raw is None else tuple(
         _number(item, "preprocessing.notch_hz[]")
         for item in _sequence(notch_raw, "preprocessing.notch_hz")
+    )
+    condition_markers = _object(
+        preprocessing["external_condition_markers"],
+        "preprocessing.external_condition_markers",
+    )
+    _expect_keys(
+        condition_markers,
+        path="preprocessing.external_condition_markers",
+        required=("20", "30"),
     )
     result = PreprocessingContract(
         sample_rate_hz=_number(preprocessing["sample_rate_hz"], "preprocessing.sample_rate_hz"),
@@ -281,6 +314,30 @@ def _parse_preprocessing(value: object) -> PreprocessingContract:
         subject_aggregation=_string(
             preprocessing["subject_aggregation"], "preprocessing.subject_aggregation"
         ),
+        external_resting_task=_string(
+            preprocessing["external_resting_task"],
+            "preprocessing.external_resting_task",
+        ),
+        external_paradigm_start_marker=_string(
+            preprocessing["external_paradigm_start_marker"],
+            "preprocessing.external_paradigm_start_marker",
+        ),
+        external_condition_markers=tuple(
+            (marker, _string(condition_markers[marker], f"preprocessing.external_condition_markers.{marker}"))
+            for marker in ("20", "30")
+        ),
+        external_condition_selection=_string(
+            preprocessing["external_condition_selection"],
+            "preprocessing.external_condition_selection",
+        ),
+        mapped_channel_layout=_string(
+            preprocessing["mapped_channel_layout"],
+            "preprocessing.mapped_channel_layout",
+        ),
+        required_mapped_channels=_integer(
+            preprocessing["required_mapped_channels"],
+            "preprocessing.required_mapped_channels",
+        ),
     )
     expected = (200.0, (0.5, 99.5), None, "StandardScaler", 15.0, 2.0, 2.0, 120.0, False, False, "arithmetic_mean")
     actual = (
@@ -298,6 +355,24 @@ def _parse_preprocessing(value: object) -> PreprocessingContract:
     )
     if actual != expected:
         raise ProtocolError("preprocessing does not match the approved common input contract")
+    external_expected = (
+        "block01",
+        "90",
+        (("20", "eyes_open"), ("30", "eyes_closed")),
+        "acquisition_order",
+        "egi_hydrocel_e1_e128",
+        128,
+    )
+    external_actual = (
+        result.external_resting_task,
+        result.external_paradigm_start_marker,
+        result.external_condition_markers,
+        result.external_condition_selection,
+        result.mapped_channel_layout,
+        result.required_mapped_channels,
+    )
+    if external_actual != external_expected:
+        raise ProtocolError("preprocessing does not match the approved MIPDB resting-event contract")
     return result
 
 
@@ -361,6 +436,10 @@ def _parse_training(value: object) -> TrainingContract:
     )
     if result.seeds != tuple(range(33, 43)):
         raise ProtocolError("training must use exactly seeds 33 through 42")
+    if result.optimizer != "AdamW":
+        raise ProtocolError("training optimizer must be AdamW")
+    if result.loss != "MSELoss":
+        raise ProtocolError("training loss must be MSELoss")
     if min(result.learning_rate, result.batch_size, result.max_epochs, result.patience) <= 0:
         raise ProtocolError("training numeric settings must be positive")
     if result.weight_decay < 0:

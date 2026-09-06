@@ -1,12 +1,13 @@
 # External frozen-probe study design
 
-Status: approved design; implementation and study sealing are pending.
+Status: approved design; adapters implemented; real-data execution and study
+sealing are pending.
 
 Date: 2026-09-04
 
 ## Decision
 
-The primary paper experiment will be a frozen-encoder comparison of four
+The primary confirmatory experiment will be a frozen-encoder comparison of four
 predeclared REVE representation heads. Models are developed and selected using
 HBN train/validation data only, then evaluated without adaptation on a new
 external MIPDB cohort. Existing end-to-end NeuralBench results remain secondary,
@@ -39,9 +40,9 @@ sealing. Model predictions and age-prediction metrics are prohibited for the
 primary holdout before sealing.
 
 The REVE NeurIPS 2025 appendix lists HBN releases and TDBRAIN among its
-pretraining sources. MIPDB is not named in the published exhaustive list. The
-paper must describe MIPDB's encoder-level independence as an inference from that
-list, not as a guarantee from the REVE authors.
+pretraining sources. MIPDB is not named in the published exhaustive list. Any
+report must describe MIPDB's encoder-level independence as an inference from
+that list, not as a guarantee from the REVE authors.
 
 ## Data sources
 
@@ -171,9 +172,18 @@ The MIPDB adapter must record original frequency, included blocks, channel
 labels, mapped-channel count, rejected channels, usable duration, window count,
 and every QC reason. Candidate-specific preprocessing is forbidden.
 
-Exact event names and the minimum mapped-channel threshold may be finalized
-from metadata and model-free pilot inspection, but they must be present in the
-sealed lock. After sealing they cannot change.
+The MIPDB resting input is finalized as `task-block01`. A valid recording must
+contain one paradigm-start marker `90`, followed by condition markers `20`
+(eyes open) and `30` (eyes closed). Samples before the first `20` or `30`
+marker are excluded. Both conditions are retained in acquisition order, and
+the first 120 valid seconds are selected without allowing a window to cross a
+condition boundary. The required mapped scalp layout is EGI HydroCel labels
+`E1` through `E128`; missing, duplicate, or bad channels are a QC failure and
+spatial interpolation is forbidden.
+
+These choices were finalized before any primary MIPDB model evaluation. They
+must be encoded in the executable protocol and sealed lock; after sealing they
+cannot change.
 
 ## Training and checkpoint selection
 
@@ -267,6 +277,7 @@ The sealed lock contains:
 - executable config digest;
 - REVE checkpoint identity and SHA-256;
 - HBN and MIPDB dataset versions and manifest digests;
+- HBN training-manifest, MIPDB pilot-QC, and finalized cohort-QC digests;
 - train, validation, pilot, primary, and extrapolation subject-list hashes;
 - all four heads and their immutable settings;
 - seeds 33--42;
@@ -276,7 +287,9 @@ The sealed lock contains:
 - expected output inventory;
 - UTC seal timestamp.
 
-Sealing is allowed only when all fields are complete. The external runner
+The production seal is derived from those artifacts rather than from a
+user-authored hash payload, and a dirty Git worktree is rejected. Sealing is
+allowed only when all fields are complete. The external runner
 refuses a draft or altered lock and writes `evaluation_started.json` before
 loading primary EEG. It writes `evaluation_completed.json` only after all
 expected predictions and hashes pass audit.
@@ -288,6 +301,11 @@ missing work. Aggregate primary metrics are not generated until the expected
 prediction inventory is complete. If any partial primary metric has been
 inspected before a protocol change, the confirmatory study is contaminated and
 must not be relabelled as sealed.
+
+Every post-start exception writes append-only structured evidence under
+`study_failures/`. A recoverable failure leaves the state at `started`; an
+explicitly classified terminal scientific failure may use the terminal
+`failed` transition.
 
 ## Components
 
@@ -405,7 +423,7 @@ declared Python range, and dry-run generation/audit of a sealed synthetic study.
 11. Run the predeclared confirmatory analysis without changing parameters.
 12. Publish all results, including negative or inconclusive outcomes.
 
-## Paper structure enabled by this design
+## Research narrative enabled by this design
 
 1. Motivation: single-seed head gains can be misleading.
 2. Reproduction: official NeuralBench behavior and historical evidence.

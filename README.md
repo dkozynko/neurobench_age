@@ -1,144 +1,87 @@
 # NeuralBench Age — REVE study
 
-This repository contains the code and compact evidence for the paper
-**“Stability of age probing in REVE and the limits of increasingly complex
-representation heads.”** It is not a general-purpose NeuralBench fork and it
-does not store HBN data, pretrained weights, or raw training outputs.
+This repository implements reproducible experiments on age information in REVE
+EEG representations. The main question is whether increasingly expressive
+representation heads improve reliably over a matched mean-pooled linear head
+when the encoder, data split, preprocessing, checkpoint rule, and optimization
+seeds are held fixed.
 
-The central question is whether age probing remains stable across random seeds
-when the REVE encoder and official NeuralBench Age protocol are fixed, and
-whether increasingly expressive representation heads produce reliable gains
-over the matched `mean_linear` baseline.
+The primary prospective study freezes REVE, develops heads on HBN
+train/validation subjects, and performs one sealed evaluation on an external
+MIPDB cohort. Existing official NeuralBench full fine-tuning runs are retained
+as secondary reproduction evidence. Previously opened HBN R5 results are
+retrospective secondary evidence and must not be used for model or head
+selection.
 
-See [`ARTICLE_SCOPE.md`](ARTICLE_SCOPE.md) for the inclusion policy and
-[`docs/research/article_evidence_registry.md`](docs/research/article_evidence_registry.md)
-for the claim-to-evidence map.
+See [`ARTICLE_SCOPE.md`](ARTICLE_SCOPE.md) for the claim boundary and
+[`docs/research/article_ready_protocol.md`](docs/research/article_ready_protocol.md)
+for the execution contract.
 
 ## Repository layout
 
 ```text
-src/neurobench_age/core/       benchmark contract and evidence schemas
+src/neurobench_age/core/       benchmark contracts and evidence schemas
 src/neurobench_age/heads/      REVE head implementations
-src/neurobench_age/data/       manifests and data acquisition
-src/neurobench_age/pipelines/  official and independent runners
-src/neurobench_age/training/   optional train-only extensions
-src/neurobench_age/analysis/   reproducible metrics and figures
-configs/article/               frozen configurations
-scripts/                       portable entry-point wrappers
+src/neurobench_age/data/       metadata manifests and data adapters
+src/neurobench_age/pipelines/  training, extraction, and evaluation logic
+src/neurobench_age/research/   executable protocol and study lifecycle
+src/neurobench_age/analysis/   reproducible statistical analysis
+configs/article/               retained HBN reproduction configurations
+configs/research/              prospective external-study configuration
+scripts/                       command-line entry points
 tests/                         contract and regression tests
-docs/research/                 protocol and experiment registry
-results/canonical/             compact evidence only
+docs/research/                 study design and evidence registry
+results/canonical/             compact retrospective HBN evidence only
 ```
+
+Raw EEG, pretrained weights, representation caches, checkpoints, prediction
+dumps, and launch logs must remain outside Git.
 
 ## Installation
 
-For contract tests and local dry runs:
+For contract tests and synthetic verification:
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install -e '.[test]'
+python -m pytest -q
 ```
 
-The official REVE integration is optional and requires the NeuralBench stack:
+The official REVE integration and external BIDS tooling are optional:
 
 ```bash
-python -m pip install -e '.[reve]'
+python -m pip install -e '.[reve,external]'
 ```
 
-No installation command downloads HBN data or pretrained weights.
+No installation command downloads HBN, MIPDB, or pretrained weights.
 
-## Contract check
+## Supported experiment tracks
 
-From the repository root:
+The prospective track is frozen representation probing. The encoder runs in
+evaluation and inference mode, its parameters have no gradients, layers `-2`
+and `-1` are cached once, and only the four predeclared heads are trained over
+seeds 33 through 42.
 
-```bash
-PYTHONPATH=src python -m neurobench_age.core.baseline --dry-run
-PYTHONPATH=src python -m pytest -q
-```
+The secondary track is official NeuralBench full fine-tuning. Because the REVE
+encoder is trainable in that track, it is described as end-to-end age
+prediction rather than representation probing.
 
-The dry run checks the crop/window geometry, channel count, R5 holdout
-invariant, regression interface, and official preprocessing contract.
+The exact operational sequence, executable commands, validation gates,
+statistical decision rule, and result placeholders are
+maintained in
+[`docs/research/article_ready_protocol.md`](docs/research/article_ready_protocol.md).
 
-## Canonical experiment
+## Current evidence status
 
-The canonical metadata-only manifest is included at
-`results/canonical/data/age_medium_1000_nested.csv`; prepare the matching HBN
-recordings outside this repository. Then run the validation-only pipeline with
-explicit paths:
+- Prospective external cohort count: `TBD_AFTER_EXECUTION`
+- Completed frozen-head runs: `TBD_AFTER_EXECUTION`
+- External prediction inventory: `TBD_AFTER_EXECUTION`
+- Confirmatory result: `TBD_AFTER_EXECUTION`
 
-```bash
-MANIFEST="$PWD/results/canonical/data/age_medium_1000_nested.csv" \
-DATA_ROOT=/path/to/neurobench_data_hbn \
-OUTPUT_ROOT=/path/to/article-results/validation \
-./scripts/run_article_experiment.sh
-```
+These placeholders must be replaced only from audited artifacts produced by the
+sealed workflow. The repository does not currently claim a positive or negative
+external result.
 
-The launcher defaults to the matched `mean_linear` baseline, strict protocol,
-deterministic settings, and validation-only mode. Override the head and seeds
-explicitly for a predeclared screen:
-
-```bash
-MANIFEST="$PWD/results/canonical/data/age_medium_1000_nested.csv" \
-DATA_ROOT=/path/to/neurobench_data_hbn \
-OUTPUT_ROOT=/path/to/article-results/screen \
-HEAD_VARIANT=mean_layer_linear \
-SEEDS='33' \
-PHASE=screen \
-./scripts/run_article_experiment.sh --layer-index -2
-```
-
-Use `PHASE=confirmation` for the held-back confirmation seeds; the launcher
-selects `configs/article/confirmation.json` automatically unless `CONFIG` is
-overridden explicitly.
-
-The launcher cannot open the sealed test. A final test is allowed only after
-the validation gate is audited and a single finalist is frozen; use the
-official CLI with the explicit final-test flag only in that controlled step.
-
-## Evidence analysis
-
-Analyze complete validation or final-test run directories with:
-
-```bash
-./scripts/run_article_analysis.sh \
-  /path/to/run/seed33 \
-  /path/to/run/seed34 \
-  /path/to/run/seed35 \
-  --output-dir /path/to/article-results/analysis
-```
-
-The analysis reports Pearson, MAE, RMSE, R², per-seed variability, paired
-wins/losses, worst-seed deltas, and subject-level bootstrap intervals. It
-records the input paths and hashes so that tables and figures are
-traceable to exact runs.
-
-Before any sealed evaluation, verify the matched validation gate:
-
-```bash
-python scripts/check_article_gate.py \
-  --baseline-run /path/to/baseline/seed33 \
-  --baseline-run /path/to/baseline/seed34 \
-  --baseline-run /path/to/baseline/seed35 \
-  --candidate-run /path/to/candidate/seed33 \
-  --candidate-run /path/to/candidate/seed34 \
-  --candidate-run /path/to/candidate/seed35 \
-  --output /path/to/article-results/final_gate.json
-```
-
-The gate reads validation evidence only, pairs runs by seed, requires at least
-two candidate wins, and rejects test-contaminated run directories.
-
-## Data and artifacts
-
-The canonical manifest is metadata-only and the HBN recordings remain
-external. Large checkpoints, raw predictions, launch logs, and historical
-exploration outputs are intentionally excluded from Git. Compact summaries,
-negative-result records, figures, and provenance required by the paper live
-under `results/canonical/`.
-
-The staged protocol is validation screen → held-back confirmation → one sealed
-finalist test. Test metrics must never be used to select a head or tune a
-hyperparameter. See
-[`docs/research/article_ready_protocol.md`](docs/research/article_ready_protocol.md)
-for the complete contract.
+The latest code-versus-evidence readiness boundary is recorded in
+[`docs/research/readiness_audit.md`](docs/research/readiness_audit.md).

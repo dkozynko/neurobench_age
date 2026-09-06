@@ -7,16 +7,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_article_scope_and_registry_are_explicit() -> None:
+def test_research_scope_and_registry_are_explicit() -> None:
     scope = (ROOT / "ARTICLE_SCOPE.md").read_text(encoding="utf-8")
     registry = (ROOT / "docs/research/article_evidence_registry.md").read_text(encoding="utf-8")
+    scope_normalized = " ".join(scope.split())
 
-    assert "Stability of age probing in REVE" in scope
-    assert "increasingly complex" in scope
-    assert "canonical 1000-subject nested manifest" in scope
-    assert "screening" in scope and "confirmation" in scope
-    assert "Head stability" in registry
-    assert "Complexity limits" in registry
+    assert "frozen REVE representations" in scope_normalized
+    assert "increasingly expressive" in scope_normalized
+    assert "MIPDB" in scope_normalized
+    assert "prospective" in scope_normalized and "retrospective" in scope_normalized
+    assert "Primary prospective study" in registry
+    assert "Retrospective HBN/R5 boundary" in registry
 
 
 def test_protocol_declares_holdout_and_required_evidence() -> None:
@@ -24,15 +25,14 @@ def test_protocol_declares_holdout_and_required_evidence() -> None:
     protocol_lower = " ".join(protocol.lower().split())
 
     for required in (
-        "validation-only seed-33 screen",
-        "seeds 34 and 35",
-        "sealed final test",
-        "test score is never used",
+        "seeds 33 through 42",
+        "sealed external holdout",
+        "MIPDB must never be used",
         "Pearson",
         "MAE",
         "RMSE",
         "R²",
-        "paired subject-level bootstrap",
+        "hierarchical paired bootstrap",
     ):
         assert required.lower() in protocol_lower
 

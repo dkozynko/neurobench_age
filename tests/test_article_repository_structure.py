@@ -7,17 +7,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_repository_declares_article_scope() -> None:
+def test_repository_declares_research_scope_without_paper_packaging_claim() -> None:
     scope = ROOT / "ARTICLE_SCOPE.md"
     readme = ROOT / "README.md"
 
     assert scope.is_file()
     scope_text = scope.read_text(encoding="utf-8").lower()
     readme_text = readme.read_text(encoding="utf-8").lower()
-    assert "stability of age probing" in scope_text
-    assert "limits" in scope_text and "complex" in scope_text
-    assert "canonical" in scope_text
-    assert "article" in readme_text
+    assert "frozen reve representations" in scope_text
+    assert "limits" in scope_text and "expressive" in scope_text
+    assert "primary prospective study" in scope_text
+    assert "for the paper" not in scope_text
+    assert "for the paper" not in readme_text
 
 
 def test_package_layout_and_article_entry_points_are_declared() -> None:

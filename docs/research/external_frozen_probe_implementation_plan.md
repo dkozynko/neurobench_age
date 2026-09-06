@@ -35,9 +35,15 @@ New production files:
 - `src/neurobench_age/analysis/confirmatory.py`
 - `src/neurobench_age/data/mipdb.py`
 - `src/neurobench_age/pipelines/frozen_probe.py`
+- `src/neurobench_age/pipelines/frozen_probe_training.py`
 - `src/neurobench_age/pipelines/external_holdout.py`
+- `src/neurobench_age/pipelines/representation_materialization.py`
+- `src/neurobench_age/research/sealing.py`
 - `configs/research/external_frozen_probe.json`
 - `scripts/build_mipdb_manifest.py`
+- `scripts/run_mipdb_pilot.py`
+- `scripts/finalize_mipdb_cohort.py`
+- `scripts/cache_hbn_representations.py`
 - `scripts/seal_external_study.py`
 - `scripts/run_frozen_probe.py`
 - `scripts/run_external_holdout.py`
@@ -63,6 +69,7 @@ New or extended tests:
 - `tests/test_study_lock.py`
 - `tests/test_mipdb_inventory.py`
 - `tests/test_mipdb_preprocessing.py`
+- `tests/test_scientific_workflow.py`
 - `tests/test_frozen_probe.py`
 - `tests/test_external_holdout.py`
 - `tests/test_confirmatory_analysis.py`
@@ -165,7 +172,7 @@ python3 -m pytest -q tests/test_paper_evidence.py tests/test_analysis_cli.py
 - [x] Add the executable protocol with seeds 33–42, four approved heads,
   layer `-2`, bootstrap seed `20260903`, 10,000 iterations, and the full
   decision rule.
-- [ ] Make every research CLI load the same protocol and record its SHA-256.
+- [x] Make every research CLI load the same protocol and record its SHA-256.
 - [x] Replace the ambiguous ignored `--config` with an enforced
   `--phase-config` for article launches, and record its path, name, and SHA-256
   in run evidence. Generic diagnostic runs do not pretend to consume it.
@@ -189,10 +196,15 @@ python3 -m pytest -q tests/test_research_protocol.py tests/test_official_cli.py
 - [x] Implement canonical JSON serialization and SHA-256 helpers.
 - [x] Seal all required hashes into one immutable study lock.
 - [x] Write state changes and sidecars atomically.
-- [ ] Require a `started` marker before primary EEG samples are read.
-- [ ] Permit only exact resume against the same lock and immutable prediction
+- [x] Require a `started` marker before primary EEG samples are read.
+- [x] Permit only exact resume against the same lock and immutable prediction
   inventory.
 - [x] Ensure failure writes a diagnostic artifact without rewriting the lock.
+- [x] Derive the production seal from verified artifacts rather than a manually
+  authored payload, including pilot QC, finalized cohort QC, HBN training
+  evidence, and every checkpoint/run manifest.
+- [x] Append resumable failure evidence without moving a recoverable run to a
+  terminal state.
 
 Verification:
 
@@ -200,7 +212,7 @@ Verification:
 python3 -m pytest -q tests/test_study_lock.py
 ```
 
-## Task 6: Build metadata-only MIPDB inventory and engineering pilot
+## Task 6: Build content-addressed MIPDB inventory and engineering pilot
 
 **Files:** `src/neurobench_age/data/mipdb.py`,
 `scripts/build_mipdb_manifest.py`, `tests/test_mipdb_inventory.py`.
@@ -209,8 +221,8 @@ python3 -m pytest -q tests/test_study_lock.py
   missing ages, duplicate IDs, malformed ages, and missing recordings.
 - [x] Write failing tests for deterministic normalized subject ordering and
   manifest hashing.
-- [x] Implement metadata-only inventory creation; this stage must not import the
-  model, load signal arrays, or compute prediction metrics.
+- [x] Implement model-free content-addressed inventory creation; this stage must
+  not import the model, load signal arrays, or compute prediction metrics.
 - [x] Select exactly ten engineering subjects using the approved SHA-256 rule:
   `dataset_manifest_sha256 + NUL + subject_id + NUL +
   "mipdb-engineering-pilot-v1"`.
@@ -220,6 +232,8 @@ python3 -m pytest -q tests/test_study_lock.py
 - [x] Mark the study underpowered when fewer than 50 primary subjects remain.
 - [x] Emit a manifest containing only metadata, exclusions, cohort membership,
   and cryptographic hashes—never model performance.
+- [x] Run the frozen signal/QC contract over every non-pilot candidate and emit
+  a create-only finalized manifest before sealing.
 
 Verification:
 
@@ -266,7 +280,7 @@ python3 -m pytest -q tests/test_mipdb_preprocessing.py
 - [x] Cache final and penultimate representations once per subject in a
   deterministic external cache keyed by protocol, checkpoint, data manifest,
   preprocessing, subject, and source hashes.
-- [ ] Make every head consume declared cached fields only; it may not invoke or
+- [x] Make every head consume declared cached fields only; it may not invoke or
   mutate the encoder.
 - [x] Reject incomplete, stale, or hash-mismatched cache entries.
 
@@ -279,19 +293,20 @@ python3 -m pytest -q tests/test_frozen_probe.py
 ## Task 9: Train the four predeclared heads on HBN train/validation only
 
 **Files:** `src/neurobench_age/pipelines/frozen_probe.py`,
+`src/neurobench_age/pipelines/frozen_probe_training.py`,
 `scripts/run_frozen_probe.py`, training tests.
 
-- [ ] Write tests that reject any head outside `mean_linear`,
+- [x] Write tests that reject any head outside `mean_linear`,
   `mean_layer_linear`, `mean_rich_stats_residual`, and
   `multi_query_rich_stats`.
-- [ ] Write leakage tests proving the training path has no test-split loader or
+- [x] Write leakage tests proving the training path has no test-split loader or
   test metric available during fitting and checkpoint selection.
-- [ ] Implement the four heads against the same cached representation contract.
-- [ ] Train each head with seeds 33–42 and validation-only checkpoint selection.
-- [ ] Persist head-only parameter counts, runtime, peak memory, selected epoch,
+- [x] Implement the four heads against the same cached representation contract.
+- [x] Train each head with seeds 33–42 and validation-only checkpoint selection.
+- [x] Persist head-only parameter counts, runtime, peak memory, selected epoch,
   optimizer settings, validation history, checkpoint hash, and seed.
-- [ ] Require an exact 40-run inventory before the study can be sealed.
-- [ ] Add exact-resume behavior that reuses only hash-valid completed runs.
+- [x] Require an exact 40-run inventory before the study can be sealed.
+- [x] Add exact-resume behavior that reuses only hash-valid completed runs.
 
 Verification:
 
@@ -304,21 +319,21 @@ python3 -m pytest -q tests/test_frozen_probe.py tests/test_frozen_probe_cli.py
 **Files:** `src/neurobench_age/pipelines/external_holdout.py`,
 `scripts/run_external_holdout.py`, `tests/test_external_holdout.py`.
 
-- [ ] Write a static/API test proving this module has no optimizer, scheduler,
+- [x] Write a static/API test proving this module has no optimizer, scheduler,
   backward pass, calibration fit, or model-selection entry point.
-- [ ] Write failing tests for an unsealed study, wrong checkpoint inventory,
+- [x] Write failing tests for an unsealed study, wrong checkpoint inventory,
   wrong subject inventory, wrong seed inventory, pilot contamination, and
   partially overwritten predictions.
-- [ ] Preflight the lock, code revision, environment, cache identity, 40 head
+- [x] Preflight the lock, code revision, environment, cache identity, 40 head
   checkpoints, and ordered external subject list.
-- [ ] Transition to `started` before reading primary subject EEG.
-- [ ] Write one immutable subject prediction record per head and seed, including
+- [x] Transition to `started` before reading primary subject EEG.
+- [x] Write one immutable subject prediction record per head and seed, including
   target, prediction, QC status, and all relevant hashes.
-- [ ] Resume only missing records with exact identity; never overwrite an
+- [x] Resume only missing records with exact identity; never overwrite an
   existing record.
-- [ ] Produce no aggregate metric until the full expected prediction inventory
+- [x] Produce no aggregate metric until the full expected prediction inventory
   is complete.
-- [ ] Transition to `completed` only after inventory and hash validation.
+- [x] Transition to `completed` only after inventory and hash validation.
 
 Verification:
 
@@ -331,25 +346,25 @@ python3 -m pytest -q tests/test_external_holdout.py
 **Files:** `src/neurobench_age/analysis/confirmatory.py`,
 `scripts/analyze_confirmatory.py`, `tests/test_confirmatory_analysis.py`.
 
-- [ ] Add reference tests for Pearson, MAE, RMSE, R², calibration slope, and
+- [x] Add reference tests for Pearson, MAE, RMSE, R², calibration slope, and
   calibration intercept.
-- [ ] Add exact-pairing tests over ten seeds and identical subject order.
-- [ ] Implement the primary estimand: mean across seeds of candidate-minus-
+- [x] Add exact-pairing tests over ten seeds and identical subject order.
+- [x] Implement the primary estimand: mean across seeds of candidate-minus-
   `mean_linear` subject-level external Pearson.
-- [ ] Implement deterministic hierarchical paired bootstrap with 10,000
+- [x] Implement deterministic hierarchical paired bootstrap with 10,000
   iterations and RNG seed `20260903`, resampling seeds and subjects while
   preserving pairing.
-- [ ] Implement exact one-sided paired seed randomization by enumerating all
+- [x] Implement exact one-sided paired seed randomization by enumerating all
   `2^10` sign flips.
-- [ ] Implement Holm step-down correction over the three candidate comparisons.
-- [ ] Implement the joint stable-improvement rule: adjusted p-value below 0.05,
+- [x] Implement Holm step-down correction over the three candidate comparisons.
+- [x] Implement the joint stable-improvement rule: adjusted p-value below 0.05,
   bootstrap lower bound above zero, at least 8/10 wins, and worst seed delta at
   least -0.01.
-- [ ] Report wins/ties/losses, worst delta, seed SD, calibration, resource use,
+- [x] Report wins/ties/losses, worst delta, seed SD, calibration, resource use,
   exclusions, cohort sizes, and power warning.
-- [ ] If no candidate passes, state only that no tested complex head established
+- [x] If no candidate passes, state only that no tested complex head established
   a stable external gain; do not claim equivalence.
-- [ ] Fail if predictions are incomplete or if any provenance field differs.
+- [x] Fail if predictions are incomplete or if any provenance field differs.
 
 Verification:
 
@@ -362,17 +377,17 @@ python3 -m pytest -q tests/test_confirmatory_analysis.py
 **Files:** `README.md`, `docs/research/article_ready_protocol.md`,
 `docs/research/article_evidence_registry.md`, documentation tests.
 
-- [ ] Label existing HBN R5 results as retrospective/secondary because the test
+- [x] Label existing HBN R5 results as retrospective/secondary because the test
   set has already been used in repeated finalist decisions.
-- [ ] Describe frozen representation probing as the primary new study and
+- [x] Describe frozen representation probing as the primary new study and
   official NeuralBench full fine-tuning as secondary reproduction evidence.
-- [ ] Replace generic “probing” language for trainable-encoder runs with
+- [x] Replace generic “probing” language for trainable-encoder runs with
   “end-to-end age prediction” or “full fine-tuning.”
-- [ ] Document the exact commands for inventory, pilot QC, HBN extraction,
+- [x] Document the exact commands for inventory, pilot QC, HBN extraction,
   head training, sealing, external inference, and analysis.
-- [ ] Add placeholders for real cohort counts and results rather than inventing
+- [x] Add placeholders for real cohort counts and results rather than inventing
   values before the study runs.
-- [ ] Document the negative-result interpretation and all limitations, including
+- [x] Document the negative-result interpretation and all limitations, including
   cross-dataset shift and possible encoder pretraining uncertainty.
 
 Verification:
@@ -381,22 +396,65 @@ Verification:
 python3 -m pytest -q tests/test_documentation.py
 ```
 
+## Task 12A: Complete real-data representation adapters
+
+**Files:** `configs/research/external_frozen_probe.json`,
+`src/neurobench_age/research/protocol.py`, `src/neurobench_age/data/mipdb.py`,
+`src/neurobench_age/pipelines/representation_materialization.py`,
+`scripts/run_mipdb_pilot.py`, `scripts/cache_hbn_representations.py`,
+`scripts/run_external_holdout.py`, adapter and CLI tests, protocol docs.
+
+- [x] Extend the strict preprocessing contract with `task-block01`, paradigm
+  marker `90`, condition markers `20`/`30`, both-condition acquisition-order
+  selection, and the exact EGI `E1`--`E128` mapped-channel requirement.
+- [x] Make metadata inventory treat BrainVision `.vhdr` as the recording and
+  never count its `.eeg` binary companion as a second recording.
+- [x] Parse MIPDB event files deterministically, discard pre-condition samples,
+  preserve EO/EC boundaries, and reject malformed or ambiguous marker streams.
+- [x] Add a production MNE-BIDS loader that applies the common preprocessing
+  contract and emits complete model-free QC without retaining pilot ages or
+  any age-prediction metric.
+- [x] Add `run_mipdb_pilot.py`; it must process exactly the ten deterministic
+  pilot subjects, verify frozen-encoder output shape, and write a create-only
+  QC report containing no prediction or target fields.
+- [x] Add `cache_hbn_representations.py`; it must exclude R5, require disjoint
+  train/validation subjects, cache layers `-2`/`-1` exactly once, and emit the
+  strict training manifest consumed by `run_frozen_probe.py`.
+- [x] Add a lazy external representation provider that is instantiated without
+  reading EEG, is called only after `evaluation_started.json`, materializes or
+  exactly resumes each immutable cache entry, and verifies the loaded encoder
+  state against the sealed checkpoint hash.
+- [x] Wire the provider into `run_external_holdout.py` with explicit BIDS and
+  channel-mapping paths; remove the unsafe cache-only production path.
+- [x] Replace all three integration-blocker sections with exact runnable
+  commands and verify that every documented script exists.
+
+Verification:
+
+```bash
+python3 -m pytest -q tests/test_research_protocol.py \
+  tests/test_mipdb_inventory.py tests/test_mipdb_preprocessing.py \
+  tests/test_representation_materialization.py tests/test_mipdb_pilot_cli.py \
+  tests/test_hbn_cache_cli.py tests/test_external_holdout.py \
+  tests/test_documentation.py
+```
+
 ## Task 13: Full synthetic verification and readiness audit
 
 **Files:** all files above; optional readiness report under `docs/research/`.
 
-- [ ] Run the complete test suite without manual `PYTHONPATH`.
-- [ ] Compile all Python modules.
-- [ ] Syntax-check all shell launchers.
-- [ ] Build/install in a clean Python 3.12 environment with the declared
+- [x] Run the complete test suite without manual `PYTHONPATH`.
+- [x] Compile all Python modules.
+- [x] Syntax-check all shell launchers.
+- [x] Build/install in a clean Python 3.12 environment with the declared
   research extras.
-- [ ] Run a tiny end-to-end synthetic sealed study covering inventory, pilot,
+- [x] Run a tiny end-to-end synthetic sealed study covering inventory, pilot,
   representation caching, 40 miniature head runs, one-time prediction, and
   confirmatory analysis.
-- [ ] Scan the repository for tracked datasets, checkpoints, archives, caches,
+- [x] Scan the repository for tracked datasets, checkpoints, archives, caches,
   secrets, and unexpectedly large blobs.
-- [ ] Run `git diff --check` and inspect every uncommitted change.
-- [ ] Write a readiness report that distinguishes code validation from real-data
+- [x] Run `git diff --check` and inspect every uncommitted change.
+- [x] Write a readiness report that distinguishes code validation from real-data
   completion and explicitly says primary MIPDB inference has not started.
 
 Verification:
@@ -415,7 +473,7 @@ This task begins only after Tasks 1–13 pass and the artifacts are manually
 reviewed. It is an execution checklist, not part of ordinary code testing.
 
 - [ ] Download or mount MIPDB outside Git and record the exact release/source.
-- [ ] Build the metadata-only dataset manifest.
+- [ ] Build the content-addressed draft dataset manifest.
 - [ ] Materialize the deterministic ten-subject engineering pilot list.
 - [ ] Run pilot loader/QC/shape checks only; do not compute age metrics.
 - [ ] Freeze the QC policy and regenerate the confirmatory cohort manifest.
@@ -431,7 +489,7 @@ reviewed. It is an execution checklist, not part of ordinary code testing.
 - [ ] Freeze the evidence bundle and use it to write the Results, Discussion,
   Limitations, and Conclusion sections.
 
-Expected paper narrative after execution:
+Expected research narrative after execution:
 
 1. Reproduce the established NeuralBench age-prediction setup as secondary
    context.

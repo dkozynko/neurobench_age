@@ -140,6 +140,12 @@ def test_source_tree_digest_ignores_runtime_artifacts(tmp_path: Path) -> None:
     (source_root / "results" / "run_manifest.json").write_text("{}\n")
     (source_root / "__pycache__").mkdir()
     (source_root / "__pycache__" / "runner.pyc").write_bytes(b"cache")
+    (source_root / "build/generated").mkdir(parents=True)
+    (source_root / "build/generated/runner.py").write_text("generated\n")
+    (source_root / "dist").mkdir()
+    (source_root / "dist/archive.txt").write_text("generated\n")
+    (source_root / "src/package.egg-info").mkdir(parents=True)
+    (source_root / "src/package.egg-info/SOURCES.txt").write_text("generated\n")
 
     assert experiment_evidence.source_tree_sha256(source_root) == first
 

@@ -11,7 +11,7 @@
     "external": {
       "name": "MIPDB",
       "nemar_id": "nm000153",
-      "release": "NEMAR nm000153 pinned at study sealing",
+      "release": "NEMAR nm000153 content-addressed acquisition snapshot",
       "pilot_size": 10,
       "pilot_salt": "mipdb-engineering-pilot-v1",
       "primary_cohort": "within_hbn_training_age_support",
@@ -37,7 +37,16 @@
     "max_seconds_per_subject": 120.0,
     "cross_block_windows": false,
     "spatial_interpolation": false,
-    "subject_aggregation": "arithmetic_mean"
+    "subject_aggregation": "arithmetic_mean",
+    "external_resting_task": "block01",
+    "external_paradigm_start_marker": "90",
+    "external_condition_markers": {
+      "20": "eyes_open",
+      "30": "eyes_closed"
+    },
+    "external_condition_selection": "acquisition_order",
+    "mapped_channel_layout": "egi_hydrocel_e1_e128",
+    "required_mapped_channels": 128
   },
   "heads": [
     {"name": "mean_linear", "layer_index": -1, "aggregation": "mean"},
