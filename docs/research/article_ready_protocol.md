@@ -24,11 +24,16 @@ model or head selection and cannot provide untouched confirmation.
 
 ## Fixed protocol
 
-- Checkpoint: `brain-bzh/reve-base`, pinned and hashed at execution time.
+- Checkpoint: `brain-bzh/reve-base`, constructed with protocol seed `0` and
+  hashed in full at execution time. Seeded construction is isolated from the
+  training RNG stream and stabilizes the unused randomly initialized task
+  layer included in the provenance hash.
 - Cached layers: `-2` and `-1` from one deterministic frozen-encoder pass.
 - Heads: `mean_linear`, `mean_layer_linear`,
   `mean_rich_stats_residual`, and `multi_query_rich_stats`.
 - Seeds: every integer from 33 through 42, with no missing or extra run.
+- Training budget: at most 40 epochs with early-stopping patience 7 for every
+  head, matching the canonical NeuralBench budget.
 - Checkpoint selection: maximum HBN validation Pearson, ties resolved by the
   earliest epoch.
 - External adaptation: none. MIPDB must never be used for fitting, checkpoint

@@ -242,23 +242,32 @@ def load_reve_encoder(
     *,
     channel_names: Sequence[str],
     mapping_path: Path | None,
+    initialization_seed: int,
     loader: Callable[..., nn.Module] | None = None,
 ) -> nn.Module:
-    """Build the existing REVE backbone and immediately freeze it."""
+    """Build the existing REVE backbone deterministically and freeze it."""
 
     if checkpoint != PREDECLARED_CHECKPOINT:
         raise FrozenEncoderError(
             f"checkpoint must be the predeclared {PREDECLARED_CHECKPOINT!r}"
         )
+    if (
+        isinstance(initialization_seed, bool)
+        or not isinstance(initialization_seed, int)
+        or initialization_seed < 0
+    ):
+        raise FrozenEncoderError("initialization_seed must be a non-negative integer")
     if loader is None:
         from .independent import load_reve_backbone
 
         loader = load_reve_backbone
-    encoder = loader(
-        channel_names=tuple(channel_names),
-        mapping_path=mapping_path,
-        pretrained_name=checkpoint,
-    )
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(initialization_seed)
+        encoder = loader(
+            channel_names=tuple(channel_names),
+            mapping_path=mapping_path,
+            pretrained_name=checkpoint,
+        )
     if not isinstance(encoder, nn.Module):
         raise FrozenEncoderError("REVE loader did not return a torch module")
     return freeze_encoder(encoder)

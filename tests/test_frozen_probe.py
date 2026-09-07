@@ -242,6 +242,7 @@ def test_reve_loader_accepts_only_predeclared_checkpoint_and_freezes_result() ->
         "brain-bzh/reve-base",
         channel_names=("Cz", "Fz"),
         mapping_path=Path("mapping.json"),
+        initialization_seed=0,
         loader=lambda **kwargs: built,
     )
 
@@ -253,8 +254,46 @@ def test_reve_loader_accepts_only_predeclared_checkpoint_and_freezes_result() ->
             "other/model",
             channel_names=("Cz",),
             mapping_path=None,
+            initialization_seed=0,
             loader=lambda **kwargs: TinyEncoder(),
         )
+
+
+def test_reve_loader_has_deterministic_full_state_identity() -> None:
+    torch.manual_seed(123)
+    first = load_reve_encoder(
+        "brain-bzh/reve-base",
+        channel_names=("Cz", "Fz"),
+        mapping_path=Path("mapping.json"),
+        initialization_seed=0,
+        loader=lambda **kwargs: TinyEncoder(),
+    )
+    torch.manual_seed(456)
+    second = load_reve_encoder(
+        "brain-bzh/reve-base",
+        channel_names=("Cz", "Fz"),
+        mapping_path=Path("mapping.json"),
+        initialization_seed=0,
+        loader=lambda **kwargs: TinyEncoder(),
+    )
+
+    assert encoder_state_sha256(first) == encoder_state_sha256(second)
+
+
+def test_reve_loader_restores_callers_torch_rng_state() -> None:
+    torch.manual_seed(991)
+    expected_next_value = torch.rand(4)
+
+    torch.manual_seed(991)
+    load_reve_encoder(
+        "brain-bzh/reve-base",
+        channel_names=("Cz", "Fz"),
+        mapping_path=Path("mapping.json"),
+        initialization_seed=0,
+        loader=lambda **kwargs: TinyEncoder(),
+    )
+
+    assert torch.equal(torch.rand(4), expected_next_value)
 
 
 @pytest.mark.parametrize(

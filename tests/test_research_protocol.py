@@ -26,6 +26,8 @@ def test_approved_protocol_loads_with_predeclared_primary_contract() -> None:
     protocol = load_study_protocol(PROTOCOL_PATH)
 
     assert protocol.seeds == tuple(range(33, 43))
+    assert protocol.training.max_epochs == 40
+    assert protocol.training.patience == 7
     assert protocol.head_names == (
         "mean_linear",
         "mean_layer_linear",
@@ -33,6 +35,7 @@ def test_approved_protocol_loads_with_predeclared_primary_contract() -> None:
         "multi_query_rich_stats",
     )
     assert protocol.encoder.frozen is True
+    assert protocol.encoder.initialization_seed == 0
     assert protocol.encoder.layer_indices == (-2, -1)
     assert protocol.preprocessing.external_resting_task == "block01"
     assert protocol.preprocessing.external_paradigm_start_marker == "90"
@@ -72,6 +75,10 @@ def test_protocol_rejects_unknown_fields(tmp_path: Path, mutation: object) -> No
         (lambda payload: payload["training"].update({"seeds": [33, 34]}), "seeds 33 through 42"),
         (lambda payload: payload["heads"].append({"name": "new_head", "layer_index": -1, "aggregation": "mean"}), "exactly four"),
         (lambda payload: payload["encoder"].update({"frozen": False}), "frozen"),
+        (
+            lambda payload: payload["encoder"].update({"initialization_seed": 1}),
+            "initialization seed",
+        ),
         (lambda payload: payload["encoder"].update({"layer_indices": [-3, -1]}), "layers -2 and -1"),
         (lambda payload: payload["statistics"].update({"bootstrap_iterations": 999}), "10,000"),
         (lambda payload: payload["training"].update({"optimizer": "SGD"}), "AdamW"),

@@ -89,6 +89,7 @@ def test_lazy_external_provider_reads_no_eeg_before_started_marker(
 
     def encoder_loader(*args, **kwargs):
         calls["encoder"] += 1
+        assert kwargs["initialization_seed"] == PROTOCOL.encoder.initialization_seed
         return encoder
 
     marker = tmp_path / "output" / "evaluation_started.json"

@@ -91,6 +91,10 @@ def test_pilot_runs_exact_ten_without_retaining_targets_or_predictions(
             "qc_reasons": [],
         }
 
+    def encoder_loader(checkpoint, **kwargs):
+        assert kwargs["initialization_seed"] == PROTOCOL.encoder.initialization_seed
+        return _TinyEncoder()
+
     report = run_mipdb_pilot(
         protocol=PROTOCOL,
         bids_root=tmp_path / "bids",
@@ -100,7 +104,7 @@ def test_pilot_runs_exact_ten_without_retaining_targets_or_predictions(
         device="cpu",
         extraction_batch_size=1,
         subject_loader=subject_loader,
-        encoder_loader=lambda checkpoint, **kwargs: _TinyEncoder(),
+        encoder_loader=encoder_loader,
     )
 
     assert loaded == pilot

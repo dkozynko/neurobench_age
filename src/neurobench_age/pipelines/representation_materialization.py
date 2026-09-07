@@ -277,6 +277,7 @@ def run_mipdb_pilot(
                 protocol.encoder.checkpoint,
                 channel_names=channel_labels,
                 mapping_path=Path(mapping_path),
+                initialization_seed=protocol.encoder.initialization_seed,
             )
             encoder_sha256 = encoder_state_sha256(encoder)
         elif labels_tuple != channel_labels:
@@ -480,6 +481,7 @@ def materialize_hbn_representations(
         protocol.encoder.checkpoint,
         channel_names=channel_order,
         mapping_path=Path(mapping_path),
+        initialization_seed=protocol.encoder.initialization_seed,
     )
     checkpoint_sha256 = encoder_state_sha256(encoder)
     subject_manifest_sha256 = manifest_sha256(Path(subject_manifest_path))
@@ -713,6 +715,7 @@ class LazyMipdbRepresentationProvider:
                 self.protocol.encoder.checkpoint,
                 channel_names=labels_tuple,
                 mapping_path=self.mapping_path,
+                initialization_seed=self.protocol.encoder.initialization_seed,
             )
             self._channel_labels = labels_tuple
         elif labels_tuple != self._channel_labels:

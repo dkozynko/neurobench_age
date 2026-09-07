@@ -135,6 +135,10 @@ def test_hbn_materializer_caches_only_train_validation_and_exactly_resumes(
             ("E1", "E2"),
         )
 
+    def encoder_loader(checkpoint, **kwargs):
+        assert kwargs["initialization_seed"] == PROTOCOL.encoder.initialization_seed
+        return encoder
+
     kwargs = {
         "protocol": PROTOCOL,
         "subject_manifest_path": source_manifest,
@@ -147,7 +151,7 @@ def test_hbn_materializer_caches_only_train_validation_and_exactly_resumes(
         "device": "cpu",
         "extraction_batch_size": 7,
         "prepared_loader": prepared_loader,
-        "encoder_loader": lambda checkpoint, **kwargs: encoder,
+        "encoder_loader": encoder_loader,
     }
     report = materialize_hbn_representations(**kwargs)
 

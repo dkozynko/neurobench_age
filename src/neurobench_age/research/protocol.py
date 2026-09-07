@@ -83,6 +83,7 @@ class DatasetContract:
 @dataclass(frozen=True)
 class EncoderContract:
     checkpoint: str
+    initialization_seed: int
     frozen: bool
     eval_mode: bool
     inference_mode: bool
@@ -230,10 +231,20 @@ def _parse_encoder(value: object) -> EncoderContract:
     _expect_keys(
         encoder,
         path="encoder",
-        required=("checkpoint", "frozen", "eval_mode", "inference_mode", "layer_indices"),
+        required=(
+            "checkpoint",
+            "initialization_seed",
+            "frozen",
+            "eval_mode",
+            "inference_mode",
+            "layer_indices",
+        ),
     )
     result = EncoderContract(
         checkpoint=_string(encoder["checkpoint"], "encoder.checkpoint"),
+        initialization_seed=_integer(
+            encoder["initialization_seed"], "encoder.initialization_seed"
+        ),
         frozen=_boolean(encoder["frozen"], "encoder.frozen"),
         eval_mode=_boolean(encoder["eval_mode"], "encoder.eval_mode"),
         inference_mode=_boolean(encoder["inference_mode"], "encoder.inference_mode"),
@@ -244,6 +255,8 @@ def _parse_encoder(value: object) -> EncoderContract:
     )
     if result.checkpoint != "brain-bzh/reve-base":
         raise ProtocolError("encoder checkpoint must be brain-bzh/reve-base")
+    if result.initialization_seed != 0:
+        raise ProtocolError("encoder initialization seed must be 0")
     if not (result.frozen and result.eval_mode and result.inference_mode):
         raise ProtocolError("encoder must be frozen and run in eval/inference mode")
     if result.layer_indices != (-2, -1):

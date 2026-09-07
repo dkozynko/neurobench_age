@@ -102,7 +102,11 @@ The data are still reported descriptively with that limitation.
 
 ### Primary: frozen representation probing
 
-- Use one pinned `brain-bzh/reve-base` checkpoint and record its SHA-256.
+- Use one pinned `brain-bzh/reve-base` checkpoint, construct it with the
+  predeclared initialization seed `0`, and record the SHA-256 of its complete
+  state. The seed controls the checkpoint's randomly initialized, unused task
+  layer so that full-state provenance is stable across processes; construction
+  occurs in an isolated RNG context and does not change later training RNGs.
 - Freeze every encoder parameter and keep the encoder in evaluation mode.
 - Run one deterministic extraction pass per data window and cache every
   predeclared REVE layer needed by the four heads. Each head reads only its
@@ -187,10 +191,14 @@ cannot change.
 
 ## Training and checkpoint selection
 
-- The encoder is frozen and evaluated deterministically.
+- The encoder is constructed with seed `0`, frozen, and evaluated
+  deterministically.
 - The optimizer contains head parameters only.
 - MSE is the training loss unless the sealed protocol specifies one common
   alternative for every head.
+- Use the canonical NeuralBench training budget of at most 40 epochs with
+  early-stopping patience 7. This common budget is fixed for all four heads so
+  that added head complexity does not receive a larger optimization budget.
 - Epoch budget, optimizer, learning rate, weight decay, scheduler, batch size,
   and patience are shared unless a difference is explicitly part of a
   predeclared head contract.
