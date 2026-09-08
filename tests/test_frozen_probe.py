@@ -103,6 +103,78 @@ def test_global_window_batch_materialization_preserves_permutation_order() -> No
     assert targets.tolist() == [11.0, 8.0, 11.0]
 
 
+def test_global_window_flat_materialization_matches_reference_materialization() -> None:
+    records = (
+        CachedSubjectRecord("sub-a", "train", 8.0, _identity("sub-a")),
+        CachedSubjectRecord("sub-b", "train", 11.0, _identity("sub-b")),
+    )
+    tensors = {
+        "sub-a": torch.tensor([[[10.0]], [[11.0]]]),
+        "sub-b": torch.tensor([[[20.0]], [[21.0]], [[22.0]]]),
+    }
+    plan = GlobalWindowBatchPlan.build(records, tensors=tensors, batch_size=4)
+    references = ((1, 2), (0, 0), (1, 0), (0, 1))
+    flat_features, flat_targets = plan.flatten(tensors)
+
+    reference_batch, reference_targets = plan.materialize(
+        references,
+        tensors=tensors,
+    )
+    flat_batch, flat_batch_targets = plan.materialize(
+        references,
+        flat_features=flat_features,
+        flat_targets=flat_targets,
+    )
+
+    assert torch.equal(flat_batch, reference_batch)
+    assert torch.equal(flat_batch_targets, reference_targets)
+
+
+def test_global_window_index_batches_match_reference_batches() -> None:
+    records = (
+        CachedSubjectRecord("sub-a", "train", 8.0, _identity("sub-a")),
+        CachedSubjectRecord("sub-b", "train", 11.0, _identity("sub-b")),
+    )
+    tensors = {
+        "sub-a": torch.tensor([[[10.0]], [[11.0]]]),
+        "sub-b": torch.tensor([[[20.0]], [[21.0]], [[22.0]]]),
+    }
+    plan = GlobalWindowBatchPlan.build(records, tensors=tensors, batch_size=2)
+
+    reference_batches = plan.permuted_batches(
+        generator=torch.Generator(device="cpu").manual_seed(33)
+    )
+    index_batches = plan.permuted_batch_indices(
+        generator=torch.Generator(device="cpu").manual_seed(33)
+    )
+
+    expected = tuple(
+        tuple(plan.subject_offsets[subject] + window for subject, window in batch)
+        for batch in reference_batches
+    )
+    assert tuple(tuple(batch.tolist()) for batch in index_batches) == expected
+
+
+def test_training_store_device_keeps_cpu_path_when_cuda_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    features = torch.randn(4, 2, 3)
+    targets = torch.randn(4)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    moved_features, moved_targets, selected_device = (
+        training_module._prepare_training_store_device(
+            features,
+            targets,
+            device="cuda",
+        )
+    )
+
+    assert selected_device == "cpu"
+    assert moved_features is features
+    assert moved_targets is targets
+
+
 @pytest.mark.parametrize(
     "tensors",
     [
@@ -797,6 +869,64 @@ def test_store_backed_training_is_numerically_identical_to_disk_reference(
         tmp_path / "memory/head_checkpoint.pt", map_location="cpu", weights_only=True
     )["state_dict"]
     assert all(torch.equal(disk_state[key], memory_state[key]) for key in disk_state)
+
+
+def test_shared_flat_training_store_is_numerically_identical_to_store_reference(
+    tmp_path: Path,
+) -> None:
+    cache_root = tmp_path / "cache"
+    records = _tiny_training_records(cache_root)
+    training = replace(_tiny_training_contract(), max_epochs=3, patience=3)
+    store = ValidatedRepresentationStore.build(
+        records=records,
+        cache_root=cache_root,
+        available_memory_bytes=16 * 1024**3,
+    )
+    train_records = tuple(record for record in records if record.split == "train")
+    train_tensors = {
+        record.subject_id: store.tensor(record.subject_id, -1)
+        for record in train_records
+    }
+    plan = GlobalWindowBatchPlan.build(
+        train_records,
+        tensors=train_tensors,
+        batch_size=training.batch_size,
+    )
+    flat_store = (*plan.flatten(train_tensors), "cpu")
+
+    reference = train_frozen_probe_run(
+        head_name="mean_linear",
+        seed=33,
+        records=records,
+        cache_root=cache_root,
+        run_dir=tmp_path / "reference",
+        training=training,
+        device="cpu",
+        training_source_sha256=TRAINING_SOURCE_SHA256,
+        representation_store=store,
+    )
+    shared = train_frozen_probe_run(
+        head_name="mean_linear",
+        seed=33,
+        records=records,
+        cache_root=cache_root,
+        run_dir=tmp_path / "shared",
+        training=training,
+        device="cpu",
+        training_source_sha256=TRAINING_SOURCE_SHA256,
+        representation_store=store,
+        flat_training_store=flat_store,
+    )
+
+    assert shared.manifest["validation_history"] == reference.manifest["validation_history"]
+    assert shared.manifest["selected_epoch"] == reference.manifest["selected_epoch"]
+    reference_state = torch.load(
+        tmp_path / "reference/head_checkpoint.pt", map_location="cpu", weights_only=True
+    )["state_dict"]
+    shared_state = torch.load(
+        tmp_path / "shared/head_checkpoint.pt", map_location="cpu", weights_only=True
+    )["state_dict"]
+    assert all(torch.equal(reference_state[key], shared_state[key]) for key in reference_state)
 
 
 def test_training_source_change_blocks_exact_resume(tmp_path: Path) -> None:

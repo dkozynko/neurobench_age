@@ -102,6 +102,7 @@ class GlobalWindowBatchPlan:
 
     subject_ids: tuple[str, ...]
     subject_ages: tuple[float, ...]
+    subject_offsets: tuple[int, ...]
     references: tuple[tuple[int, int], ...]
     batch_size: int
 
@@ -135,6 +136,7 @@ class GlobalWindowBatchPlan:
         expected_tail: tuple[int, ...] | None = None
         expected_dtype: torch.dtype | None = None
         references: list[tuple[int, int]] = []
+        subject_offsets = [0]
         for subject_index, subject_id in enumerate(subject_ids):
             tensor = tensors[subject_id]
             if (
@@ -158,9 +160,11 @@ class GlobalWindowBatchPlan:
                 (subject_index, window_index)
                 for window_index in range(tensor.shape[0])
             )
+            subject_offsets.append(len(references))
         return cls(
             subject_ids=subject_ids,
             subject_ages=tuple(float(record.age) for record in normalized),
+            subject_offsets=tuple(subject_offsets),
             references=tuple(references),
             batch_size=batch_size,
         )
@@ -176,22 +180,121 @@ class GlobalWindowBatchPlan:
     def permuted_batches(
         self, *, generator: torch.Generator
     ) -> tuple[tuple[tuple[int, int], ...], ...]:
-        order = torch.randperm(self.total_windows, generator=generator).tolist()
-        shuffled = tuple(self.references[index] for index in order)
+        shuffled = tuple(
+            self.references[index]
+            for batch in self.permuted_batch_indices(generator=generator)
+            for index in batch.tolist()
+        )
         return tuple(
             shuffled[start : start + self.batch_size]
             for start in range(0, len(shuffled), self.batch_size)
         )
 
+    def permuted_batch_indices(
+        self, *, generator: torch.Generator
+    ) -> tuple[torch.Tensor, ...]:
+        """Return the same seeded shuffle as flat CPU row indices."""
+
+        order = torch.randperm(self.total_windows, generator=generator)
+        return tuple(
+            order[start : start + self.batch_size]
+            for start in range(0, self.total_windows, self.batch_size)
+        )
+
+    def flatten(
+        self, tensors: Mapping[str, torch.Tensor]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Create one contiguous CPU feature/target store for vectorized gathers."""
+
+        if set(tensors) != set(self.subject_ids):
+            raise FrozenEncoderError("global window flat store tensors are invalid")
+        ordered_tensors = tuple(tensors[subject_id] for subject_id in self.subject_ids)
+        if any(
+            not isinstance(tensor, torch.Tensor)
+            or tensor.device.type != "cpu"
+            or tensor.ndim != 3
+            or tensor.shape[0] <= 0
+            for tensor in ordered_tensors
+        ):
+            raise FrozenEncoderError("global window flat store requires CPU tensors")
+        first_tail = tuple(ordered_tensors[0].shape[1:])
+        first_dtype = ordered_tensors[0].dtype
+        if any(
+            tuple(tensor.shape[1:]) != first_tail or tensor.dtype != first_dtype
+            for tensor in ordered_tensors[1:]
+        ):
+            raise FrozenEncoderError("global window flat store tensors are inconsistent")
+        features = torch.cat(ordered_tensors, dim=0)
+        targets = torch.cat(
+            tuple(
+                torch.full(
+                    (tensor.shape[0],),
+                    age,
+                    dtype=features.dtype,
+                )
+                for tensor, age in zip(ordered_tensors, self.subject_ages)
+            ),
+            dim=0,
+        )
+        return features, targets
+
+    def _flat_indices(
+        self, references: Sequence[tuple[int, int]]
+    ) -> torch.Tensor:
+        indices: list[int] = []
+        for subject_index, window_index in references:
+            if (
+                isinstance(subject_index, bool)
+                or not isinstance(subject_index, int)
+                or subject_index < 0
+                or subject_index >= len(self.subject_ids)
+            ):
+                raise FrozenEncoderError("global window subject index is invalid")
+            window_count = (
+                self.subject_offsets[subject_index + 1]
+                - self.subject_offsets[subject_index]
+            )
+            if (
+                isinstance(window_index, bool)
+                or not isinstance(window_index, int)
+                or window_index < 0
+                or window_index >= window_count
+            ):
+                raise FrozenEncoderError("global window index is invalid")
+            indices.append(self.subject_offsets[subject_index] + window_index)
+        return torch.tensor(indices, dtype=torch.long)
+
     def materialize(
         self,
         references: Sequence[tuple[int, int]],
         *,
-        tensors: Mapping[str, torch.Tensor],
+        tensors: Mapping[str, torch.Tensor] | None = None,
+        flat_features: torch.Tensor | None = None,
+        flat_targets: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         normalized = tuple(references)
         if not normalized or len(normalized) > self.batch_size:
             raise FrozenEncoderError("global window batch references are invalid")
+        if (flat_features is None) != (flat_targets is None):
+            raise FrozenEncoderError("global window flat store is incomplete")
+        if flat_features is not None and flat_targets is not None:
+            if (
+                flat_features.device.type != "cpu"
+                or flat_targets.device.type != "cpu"
+                or flat_features.ndim != 3
+                or flat_targets.ndim != 1
+                or flat_features.shape[0] != self.total_windows
+                or flat_targets.shape[0] != self.total_windows
+                or flat_targets.dtype != flat_features.dtype
+            ):
+                raise FrozenEncoderError("global window flat store is invalid")
+            indices = self._flat_indices(normalized)
+            return (
+                flat_features.index_select(0, indices),
+                flat_targets.index_select(0, indices),
+            )
+        if tensors is None:
+            raise FrozenEncoderError("global window tensors are required")
         windows: list[torch.Tensor] = []
         ages: list[float] = []
         for subject_index, window_index in normalized:
@@ -701,6 +804,34 @@ def _process_peak_rss_bytes() -> int:
     return peak if sys.platform == "darwin" else peak * 1024
 
 
+def _prepare_training_store_device(
+    features: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    device: str,
+    required_headroom_bytes: int = 2 * 1024**3,
+) -> tuple[torch.Tensor, torch.Tensor, str]:
+    """Keep the flat store on CPU unless the requested CUDA device can hold it."""
+
+    if not device.startswith("cuda") or not torch.cuda.is_available():
+        return features, targets, "cpu"
+    required_bytes = (
+        features.numel() * features.element_size()
+        + targets.numel() * targets.element_size()
+    )
+    try:
+        free_bytes, _ = torch.cuda.mem_get_info(device)
+    except RuntimeError as error:
+        raise FrozenEncoderError("could not inspect available CUDA memory") from error
+    if required_bytes + required_headroom_bytes > free_bytes:
+        return features, targets, "cpu"
+    try:
+        return features.to(device), targets.to(device), device
+    except torch.cuda.OutOfMemoryError:
+        torch.cuda.empty_cache()
+        return features, targets, "cpu"
+
+
 def _pearson_from_rows(rows: Sequence[Mapping[str, float | str]]) -> float:
     if len(rows) < 2:
         return float("nan")
@@ -774,6 +905,7 @@ def train_frozen_probe_run(
     device: str,
     training_source_sha256: str,
     representation_store: ValidatedRepresentationStore | None = None,
+    flat_training_store: tuple[torch.Tensor, torch.Tensor, str] | None = None,
     progress_sink: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> FrozenProbeRunResult:
     """Train one cache-only head and select the earliest best validation epoch."""
@@ -827,6 +959,34 @@ def train_frozen_probe_run(
         raise FrozenEncoderError(
             "cached representation must have shape [windows, tokens, features]"
         )
+    if flat_training_store is None:
+        train_features, train_targets = batch_plan.flatten(train_tensors)
+        train_features, train_targets, train_store_device = (
+            _prepare_training_store_device(
+                train_features,
+                train_targets,
+                device=device,
+            )
+        )
+    else:
+        if len(flat_training_store) != 3:
+            raise FrozenEncoderError("shared flat training store is invalid")
+        train_features, train_targets, train_store_device = flat_training_store
+        if (
+            not isinstance(train_features, torch.Tensor)
+            or not isinstance(train_targets, torch.Tensor)
+            or not isinstance(train_store_device, str)
+            or train_features.ndim != 3
+            or train_targets.ndim != 1
+            or train_features.shape[0] != batch_plan.total_windows
+            or train_targets.shape[0] != batch_plan.total_windows
+            or tuple(train_features.shape[1:]) != tuple(sample.shape[1:])
+            or train_features.dtype != sample.dtype
+            or train_targets.dtype != sample.dtype
+            or train_features.device != train_targets.device
+            or train_store_device not in {"cpu", device}
+        ):
+            raise FrozenEncoderError("shared flat training store is invalid")
 
     _configure_strict_determinism(seed)
     head = build_frozen_probe_head(head_name, embed_dim=int(sample.shape[-1])).to(device)
@@ -868,6 +1028,7 @@ def train_frozen_probe_run(
                 "max_epochs": training.max_epochs,
                 "total_training_windows": batch_plan.total_windows,
                 "steps_per_epoch": batch_plan.steps_per_epoch,
+                "training_store_device": train_store_device,
             }
         )
     history: list[dict[str, float | int]] = []
@@ -882,11 +1043,12 @@ def train_frozen_probe_run(
         head.train()
         epoch_loss_sum = 0.0
         epoch_windows = 0
-        for references in batch_plan.permuted_batches(generator=order_generator):
-            batch, targets = batch_plan.materialize(
-                references,
-                tensors=train_tensors,
-            )
+        for flat_indices in batch_plan.permuted_batch_indices(
+            generator=order_generator
+        ):
+            device_indices = flat_indices.to(train_features.device)
+            batch = train_features.index_select(0, device_indices)
+            targets = train_targets.index_select(0, device_indices)
             batch = batch.to(device)
             targets = targets.to(device)
             optimizer.zero_grad(set_to_none=True)
@@ -1327,8 +1489,39 @@ def train_frozen_probe_study(
             }
         )
     completed = 0
+    shared_cpu_stores: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
+    active_layer: int | None = None
+    active_store: tuple[torch.Tensor, torch.Tensor, str] | None = None
     for head_name in APPROVED_HEADS:
         for seed in training.seeds:
+            required_layer = required_layer_for_head(head_name)
+            if required_layer not in shared_cpu_stores:
+                train_records = tuple(
+                    record for record in records if record.split == "train"
+                )
+                tensors = {
+                    record.subject_id: store.tensor(record.subject_id, required_layer)
+                    for record in train_records
+                }
+                plan = GlobalWindowBatchPlan.build(
+                    train_records,
+                    tensors=tensors,
+                    batch_size=training.batch_size,
+                )
+                shared_cpu_stores[required_layer] = plan.flatten(tensors)
+            if active_layer != required_layer:
+                if active_store is not None and active_store[0].device.type == "cuda":
+                    del active_store
+                    torch.cuda.empty_cache()
+                cpu_features, cpu_targets = shared_cpu_stores[required_layer]
+                active_store = (
+                    *_prepare_training_store_device(
+                        cpu_features,
+                        cpu_targets,
+                        device=device,
+                    ),
+                )
+                active_layer = required_layer
             result = train_frozen_probe_run(
                 head_name=head_name,
                 seed=seed,
@@ -1339,6 +1532,7 @@ def train_frozen_probe_study(
                 device=device,
                 training_source_sha256=training_source_sha256,
                 representation_store=store,
+                flat_training_store=active_store,
                 progress_sink=progress_sink,
             )
             completed += 1
