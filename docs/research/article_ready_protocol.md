@@ -1,10 +1,14 @@
 # REVE age study execution protocol
 
-The executable configuration at
-`configs/research/external_frozen_probe.json` is authoritative. This document
-explains the evidence boundary, command sequence, current integration status,
-and interpretation rules. Paths shown below are placeholders; raw data and run
-artifacts must live outside the repository.
+The executable representation configuration at
+`configs/research/external_frozen_probe.json` and the separate head-training
+configuration at
+`configs/research/neuralbench_frozen_probe_training.json` are authoritative.
+The first fixes the encoder, data, preprocessing, and cohort identities; the
+second fixes the final NeuralBench-compatible optimization contract. This
+document explains the evidence boundary, command sequence, current integration
+status, and interpretation rules. Paths shown below are placeholders; raw data
+and run artifacts must live outside the repository.
 
 ## Evidence boundary
 
@@ -16,7 +20,10 @@ runs.
 
 Official NeuralBench full fine-tuning is secondary reproduction evidence. It is
 end-to-end age prediction, not representation probing, because the encoder is
-trainable.
+trainable. The primary study is intentionally not an exact end-to-end
+NeuralBench rerun: it keeps the encoder frozen, excludes Cz, uses cached
+representations, and selects checkpoints with subject-level validation
+Pearson. Only the head optimization dynamics are aligned with NeuralBench.
 
 Existing HBN R5 results are retrospective secondary evidence because R5 has
 already been used in repeated finalist decisions. They must not be used for
@@ -35,6 +42,9 @@ model or head selection and cannot provide untouched confirmation.
 - Heads: `mean_linear`, `mean_layer_linear`,
   `mean_rich_stats_residual`, and `multi_query_rich_stats`.
 - Seeds: every integer from 33 through 42, with no missing or extra run.
+- Head optimization: global seeded window shuffling, AdamW with learning rate
+  `1e-4`, weight decay `0.05`, OneCycleLR with `max_lr=1e-4`, `pct_start=0.1`,
+  cosine annealing, gradient clipping at `1.0`, batch size 64, and MSE loss.
 - Training budget: at most 40 epochs with early-stopping patience 7 for every
   head, matching the canonical NeuralBench budget.
 - Checkpoint selection: maximum HBN validation Pearson, ties resolved by the
@@ -55,6 +65,7 @@ copy data or outputs into `results/canonical/`.
 
 ```bash
 export RESEARCH_PROTOCOL="$PWD/configs/research/external_frozen_probe.json"
+export TRAINING_PROTOCOL="$PWD/configs/research/neuralbench_frozen_probe_training.json"
 export MIPDB_ROOT="/absolute/path/to/mipdb"
 export MIPDB_DRAFT_MANIFEST="/absolute/path/to/study/mipdb_draft_manifest.json"
 export MIPDB_PILOT_QC="/absolute/path/to/study/mipdb_pilot_qc.json"
@@ -162,6 +173,7 @@ same-path file replacement.
 ```bash
 python scripts/run_frozen_probe.py \
   --protocol "$RESEARCH_PROTOCOL" \
+  --training-protocol "$TRAINING_PROTOCOL" \
   --training-manifest "$HBN_TRAINING_MANIFEST" \
   --cache-root "$HBN_CACHE" \
   --output-root "$HEAD_RUNS" \
@@ -182,6 +194,7 @@ absolute external output root:
 ```bash
 python scripts/seal_external_study.py \
   --protocol "$RESEARCH_PROTOCOL" \
+  --training-protocol "$TRAINING_PROTOCOL" \
   --environment "$ENVIRONMENT_LOCK" \
   --hbn-subject-manifest "$HBN_SUBJECT_MANIFEST" \
   --hbn-training-manifest "$HBN_TRAINING_MANIFEST" \
@@ -210,6 +223,7 @@ reused on an exact resume.
 ```bash
 python scripts/run_external_holdout.py \
   --protocol "$RESEARCH_PROTOCOL" \
+  --training-protocol "$TRAINING_PROTOCOL" \
   --lock "$STUDY_LOCK" \
   --checkpoint-root "$HEAD_RUNS" \
   --checkpoint-inventory "$CHECKPOINT_INVENTORY" \

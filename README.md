@@ -63,6 +63,14 @@ evaluation and inference mode, its parameters have no gradients, layers `-2`
 and `-1` are cached once, and only the four predeclared heads are trained over
 seeds 33 through 42.
 
+The final head-training contract is explicit in
+`configs/research/neuralbench_frozen_probe_training.json`: global seeded window
+shuffling, AdamW, OneCycleLR, gradient clipping, 40 epochs, and patience 7.
+This makes the study NeuralBench-compatible at the optimization level while
+preserving the deliberate frozen-probe boundary. Final schema-3 artifacts
+carry separate representation-protocol and training-protocol hashes, so the
+stopped constant-learning-rate pilot cannot be mixed into the final study.
+
 The secondary track is official NeuralBench full fine-tuning. Because the REVE
 encoder is trainable in that track, it is described as end-to-end age
 prediction rather than representation probing.

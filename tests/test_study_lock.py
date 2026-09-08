@@ -156,6 +156,7 @@ def test_production_sealing_cli_is_artifact_derived() -> None:
     assert 'add_argument("--payload"' not in source
     for required in (
         "--environment",
+        "--training-protocol",
         "--hbn-subject-manifest",
         "--hbn-training-manifest",
         "--hbn-data-root",
@@ -278,6 +279,8 @@ def test_sealing_cli_loads_the_same_protocol_and_records_its_digest(
         [
             "--protocol",
             str(protocol_path),
+            "--training-protocol",
+            str(ROOT / "configs/research/neuralbench_frozen_probe_training.json"),
             *[
                 value
                 for name, path in paths.items()
