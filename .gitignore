@@ -1,0 +1,29 @@
+# Python and local environments
+**/__pycache__/
+*.py[cod]
+/.pytest_cache/
+/.venv/
+*.egg-info/
+/build/
+/dist/
+
+# Local/generated experiment outputs
+/artifacts/
+/data/
+/representation_cache/
+/results/runs/
+/results/raw/
+/results/canonical/runs/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+
+# IDE and operating-system files
+/.idea/
+.DS_Store
+*.docx
+~$*.docx
+
+# Superpowers planning notes are local working documents, not content
+/docs/superpowers/
