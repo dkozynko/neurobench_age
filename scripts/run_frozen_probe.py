@@ -10,6 +10,7 @@ from typing import Sequence
 
 import torch
 
+from neurobench_age.core.evidence import source_tree_sha256
 from neurobench_age.pipelines.frozen_probe_training import (
     FrozenEncoderError,
     load_frozen_probe_training_manifest,
@@ -45,6 +46,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.output_root.resolve().is_relative_to(canonical_results):
             raise FrozenEncoderError("output-root must be outside results/canonical")
         protocol = load_study_protocol(args.protocol)
+        training_source_sha256 = source_tree_sha256(repository_root)
         records = load_frozen_probe_training_manifest(
             args.training_manifest, protocol=protocol
         )
@@ -54,6 +56,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_root=args.output_root,
             training=protocol.training,
             device=_resolve_device(args.device),
+            training_source_sha256=training_source_sha256,
+            progress_sink=lambda event: print(
+                json.dumps(event, sort_keys=True, allow_nan=False), flush=True
+            ),
         )
     except (OSError, ProtocolError, FrozenEncoderError) as error:
         parser.error(str(error))
@@ -64,6 +70,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "status": inventory["status"],
                 "run_count": inventory["run_count"],
                 "protocol_sha256": protocol.sha256,
+                "training_source_sha256": training_source_sha256,
                 "checkpoint_inventory_sha256": inventory[
                     "checkpoint_inventory_sha256"
                 ],

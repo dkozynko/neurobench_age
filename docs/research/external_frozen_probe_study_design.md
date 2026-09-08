@@ -161,6 +161,9 @@ The common REVE input contract is:
 
 - scalp channels identified from BIDS channel metadata;
 - channel positions supplied to REVE by canonical electrode label;
+- both HBN and MIPDB are passed to REVE in the exact ordered layout `E1`
+  through `E128`; HBN's additional `Cz` channel is excluded, and a missing or
+  duplicate required E-channel is a hard failure;
 - no spatial interpolation solely to imitate the HBN channel count;
 - 200 Hz output frequency;
 - 0.5--99.5 Hz band-pass;

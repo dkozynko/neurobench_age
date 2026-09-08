@@ -25,8 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _checkpoint_inventory(tmp_path: Path) -> tuple[Path, str]:
     body = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "complete",
+        "training_source_sha256": "b" * 64,
         "heads": list(APPROVED_HEADS),
         "seeds": list(range(33, 43)),
         "run_count": 40,
@@ -34,6 +35,7 @@ def _checkpoint_inventory(tmp_path: Path) -> tuple[Path, str]:
             {
                 "head_name": head_name,
                 "seed": seed,
+                "training_source_sha256": "b" * 64,
                 "run_identity_sha256": "1" * 64,
                 "run_manifest_sha256": "2" * 64,
                 "checkpoint_sha256": "3" * 64,
@@ -60,7 +62,8 @@ def _payload(tmp_path: Path) -> dict[str, object]:
     return {
         "study_id": "reve_age_external_frozen_probe_v1",
         "protocol_sha256": digest,
-        "source_tree_sha256": "b" * 64,
+        "representation_source_sha256": "8" * 64,
+        "training_source_sha256": "b" * 64,
         "git_revision": "revision",
         "git_dirty": False,
         "encoder_checkpoint": "brain-bzh/reve-base",
@@ -169,12 +172,12 @@ def test_lock_detects_tampering_and_expected_provenance_drift(tmp_path: Path) ->
 
     changed = dict(payload)
     changed["mipdb_manifest_sha256"] = "9" * 64
-    changed["source_tree_sha256"] = "8" * 64
+    changed["training_source_sha256"] = "8" * 64
     with pytest.raises(StudyLockError) as raised:
         verify_exact_study(lock_path, changed)
     assert raised.value.mismatched_fields == (
         "mipdb_manifest_sha256",
-        "source_tree_sha256",
+        "training_source_sha256",
     )
 
     tampered = json.loads(lock_path.read_text())

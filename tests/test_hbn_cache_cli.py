@@ -13,6 +13,7 @@ import torch
 from torch import nn
 
 from neurobench_age.pipelines.frozen_probe import (
+    FrozenEncoderError,
     RepresentationCacheIdentity,
     load_cached_representations,
 )
@@ -131,12 +132,15 @@ def test_hbn_materializer_caches_only_train_validation_and_exactly_resumes(
         loaded.append(recording.subject)
         value = 1.0 if recording.subject == "sub-train" else 2.0
         return PreparedRecording(
-            np.full((2, 24_000), value, dtype=np.float32),
-            ("E1", "E2"),
+            np.full((129, 24_000), value, dtype=np.float32),
+            tuple(f"E{index}" for index in range(1, 129)) + ("Cz",),
         )
 
     def encoder_loader(checkpoint, **kwargs):
         assert kwargs["initialization_seed"] == PROTOCOL.encoder.initialization_seed
+        assert kwargs["channel_names"] == tuple(
+            f"E{index}" for index in range(1, 129)
+        )
         return encoder
 
     kwargs = {
@@ -187,6 +191,36 @@ def test_hbn_materializer_caches_only_train_validation_and_exactly_resumes(
     train_recording.write_bytes(b"changed HBN acquisition")
     with pytest.raises(Exception, match="training manifest does not match"):
         materialize_hbn_representations(**kwargs)
+
+
+def test_hbn_materializer_rejects_missing_protocol_channel(tmp_path: Path) -> None:
+    data_root = tmp_path / "hbn"
+    source_manifest = tmp_path / "canonical.csv"
+    _canonical_manifest(source_manifest, data_root)
+
+    def prepared_loader(recording):
+        return PreparedRecording(
+            np.zeros((128, 24_000), dtype=np.float32),
+            tuple(f"E{index}" for index in range(1, 128)) + ("Cz",),
+        )
+
+    with pytest.raises(FrozenEncoderError, match="missing required HBN channels.*E128"):
+        materialize_hbn_representations(
+            protocol=PROTOCOL,
+            subject_manifest_path=source_manifest,
+            data_root=data_root,
+            preprocessing_cache_root=tmp_path / "preprocessed",
+            representation_cache_root=tmp_path / "representations",
+            training_manifest_path=tmp_path / "training_manifest.json",
+            mapping_path=tmp_path / "reve.json",
+            repository_root=ROOT,
+            device="cpu",
+            extraction_batch_size=7,
+            prepared_loader=prepared_loader,
+            encoder_loader=lambda checkpoint, **kwargs: pytest.fail(
+                "encoder must not be built for an invalid HBN channel inventory"
+            ),
+        )
 
 
 def test_hbn_preprocessing_cache_key_changes_with_recording_bytes(

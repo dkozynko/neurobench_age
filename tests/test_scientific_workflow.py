@@ -139,14 +139,14 @@ def test_tiny_artifact_derived_sealed_study_runs_end_to_end(
         repository_root=ROOT,
         device="cpu",
         extraction_batch_size=2,
-        prepared_loader=lambda recording: PreparedRecording(
-            np.full(
-                (2, 24_000),
-                float(recording.age or 0.0) / 10.0,
-                dtype=np.float32,
+            prepared_loader=lambda recording: PreparedRecording(
+                np.full(
+                    (128, 24_000),
+                    float(recording.age or 0.0) / 10.0,
+                    dtype=np.float32,
+                ),
+                tuple(f"E{index}" for index in range(1, 129)),
             ),
-            ("E1", "E2"),
-        ),
         encoder_loader=lambda checkpoint, **kwargs: encoder,
     )
     records = load_frozen_probe_training_manifest(
@@ -159,6 +159,8 @@ def test_tiny_artifact_derived_sealed_study_runs_end_to_end(
         output_root=checkpoint_root,
         training=protocol.training,
         device="cpu",
+        training_source_sha256=source_tree_sha256(ROOT),
+        available_memory_bytes=16 * 1024**3,
     )
     checkpoint_inventory_path = checkpoint_root / "checkpoint_inventory.json"
 
@@ -243,7 +245,7 @@ def test_tiny_artifact_derived_sealed_study_runs_end_to_end(
         environment_path=environment_path,
         output_root=external_root,
         runtime=RuntimeProvenance(
-            source_tree_sha256=tree_sha256,
+            training_source_sha256=tree_sha256,
             git_revision="synthetic-clean-revision",
             git_dirty=False,
             environment_sha256=_sha256_file(environment_path),

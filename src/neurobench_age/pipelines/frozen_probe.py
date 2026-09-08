@@ -16,6 +16,15 @@ from torch import nn
 
 PREDECLARED_CHECKPOINT = "brain-bzh/reve-base"
 PREDECLARED_LAYERS = (-2, -1)
+_CACHE_DTYPES = {
+    str(dtype): dtype
+    for dtype in (
+        torch.float16,
+        torch.float32,
+        torch.float64,
+        torch.bfloat16,
+    )
+}
 
 
 class FrozenEncoderError(RuntimeError):
@@ -303,6 +312,88 @@ class RepresentationCacheIdentity:
         return _canonical_sha256(asdict(self))
 
 
+@dataclass(frozen=True)
+class CachedTensorMetadata:
+    shape: tuple[int, ...]
+    dtype: torch.dtype
+    nbytes: int
+
+
+def _inspect_cache_entry(
+    cache_root: Path,
+    identity: RepresentationCacheIdentity,
+) -> tuple[Path, Path, dict[str, Any], dict[int, CachedTensorMetadata]]:
+    entry = Path(cache_root) / identity.key
+    metadata_path = entry / "metadata.json"
+    payload_path = entry / "representations.pt"
+    if not metadata_path.is_file() or not payload_path.is_file():
+        raise FrozenEncoderError(f"cache entry is missing or incomplete: {entry}")
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise FrozenEncoderError(f"cache entry metadata is invalid: {entry}") from error
+    if (
+        not isinstance(metadata, dict)
+        or metadata.get("schema_version") != 1
+        or metadata.get("status") != "complete"
+        or metadata.get("cache_key") != identity.key
+        or metadata.get("identity") != asdict(identity)
+    ):
+        raise FrozenEncoderError(
+            f"cache entry identity or completion marker is invalid: {entry}"
+        )
+    available = tuple(metadata.get("layers", ()))
+    if available != PREDECLARED_LAYERS:
+        raise FrozenEncoderError(
+            "cache layer inventory is invalid: "
+            f"expected={PREDECLARED_LAYERS} available={available}"
+        )
+    _validate_extraction_evidence(metadata.get("evidence"))
+    raw_tensor_metadata = metadata.get("tensor_metadata")
+    expected_keys = {str(layer) for layer in PREDECLARED_LAYERS}
+    if not isinstance(raw_tensor_metadata, dict) or set(raw_tensor_metadata) != expected_keys:
+        raise FrozenEncoderError("cache tensor metadata inventory is invalid")
+    tensor_metadata: dict[int, CachedTensorMetadata] = {}
+    for layer in PREDECLARED_LAYERS:
+        raw = raw_tensor_metadata[str(layer)]
+        if not isinstance(raw, dict) or set(raw) != {"shape", "dtype"}:
+            raise FrozenEncoderError(f"cache layer {layer} metadata is invalid")
+        raw_shape = raw["shape"]
+        if (
+            not isinstance(raw_shape, list)
+            or not raw_shape
+            or any(
+                isinstance(value, bool) or not isinstance(value, int) or value <= 0
+                for value in raw_shape
+            )
+        ):
+            raise FrozenEncoderError(f"cache layer {layer} shape metadata is invalid")
+        dtype = _CACHE_DTYPES.get(raw["dtype"])
+        if dtype is None:
+            raise FrozenEncoderError(f"cache layer {layer} dtype metadata is invalid")
+        shape = tuple(raw_shape)
+        element_size = torch.empty((), dtype=dtype).element_size()
+        tensor_metadata[layer] = CachedTensorMetadata(
+            shape=shape,
+            dtype=dtype,
+            nbytes=math.prod(shape) * element_size,
+        )
+    payload_digest = metadata.get("payload_sha256")
+    if not isinstance(payload_digest, str) or not _is_sha256(payload_digest):
+        raise FrozenEncoderError("cache payload SHA-256 metadata is invalid")
+    return entry, payload_path, metadata, tensor_metadata
+
+
+def inspect_cached_representation_metadata(
+    cache_root: Path,
+    identity: RepresentationCacheIdentity,
+) -> dict[int, CachedTensorMetadata]:
+    """Validate cache identity/schema and inspect tensor sizes without loading payload."""
+
+    _, _, _, tensor_metadata = _inspect_cache_entry(cache_root, identity)
+    return tensor_metadata
+
+
 
 
 def write_cached_representations(
@@ -371,29 +462,10 @@ def load_cached_representations(
 ) -> dict[int, torch.Tensor]:
     """Load only a complete cache entry with exact provenance and layer inventory."""
 
-    entry = Path(cache_root) / identity.key
-    metadata_path = entry / "metadata.json"
-    payload_path = entry / "representations.pt"
-    if not metadata_path.is_file() or not payload_path.is_file():
-        raise FrozenEncoderError(f"cache entry is missing or incomplete: {entry}")
-    try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise FrozenEncoderError(f"cache entry metadata is invalid: {entry}") from error
-    if (
-        not isinstance(metadata, dict)
-        or metadata.get("status") != "complete"
-        or metadata.get("cache_key") != identity.key
-        or metadata.get("identity") != asdict(identity)
-    ):
-        raise FrozenEncoderError(f"cache entry identity or completion marker is invalid: {entry}")
-    available = tuple(metadata.get("layers", ()))
-    if available != PREDECLARED_LAYERS:
-        raise FrozenEncoderError(
-            "cache layer inventory is invalid: "
-            f"expected={PREDECLARED_LAYERS} available={available}"
-        )
-    _validate_extraction_evidence(metadata.get("evidence"))
+    entry, payload_path, metadata, tensor_metadata = _inspect_cache_entry(
+        cache_root, identity
+    )
+    available = PREDECLARED_LAYERS
     required = tuple(int(index) for index in required_layers)
     if any(index not in available for index in required):
         raise FrozenEncoderError(
@@ -412,8 +484,8 @@ def load_cached_representations(
         tensor = payload.get(index)
         if not isinstance(tensor, torch.Tensor) or not torch.isfinite(tensor).all():
             raise FrozenEncoderError(f"cache layer {index} is missing or non-finite")
-        expected = metadata.get("tensor_metadata", {}).get(str(index), {})
-        if list(tensor.shape) != expected.get("shape") or str(tensor.dtype) != expected.get("dtype"):
+        expected = tensor_metadata[index]
+        if tuple(tensor.shape) != expected.shape or tensor.dtype != expected.dtype:
             raise FrozenEncoderError(f"cache layer {index} metadata does not match payload")
         result[index] = tensor
     return result

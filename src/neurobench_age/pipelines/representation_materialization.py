@@ -25,8 +25,6 @@ from neurobench_age.pipelines.independent import (
     HbnRecording,
     PreparedRecording,
     PreprocessedRecordingStore,
-    align_prepared_recording,
-    build_global_channel_order,
     hbn_recording_source_files,
 )
 from neurobench_age.research.protocol import PreprocessingContract, StudyProtocol
@@ -381,6 +379,41 @@ def _hbn_windows(
     return np.asarray(windows, dtype=np.float32)
 
 
+def _required_hbn_channel_order(
+    contract: PreprocessingContract,
+) -> tuple[str, ...]:
+    if (
+        contract.mapped_channel_layout != "egi_hydrocel_e1_e128"
+        or contract.required_mapped_channels != 128
+    ):
+        raise FrozenEncoderError("unsupported HBN mapped-channel contract")
+    return tuple(f"E{index}" for index in range(1, 129))
+
+
+def _select_hbn_protocol_channels(
+    prepared: PreparedRecording,
+    channel_order: tuple[str, ...],
+) -> PreparedRecording:
+    """Select the exact cross-dataset E1-E128 layout and reject missing channels."""
+
+    data = np.asarray(prepared.data)
+    names = tuple(prepared.channel_names)
+    if data.ndim != 2 or data.shape[0] != len(names):
+        raise FrozenEncoderError("prepared HBN recording has invalid dimensions")
+    if len(set(names)) != len(names):
+        raise FrozenEncoderError("prepared HBN recording has duplicate channels")
+    source_indices = {name: index for index, name in enumerate(names)}
+    missing = [name for name in channel_order if name not in source_indices]
+    if missing:
+        raise FrozenEncoderError(f"missing required HBN channels: {missing}")
+    indices = tuple(source_indices[name] for name in channel_order)
+    if indices == tuple(range(len(channel_order))) and data.dtype == np.float32:
+        selected = data[: len(channel_order)]
+    else:
+        selected = np.asarray(data[list(indices)], dtype=np.float32)
+    return PreparedRecording(selected, channel_order)
+
+
 def _write_json_exact_resume(path: Path, payload: Mapping[str, Any]) -> None:
     if path.exists():
         existing = _load_json(path, "training manifest")
@@ -464,19 +497,19 @@ def materialize_hbn_representations(
 
     store = PreprocessedRecordingStore(Path(preprocessing_cache_root))
     load_prepared = prepared_loader or store.load
-    channel_inventory: list[PreparedRecording] = []
+    channel_order = _required_hbn_channel_order(protocol.preprocessing)
     for recording in recordings:
         prepared = load_prepared(recording)
         data = np.asarray(prepared.data)
         if data.ndim != 2 or data.shape[0] != len(prepared.channel_names):
             raise FrozenEncoderError("prepared HBN recording has invalid dimensions")
-        channel_inventory.append(
+        _select_hbn_protocol_channels(
             PreparedRecording(
                 np.empty((data.shape[0], 0), dtype=np.float32),
                 tuple(prepared.channel_names),
-            )
+            ),
+            channel_order,
         )
-    channel_order = build_global_channel_order(channel_inventory)
     encoder = encoder_loader(
         protocol.encoder.checkpoint,
         channel_names=channel_order,
@@ -547,7 +580,7 @@ def materialize_hbn_representations(
         else:
             if encoder_state_sha256(encoder) != checkpoint_sha256:
                 raise FrozenEncoderError("HBN encoder state changed between subjects")
-            prepared = align_prepared_recording(
+            prepared = _select_hbn_protocol_channels(
                 load_prepared(recording), channel_order
             )
             windows = _hbn_windows(prepared, contract=protocol.preprocessing)
@@ -564,6 +597,7 @@ def materialize_hbn_representations(
                 "release": row.release,
                 "recording_relpath": row.recording_relpath,
                 "channel_count": len(channel_order),
+                "channel_names": list(channel_order),
                 "window_count": int(windows.shape[0]),
                 "window_samples": int(windows.shape[2]),
                 "cross_block_windows": False,

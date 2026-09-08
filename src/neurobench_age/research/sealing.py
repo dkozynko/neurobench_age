@@ -104,6 +104,10 @@ def verify_checkpoint_artifacts(
             manifest.get("status") != "complete"
             or manifest.get("head_name") != head_name
             or manifest.get("seed") != seed
+            or manifest.get("training_source_sha256")
+            != inventory["training_source_sha256"]
+            or manifest.get("training_source_sha256")
+            != record["training_source_sha256"]
             or manifest.get("run_identity_sha256") != record["run_identity_sha256"]
             or manifest.get("selected_epoch") != record["selected_epoch"]
             or manifest.get("checkpoint_sha256") != record["checkpoint_sha256"]
@@ -120,11 +124,14 @@ def verify_checkpoint_artifacts(
             raise StudyLockError(f"checkpoint is unreadable: {checkpoint_path}") from error
         if (
             not isinstance(checkpoint, dict)
+            or checkpoint.get("schema_version") != 2
             or not isinstance(checkpoint.get("state_dict"), dict)
             or checkpoint.get("head_name") != head_name
             or checkpoint.get("seed") != seed
             or checkpoint.get("selected_epoch") != record["selected_epoch"]
             or checkpoint.get("run_identity_sha256") != record["run_identity_sha256"]
+            or checkpoint.get("training_source_sha256")
+            != inventory["training_source_sha256"]
         ):
             raise StudyLockError(f"checkpoint payload identity differs: {checkpoint_path}")
     return inventory
@@ -238,9 +245,10 @@ def _validate_checkpoint_contracts(
         manifest = _load_json(path, "checkpoint run manifest")
         identity = manifest.get("run_identity")
         expected_identity = {
-            "schema_version": 1,
+            "schema_version": 2,
             "head_name": record["head_name"],
             "seed": record["seed"],
+            "training_source_sha256": inventory["training_source_sha256"],
             "cache_contract": cache_contract,
             "training": training_contract,
             "subjects": expected_subjects,
@@ -312,8 +320,6 @@ def derive_study_payload(
     hbn_manifest_sha256 = manifest_sha256(Path(hbn_subject_manifest_path))
     if training_manifest.get("subject_manifest_sha256") != hbn_manifest_sha256:
         raise StudyLockError("HBN source manifest differs from training evidence")
-    if training_manifest.get("source_tree_sha256") != source_sha256:
-        raise StudyLockError("HBN training source differs from the sealing source")
     expected_preprocessing_sha256 = preprocessing_contract_sha256(
         protocol.preprocessing
     )
@@ -327,6 +333,8 @@ def derive_study_payload(
         checkpoint_root=checkpoint_root,
         inventory_path=checkpoint_inventory_path,
     )
+    if inventory["training_source_sha256"] != source_sha256:
+        raise StudyLockError("checkpoint training source differs from the sealing source")
     _validate_checkpoint_contracts(
         checkpoint_root=checkpoint_root,
         inventory=inventory,
@@ -406,7 +414,8 @@ def derive_study_payload(
     return {
         "study_id": protocol.study_id,
         "protocol_sha256": protocol.sha256,
-        "source_tree_sha256": source_sha256,
+        "representation_source_sha256": training_manifest["source_tree_sha256"],
+        "training_source_sha256": source_sha256,
         "git_revision": git_revision,
         "git_dirty": git_dirty,
         "encoder_checkpoint": protocol.encoder.checkpoint,

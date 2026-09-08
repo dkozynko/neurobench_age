@@ -29,6 +29,9 @@ model or head selection and cannot provide untouched confirmation.
   training RNG stream and stabilizes the unused randomly initialized task
   layer included in the provenance hash.
 - Cached layers: `-2` and `-1` from one deterministic frozen-encoder pass.
+- Encoder input layout: exactly ordered `E1` through `E128` for both HBN and
+  MIPDB. Extra HBN `Cz` is excluded; required channels cannot be padded or
+  silently omitted.
 - Heads: `mean_linear`, `mean_layer_linear`,
   `mean_rich_stats_residual`, and `multi_query_rich_stats`.
 - Seeds: every integer from 33 through 42, with no missing or extra run.

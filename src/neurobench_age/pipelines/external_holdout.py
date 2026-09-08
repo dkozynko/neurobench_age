@@ -46,7 +46,7 @@ class ExternalHoldoutError(RuntimeError):
 
 @dataclass(frozen=True)
 class RuntimeProvenance:
-    source_tree_sha256: str
+    training_source_sha256: str
     git_revision: str
     git_dirty: bool
     environment_sha256: str
@@ -139,7 +139,7 @@ def _validate_runtime(
 ) -> None:
     actual_environment_sha256 = _sha256_file(environment_path)
     expected = {
-        "source_tree_sha256": runtime.source_tree_sha256,
+        "training_source_sha256": runtime.training_source_sha256,
         "git_revision": runtime.git_revision,
         "git_dirty": runtime.git_dirty,
         "environment_sha256": runtime.environment_sha256,
@@ -263,6 +263,8 @@ def _load_heads(
         "checkpoint_inventory_sha256"
     ]:
         raise ExternalHoldoutError("checkpoint inventory does not match sealed study")
+    if inventory["training_source_sha256"] != lock["training_source_sha256"]:
+        raise ExternalHoldoutError("checkpoint inventory training source does not match")
     loaded: list[_LoadedHead] = []
     for record in inventory["runs"]:
         head_name = record["head_name"]
@@ -278,13 +280,19 @@ def _load_heads(
             payload = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
         except Exception as error:
             raise ExternalHoldoutError(f"head checkpoint is unreadable: {checkpoint_path}") from error
-        if not isinstance(payload, Mapping) or not isinstance(payload.get("state_dict"), Mapping):
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("schema_version") != 2
+            or not isinstance(payload.get("state_dict"), Mapping)
+        ):
             raise ExternalHoldoutError(f"head checkpoint payload is invalid: {checkpoint_path}")
         if (
             payload.get("head_name") != head_name
             or payload.get("seed") != seed
             or payload.get("selected_epoch") != record["selected_epoch"]
             or payload.get("run_identity_sha256") != record["run_identity_sha256"]
+            or payload.get("training_source_sha256")
+            != lock["training_source_sha256"]
         ):
             raise ExternalHoldoutError(f"head checkpoint identity does not match: {checkpoint_path}")
         linear_weight = payload["state_dict"].get("linear.weight")
@@ -325,7 +333,7 @@ def _cache_identity(
         dataset_manifest_sha256=dataset_manifest_sha256,
         preprocessing_sha256=lock["preprocessing_sha256"],
         subject_id=subject_id,
-        source_tree_sha256=lock["source_tree_sha256"],
+        source_tree_sha256=lock["training_source_sha256"],
     )
 
 
@@ -337,11 +345,11 @@ def _prediction_static_fields(
     loaded_head: _LoadedHead,
 ) -> dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "study_id": lock["study_id"],
         "lock_sha256": lock["lock_sha256"],
         "protocol_sha256": lock["protocol_sha256"],
-        "source_tree_sha256": lock["source_tree_sha256"],
+        "training_source_sha256": lock["training_source_sha256"],
         "environment_sha256": lock["environment_sha256"],
         "mipdb_manifest_sha256": lock["mipdb_manifest_sha256"],
         "preprocessing_sha256": lock["preprocessing_sha256"],

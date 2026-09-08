@@ -9,10 +9,12 @@ import os
 from pathlib import Path
 import resource
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Mapping, Sequence
+from types import MappingProxyType
+from typing import Any, Callable, Mapping, Sequence
 
 import torch
 from torch import nn
@@ -26,10 +28,12 @@ from neurobench_age.research.protocol import StudyProtocol, TrainingContract
 
 from .frozen_probe import (
     FrozenEncoderError,
+    PREDECLARED_LAYERS,
     RepresentationCacheIdentity,
     _canonical_sha256,
     _is_sha256,
     _sha256_file,
+    inspect_cached_representation_metadata,
     load_cached_representations,
 )
 
@@ -110,6 +114,199 @@ def validate_training_records(
             "training records must contain non-empty train and validation splits"
         )
     return normalized
+
+
+def _available_memory_bytes(
+    *,
+    platform_name: str | None = None,
+    proc_meminfo_path: Path = Path("/proc/meminfo"),
+    vm_stat_output: str | None = None,
+) -> int:
+    """Return currently available host memory or fail closed."""
+
+    platform_name = sys.platform if platform_name is None else platform_name
+    try:
+        if platform_name.startswith("linux"):
+            lines = Path(proc_meminfo_path).read_text(encoding="utf-8").splitlines()
+            value = next(
+                int(line.split()[1]) * 1024
+                for line in lines
+                if line.startswith("MemAvailable:")
+            )
+        elif platform_name == "darwin":
+            output = (
+                subprocess.run(
+                    ["vm_stat"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout
+                if vm_stat_output is None
+                else vm_stat_output
+            )
+            first, *lines = output.splitlines()
+            marker = "page size of "
+            page_size = int(first.split(marker, 1)[1].split()[0])
+            counts: dict[str, int] = {}
+            for line in lines:
+                if ":" not in line:
+                    continue
+                key, raw = line.split(":", 1)
+                counts[key.strip()] = int(raw.strip().rstrip("."))
+            value = page_size * sum(
+                counts[name]
+                for name in ("Pages free", "Pages inactive", "Pages speculative")
+            )
+        else:
+            pages = os.sysconf("SC_AVPHYS_PAGES")
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            if (
+                isinstance(pages, bool)
+                or not isinstance(pages, int)
+                or pages <= 0
+                or isinstance(page_size, bool)
+                or not isinstance(page_size, int)
+                or page_size <= 0
+            ):
+                raise ValueError("invalid sysconf memory values")
+            value = pages * page_size
+    except (
+        AttributeError,
+        IndexError,
+        KeyError,
+        OSError,
+        StopIteration,
+        subprocess.SubprocessError,
+        ValueError,
+    ) as error:
+        raise FrozenEncoderError("available host memory could not be determined") from error
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise FrozenEncoderError("available host memory could not be determined")
+    return value
+
+
+@dataclass(frozen=True)
+class ValidatedRepresentationStore:
+    """Immutable in-memory view of one fully validated representation cache."""
+
+    _tensors: Mapping[str, Mapping[int, torch.Tensor]]
+    projected_bytes: int
+    actual_retained_bytes: int
+    available_memory_bytes: int
+    required_headroom_bytes: int
+
+    @property
+    def subject_count(self) -> int:
+        return len(self._tensors)
+
+    def tensor(self, subject_id: str, layer: int) -> torch.Tensor:
+        try:
+            layers = self._tensors[subject_id]
+        except KeyError as error:
+            raise FrozenEncoderError(
+                f"representation store has absent subject: {subject_id}"
+            ) from error
+        try:
+            return layers[int(layer)]
+        except KeyError as error:
+            raise FrozenEncoderError(
+                f"representation store has absent layer {layer} for {subject_id}"
+            ) from error
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        records: Sequence[CachedSubjectRecord],
+        cache_root: Path,
+        available_memory_bytes: int | None = None,
+        metadata_inspector: Callable[..., Mapping[int, Any]] = inspect_cached_representation_metadata,
+        strict_loader: Callable[..., dict[int, torch.Tensor]] = load_cached_representations,
+    ) -> ValidatedRepresentationStore:
+        records = validate_training_records(records)
+        declared: dict[str, Mapping[int, Any]] = {}
+        projected_bytes = 0
+        expected_shapes: dict[int, tuple[int, ...]] = {}
+        expected_dtypes: dict[int, torch.dtype] = {}
+        for record in records:
+            metadata = metadata_inspector(
+                cache_root, record.cache_identity
+            )
+            if tuple(metadata) != PREDECLARED_LAYERS:
+                raise FrozenEncoderError("representation metadata layers are not exact")
+            for layer, tensor_metadata in metadata.items():
+                if len(tensor_metadata.shape) != 3 or tensor_metadata.shape[0] <= 0:
+                    raise FrozenEncoderError(
+                        "cached representation must have shape [windows, tokens, features]"
+                    )
+                suffix = tensor_metadata.shape[1:]
+                if layer in expected_shapes and expected_shapes[layer] != suffix:
+                    raise FrozenEncoderError(
+                        "representation cache tensors have inconsistent token/feature shapes"
+                    )
+                if layer in expected_dtypes and expected_dtypes[layer] != tensor_metadata.dtype:
+                    raise FrozenEncoderError(
+                        "representation cache tensors have inconsistent dtypes"
+                    )
+                expected_shapes[layer] = suffix
+                expected_dtypes[layer] = tensor_metadata.dtype
+                projected_bytes += tensor_metadata.nbytes
+            declared[record.subject_id] = metadata
+
+        available = (
+            _available_memory_bytes()
+            if available_memory_bytes is None
+            else available_memory_bytes
+        )
+        if (
+            isinstance(available, bool)
+            or not isinstance(available, int)
+            or available <= 0
+        ):
+            raise FrozenEncoderError("available host memory must be a positive integer")
+        headroom = max(8 * 1024**3, available // 5)
+        if projected_bytes + headroom > available:
+            raise FrozenEncoderError(
+                "insufficient available RAM for validated representation store: "
+                f"projected_bytes={projected_bytes} available_bytes={available} "
+                f"required_headroom_bytes={headroom}"
+            )
+
+        retained: dict[str, Mapping[int, torch.Tensor]] = {}
+        actual_bytes = 0
+        for record in records:
+            tensors = strict_loader(
+                cache_root,
+                record.cache_identity,
+                required_layers=PREDECLARED_LAYERS,
+            )
+            if tuple(tensors) != PREDECLARED_LAYERS:
+                raise FrozenEncoderError("strict cache loader returned non-exact layers")
+            for layer in PREDECLARED_LAYERS:
+                tensor = tensors[layer]
+                expected = declared[record.subject_id][layer]
+                if (
+                    tensor.device.type != "cpu"
+                    or tuple(tensor.shape) != expected.shape
+                    or tensor.dtype != expected.dtype
+                    or not torch.isfinite(tensor).all()
+                ):
+                    raise FrozenEncoderError(
+                        f"strict cache payload differs from metadata for {record.subject_id} layer {layer}"
+                    )
+                actual_bytes += tensor.numel() * tensor.element_size()
+            retained[record.subject_id] = MappingProxyType(dict(tensors))
+        if actual_bytes != projected_bytes:
+            raise FrozenEncoderError(
+                "retained representation bytes differ from metadata projection"
+            )
+        return cls(
+            _tensors=MappingProxyType(retained),
+            projected_bytes=projected_bytes,
+            actual_retained_bytes=actual_bytes,
+            available_memory_bytes=available,
+            required_headroom_bytes=headroom,
+        )
 
 
 def load_frozen_probe_training_manifest(
@@ -221,6 +418,7 @@ def predict_cached_subjects(
     head_name: str,
     batch_size: int,
     device: str,
+    representation_store: ValidatedRepresentationStore | None = None,
 ) -> tuple[dict[str, float | str], ...]:
     """Predict subject ages from one declared cached layer only."""
 
@@ -237,11 +435,15 @@ def predict_cached_subjects(
     rows: list[dict[str, float | str]] = []
     with torch.inference_mode():
         for record in records:
-            cached = load_cached_representations(
-                cache_root,
-                record.cache_identity,
-                required_layers=(layer_index,),
-            )[layer_index]
+            cached = (
+                representation_store.tensor(record.subject_id, layer_index)
+                if representation_store is not None
+                else load_cached_representations(
+                    cache_root,
+                    record.cache_identity,
+                    required_layers=(layer_index,),
+                )[layer_index]
+            )
             if cached.ndim != 3 or cached.shape[0] == 0:
                 raise FrozenEncoderError(
                     "cached representation must have shape [windows, tokens, features]"
@@ -297,7 +499,12 @@ def _run_identity(
     seed: int,
     records: Sequence[CachedSubjectRecord],
     training: TrainingContract,
+    training_source_sha256: str,
 ) -> dict[str, Any]:
+    if not isinstance(training_source_sha256, str) or not _is_sha256(
+        training_source_sha256
+    ):
+        raise FrozenEncoderError("training_source_sha256 must be a SHA-256 digest")
     training_payload = asdict(training)
     training_payload["seeds"] = list(training.seeds)
     cache_contract_fields = (
@@ -322,9 +529,10 @@ def _run_identity(
                 "training records contain mixed cache provenance"
             )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "head_name": head_name,
         "seed": seed,
+        "training_source_sha256": training_source_sha256,
         "cache_contract": cache_contract,
         "training": training_payload,
         "subjects": [
@@ -360,7 +568,10 @@ def _pearson_from_rows(rows: Sequence[Mapping[str, float | str]]) -> float:
 
 
 def _load_completed_run(
-    run_dir: Path, *, expected_identity_sha256: str
+    run_dir: Path,
+    *,
+    expected_identity_sha256: str,
+    training_source_sha256: str,
 ) -> Mapping[str, Any]:
     manifest_path = run_dir / "run_manifest.json"
     checkpoint_path = run_dir / "head_checkpoint.pt"
@@ -370,7 +581,11 @@ def _load_completed_run(
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise FrozenEncoderError(f"existing run manifest is invalid: {run_dir}") from error
-    if not isinstance(manifest, dict) or manifest.get("status") != "complete":
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != 2
+        or manifest.get("status") != "complete"
+    ):
         raise FrozenEncoderError(f"existing run completion marker is invalid: {run_dir}")
     claimed_manifest_hash = manifest.get("run_manifest_sha256")
     manifest_body = {
@@ -380,6 +595,8 @@ def _load_completed_run(
         raise FrozenEncoderError(f"existing run manifest hash does not match: {run_dir}")
     if manifest.get("run_identity_sha256") != expected_identity_sha256:
         raise FrozenEncoderError(f"existing run identity does not match: {run_dir}")
+    if manifest.get("training_source_sha256") != training_source_sha256:
+        raise FrozenEncoderError(f"existing run training source does not match: {run_dir}")
     if manifest.get("checkpoint_sha256") != _sha256_file(checkpoint_path):
         raise FrozenEncoderError(f"existing run checkpoint hash does not match: {run_dir}")
     return manifest
@@ -406,6 +623,9 @@ def train_frozen_probe_run(
     run_dir: Path,
     training: TrainingContract,
     device: str,
+    training_source_sha256: str,
+    representation_store: ValidatedRepresentationStore | None = None,
+    progress_sink: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> FrozenProbeRunResult:
     """Train one cache-only head and select the earliest best validation epoch."""
 
@@ -415,14 +635,20 @@ def train_frozen_probe_run(
     if seed not in training.seeds:
         raise FrozenEncoderError(f"seed {seed} is outside the predeclared inventory")
     identity = _run_identity(
-        head_name=head_name, seed=seed, records=records, training=training
+        head_name=head_name,
+        seed=seed,
+        records=records,
+        training=training,
+        training_source_sha256=training_source_sha256,
     )
     identity_sha256 = _canonical_sha256(identity)
     run_dir = Path(run_dir)
     if run_dir.exists():
         return FrozenProbeRunResult(
             manifest=_load_completed_run(
-                run_dir, expected_identity_sha256=identity_sha256
+                run_dir,
+                expected_identity_sha256=identity_sha256,
+                training_source_sha256=training_source_sha256,
             ),
             reused=True,
         )
@@ -431,11 +657,15 @@ def train_frozen_probe_run(
     validation_records = tuple(
         record for record in records if record.split == "validation"
     )
-    sample = load_cached_representations(
-        cache_root,
-        train_records[0].cache_identity,
-        required_layers=(required_layer,),
-    )[required_layer]
+    sample = (
+        representation_store.tensor(train_records[0].subject_id, required_layer)
+        if representation_store is not None
+        else load_cached_representations(
+            cache_root,
+            train_records[0].cache_identity,
+            required_layers=(required_layer,),
+        )[required_layer]
+    )
     if sample.ndim != 3 or sample.shape[-1] <= 0:
         raise FrozenEncoderError(
             "cached representation must have shape [windows, tokens, features]"
@@ -462,6 +692,15 @@ def train_frozen_probe_run(
         torch.cuda.reset_peak_memory_stats(device)
 
     started = time.perf_counter()
+    if progress_sink is not None:
+        progress_sink(
+            {
+                "event": "run_start",
+                "head_name": head_name,
+                "seed": seed,
+                "max_epochs": training.max_epochs,
+            }
+        )
     history: list[dict[str, float | int]] = []
     best_score = -float("inf")
     best_epoch = 0
@@ -477,11 +716,15 @@ def train_frozen_probe_run(
         ).tolist()
         for subject_offset in subject_order:
             record = train_records[subject_offset]
-            cached = load_cached_representations(
-                cache_root,
-                record.cache_identity,
-                required_layers=(required_layer,),
-            )[required_layer]
+            cached = (
+                representation_store.tensor(record.subject_id, required_layer)
+                if representation_store is not None
+                else load_cached_representations(
+                    cache_root,
+                    record.cache_identity,
+                    required_layers=(required_layer,),
+                )[required_layer]
+            )
             if cached.ndim != 3 or cached.shape[-1] != sample.shape[-1] or cached.shape[0] == 0:
                 raise FrozenEncoderError("training cache tensors have inconsistent shapes")
             window_order = torch.randperm(
@@ -513,6 +756,7 @@ def train_frozen_probe_run(
             head_name=head_name,
             batch_size=training.batch_size,
             device=device,
+            representation_store=representation_store,
         )
         validation_pearson = _pearson_from_rows(validation_rows)
         validation_mse = sum(
@@ -538,8 +782,32 @@ def train_frozen_probe_run(
             epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
-            if epochs_without_improvement >= training.patience:
-                break
+        if progress_sink is not None:
+            progress_sink(
+                {
+                    "event": "epoch_complete",
+                    "head_name": head_name,
+                    "seed": seed,
+                    "epoch": epoch_index + 1,
+                    "max_epochs": training.max_epochs,
+                    "training_window_mse": history[-1]["training_window_mse"],
+                    "validation_subject_mse": validation_mse,
+                    "validation_subject_pearson": (
+                        validation_pearson
+                        if math.isfinite(validation_pearson)
+                        else None
+                    ),
+                    "best_epoch": best_epoch or None,
+                    "best_validation_pearson": (
+                        best_score if math.isfinite(best_score) else None
+                    ),
+                    "epochs_without_improvement": epochs_without_improvement,
+                    "patience": training.patience,
+                    "elapsed_seconds": time.perf_counter() - started,
+                }
+            )
+        if epochs_without_improvement >= training.patience:
+            break
 
     if best_state is None:
         raise FrozenEncoderError("training produced no finite validation Pearson")
@@ -560,20 +828,23 @@ def train_frozen_probe_run(
         checkpoint_path = transaction_dir / "head_checkpoint.pt"
         torch.save(
             {
+                "schema_version": 2,
                 "state_dict": best_state,
                 "head_name": head_name,
                 "seed": seed,
                 "selected_epoch": best_epoch,
                 "run_identity_sha256": identity_sha256,
+                "training_source_sha256": training_source_sha256,
             },
             checkpoint_path,
         )
         manifest_body: dict[str, Any] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "status": "complete",
             "head_name": head_name,
             "layer_index": required_layer,
             "seed": seed,
+            "training_source_sha256": training_source_sha256,
             "run_identity": identity,
             "run_identity_sha256": identity_sha256,
             "head_parameters": {
@@ -619,6 +890,16 @@ def train_frozen_probe_run(
     except Exception:
         shutil.rmtree(transaction_dir, ignore_errors=True)
         raise
+    if progress_sink is not None:
+        progress_sink(
+            {
+                "event": "run_complete",
+                "head_name": head_name,
+                "seed": seed,
+                "selected_epoch": best_epoch,
+                "runtime_seconds": runtime_seconds,
+            }
+        )
     return FrozenProbeRunResult(manifest=manifest, reused=False)
 
 
@@ -635,6 +916,7 @@ def audit_frozen_probe_inventory(
     output_root: Path,
     records: Sequence[CachedSubjectRecord],
     training: TrainingContract,
+    training_source_sha256: str,
 ) -> Mapping[str, Any]:
     """Require and hash exactly four heads by ten predeclared seeds."""
 
@@ -678,10 +960,13 @@ def audit_frozen_probe_inventory(
                 seed=seed,
                 records=records,
                 training=training,
+                training_source_sha256=training_source_sha256,
             )
         )
         manifest = _load_completed_run(
-            run_dir, expected_identity_sha256=identity_sha256
+            run_dir,
+            expected_identity_sha256=identity_sha256,
+            training_source_sha256=training_source_sha256,
         )
         if manifest.get("head_name") != head_name or manifest.get("seed") != seed:
             raise FrozenEncoderError(f"run identity fields do not match: {run_dir}")
@@ -689,6 +974,7 @@ def audit_frozen_probe_inventory(
             {
                 "head_name": head_name,
                 "seed": seed,
+                "training_source_sha256": training_source_sha256,
                 "run_identity_sha256": identity_sha256,
                 "run_manifest_sha256": manifest["run_manifest_sha256"],
                 "checkpoint_sha256": manifest["checkpoint_sha256"],
@@ -697,8 +983,9 @@ def audit_frozen_probe_inventory(
             }
         )
     inventory_body: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "complete",
+        "training_source_sha256": training_source_sha256,
         "heads": list(APPROVED_HEADS),
         "seeds": list(range(33, 43)),
         "run_count": len(runs),
@@ -748,6 +1035,11 @@ def train_frozen_probe_study(
     output_root: Path,
     training: TrainingContract,
     device: str,
+    training_source_sha256: str,
+    progress_sink: Callable[[Mapping[str, Any]], None] | None = None,
+    available_memory_bytes: int | None = None,
+    store_metadata_inspector: Callable[..., Mapping[int, Any]] = inspect_cached_representation_metadata,
+    store_strict_loader: Callable[..., dict[int, torch.Tensor]] = load_cached_representations,
 ) -> Mapping[str, Any]:
     """Train or exactly resume the complete predeclared 4x10 run matrix."""
 
@@ -757,9 +1049,87 @@ def train_frozen_probe_study(
     output_root = Path(output_root)
     if not output_root.is_absolute():
         raise FrozenEncoderError("frozen-probe output_root must be absolute")
+    _strict_training_contract(training)
+    expected_paths = _expected_run_paths(output_root)
+    actual_heads = (
+        {path.name for path in output_root.iterdir() if path.is_dir()}
+        if output_root.is_dir()
+        else set()
+    )
+    unexpected_heads = actual_heads - set(APPROVED_HEADS)
+    if unexpected_heads:
+        raise FrozenEncoderError(
+            f"study preflight found unexpected head directories: {sorted(unexpected_heads)}"
+        )
+    unexpected_runs = {
+        (head_dir.name, run_dir.name)
+        for head_dir in output_root.iterdir()
+        if head_dir.is_dir() and head_dir.name in APPROVED_HEADS
+        for run_dir in head_dir.iterdir()
+        if run_dir.is_dir()
+        and (head_dir.name, run_dir.name)
+        not in {
+            (head_name, f"seed-{seed}")
+            for head_name, seed in expected_paths
+        }
+    } if output_root.is_dir() else set()
+    if unexpected_runs:
+        raise FrozenEncoderError(
+            f"study preflight found unexpected run directories: {sorted(unexpected_runs)}"
+        )
+    for (head_name, seed), run_dir in expected_paths.items():
+        if not run_dir.exists():
+            continue
+        identity_sha256 = _canonical_sha256(
+            _run_identity(
+                head_name=head_name,
+                seed=seed,
+                records=records,
+                training=training,
+                training_source_sha256=training_source_sha256,
+            )
+        )
+        _load_completed_run(
+            run_dir,
+            expected_identity_sha256=identity_sha256,
+            training_source_sha256=training_source_sha256,
+        )
+    inventory_path = output_root / "checkpoint_inventory.json"
+    if inventory_path.exists() and any(
+        not path.is_dir() for path in expected_paths.values()
+    ):
+        raise FrozenEncoderError(
+            "study preflight found checkpoint inventory before all runs are complete"
+        )
+    if progress_sink is not None:
+        progress_sink(
+            {
+                "event": "store_load_start",
+                "subject_count": len(records),
+            }
+        )
+    store = ValidatedRepresentationStore.build(
+        records=records,
+        cache_root=cache_root,
+        available_memory_bytes=available_memory_bytes,
+        metadata_inspector=store_metadata_inspector,
+        strict_loader=store_strict_loader,
+    )
+    if progress_sink is not None:
+        progress_sink(
+            {
+                "event": "store_load_complete",
+                "subject_count": store.subject_count,
+                "projected_bytes": store.projected_bytes,
+                "actual_retained_bytes": store.actual_retained_bytes,
+                "available_memory_bytes": store.available_memory_bytes,
+                "required_headroom_bytes": store.required_headroom_bytes,
+            }
+        )
+    completed = 0
     for head_name in APPROVED_HEADS:
         for seed in training.seeds:
-            train_frozen_probe_run(
+            result = train_frozen_probe_run(
                 head_name=head_name,
                 seed=seed,
                 records=records,
@@ -767,9 +1137,36 @@ def train_frozen_probe_study(
                 run_dir=output_root / head_name / f"seed-{seed}",
                 training=training,
                 device=device,
+                training_source_sha256=training_source_sha256,
+                representation_store=store,
+                progress_sink=progress_sink,
             )
-    return audit_frozen_probe_inventory(
+            completed += 1
+            if progress_sink is not None:
+                progress_sink(
+                    {
+                        "event": "study_progress",
+                        "completed_runs": completed,
+                        "total_runs": 40,
+                        "head_name": head_name,
+                        "seed": seed,
+                        "reused": result.reused,
+                    }
+                )
+    inventory = audit_frozen_probe_inventory(
         output_root=output_root,
         records=records,
         training=training,
+        training_source_sha256=training_source_sha256,
     )
+    if progress_sink is not None:
+        progress_sink(
+            {
+                "event": "study_complete",
+                "run_count": inventory["run_count"],
+                "checkpoint_inventory_sha256": inventory[
+                    "checkpoint_inventory_sha256"
+                ],
+            }
+        )
+    return inventory

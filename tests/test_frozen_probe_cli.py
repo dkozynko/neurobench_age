@@ -155,13 +155,15 @@ def test_frozen_probe_cli_runs_exact_matrix_and_exact_resume(
     ]
 
     assert module.main(arguments) == 0
-    first_summary = json.loads(capsys.readouterr().out)
+    first_lines = capsys.readouterr().out.splitlines()
+    first_summary = json.loads(first_lines[-1])
     assert first_summary["run_count"] == 40
+    assert any(json.loads(line).get("event") == "epoch_complete" for line in first_lines)
     first_inventory = (output_root / "checkpoint_inventory.json").read_bytes()
 
     assert module.main(arguments) == 0
     assert (output_root / "checkpoint_inventory.json").read_bytes() == first_inventory
-    summary = json.loads(capsys.readouterr().out)
+    summary = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert summary["run_count"] == 40
     assert summary["protocol_sha256"]
 

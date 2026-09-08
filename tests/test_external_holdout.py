@@ -66,11 +66,13 @@ def _write_checkpoints(root: Path) -> tuple[Path, dict[str, object]]:
             checkpoint_path = run_dir / "head_checkpoint.pt"
             torch.save(
                 {
+                    "schema_version": 2,
                     "state_dict": head.state_dict(),
                     "head_name": head_name,
                     "seed": seed,
                     "selected_epoch": 1,
                     "run_identity_sha256": "1" * 64,
+                    "training_source_sha256": "c" * 64,
                 },
                 checkpoint_path,
             )
@@ -78,6 +80,7 @@ def _write_checkpoints(root: Path) -> tuple[Path, dict[str, object]]:
                 {
                     "head_name": head_name,
                     "seed": seed,
+                    "training_source_sha256": "c" * 64,
                     "run_identity_sha256": "1" * 64,
                     "run_manifest_sha256": "2" * 64,
                     "checkpoint_sha256": _sha256_file(checkpoint_path),
@@ -88,8 +91,9 @@ def _write_checkpoints(root: Path) -> tuple[Path, dict[str, object]]:
                 }
             )
     body = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "complete",
+        "training_source_sha256": "c" * 64,
         "heads": list(APPROVED_HEADS),
         "seeds": list(range(33, 43)),
         "run_count": 40,
@@ -157,7 +161,8 @@ def _fixture(
     payload = {
         "study_id": "reve_age_external_frozen_probe_v1",
         "protocol_sha256": "a" * 64,
-        "source_tree_sha256": "c" * 64,
+        "representation_source_sha256": "8" * 64,
+        "training_source_sha256": "c" * 64,
         "git_revision": "synthetic-revision",
         "git_dirty": False,
         "encoder_checkpoint": "brain-bzh/reve-base",
@@ -193,7 +198,7 @@ def _fixture(
         "environment_path": environment_path,
         "output_root": output_root,
         "runtime": RuntimeProvenance(
-            source_tree_sha256="c" * 64,
+            training_source_sha256="c" * 64,
             git_revision="synthetic-revision",
             git_dirty=False,
             environment_sha256=_sha256_file(environment_path),

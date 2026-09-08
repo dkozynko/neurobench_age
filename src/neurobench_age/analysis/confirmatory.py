@@ -653,7 +653,7 @@ _PREDICTION_FIELDS = {
     "study_id",
     "lock_sha256",
     "protocol_sha256",
-    "source_tree_sha256",
+    "training_source_sha256",
     "environment_sha256",
     "mipdb_manifest_sha256",
     "preprocessing_sha256",
@@ -753,7 +753,7 @@ def _load_prediction_series(
         "study_id": lock["study_id"],
         "lock_sha256": lock["lock_sha256"],
         "protocol_sha256": lock["protocol_sha256"],
-        "source_tree_sha256": lock["source_tree_sha256"],
+        "training_source_sha256": lock["training_source_sha256"],
         "environment_sha256": lock["environment_sha256"],
         "mipdb_manifest_sha256": lock["mipdb_manifest_sha256"],
         "preprocessing_sha256": lock["preprocessing_sha256"],
@@ -779,7 +779,7 @@ def _load_prediction_series(
             raise ConfirmatoryAnalysisError("prediction inventory hash differs from record")
         expected = {
             **common_expected,
-            "schema_version": 1,
+            "schema_version": 2,
             "head_name": head_name,
             "seed": seed,
             "subject_id": subject_id,

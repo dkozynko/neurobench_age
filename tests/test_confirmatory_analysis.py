@@ -255,10 +255,11 @@ def _write_completed_study(tmp_path: Path) -> dict[str, Path]:
                 f"{head_name}:{seed}".encode()
             ).hexdigest()
             run_body = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "status": "complete",
                 "head_name": head_name,
                 "seed": seed,
+                "training_source_sha256": "c" * 64,
                 "run_identity_sha256": "1" * 64,
                 "checkpoint_sha256": checkpoint_sha256,
                 "selected_epoch": 1,
@@ -280,6 +281,7 @@ def _write_completed_study(tmp_path: Path) -> dict[str, Path]:
                 {
                     "head_name": head_name,
                     "seed": seed,
+                    "training_source_sha256": "c" * 64,
                     "run_identity_sha256": "1" * 64,
                     "run_manifest_sha256": run_manifest["run_manifest_sha256"],
                     "checkpoint_sha256": checkpoint_sha256,
@@ -288,8 +290,9 @@ def _write_completed_study(tmp_path: Path) -> dict[str, Path]:
                 }
             )
     checkpoint_body = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "complete",
+        "training_source_sha256": "c" * 64,
         "heads": list(APPROVED_HEADS),
         "seeds": list(SEEDS),
         "run_count": 40,
@@ -345,7 +348,8 @@ def _write_completed_study(tmp_path: Path) -> dict[str, Path]:
         {
             "study_id": protocol.study_id,
             "protocol_sha256": protocol.sha256,
-            "source_tree_sha256": "c" * 64,
+            "representation_source_sha256": "8" * 64,
+            "training_source_sha256": "c" * 64,
             "git_revision": "synthetic-revision",
             "git_dirty": False,
             "encoder_checkpoint": "brain-bzh/reve-base",
@@ -401,11 +405,11 @@ def _write_completed_study(tmp_path: Path) -> dict[str, Path]:
                 path = prediction_root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 body = {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "study_id": protocol.study_id,
                     "lock_sha256": lock["lock_sha256"],
                     "protocol_sha256": protocol.sha256,
-                    "source_tree_sha256": "c" * 64,
+                    "training_source_sha256": "c" * 64,
                     "environment_sha256": _sha256_file(environment_path),
                     "mipdb_manifest_sha256": _sha256_file(manifest_path),
                     "preprocessing_sha256": "f" * 64,

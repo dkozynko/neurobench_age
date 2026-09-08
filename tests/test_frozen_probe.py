@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 import torch
 from torch import nn
+import neurobench_age.pipelines.frozen_probe_training as training_module
 
 from neurobench_age.pipelines.frozen_probe import (
+    CachedTensorMetadata,
     FrozenEncoderError,
     RepresentationCacheIdentity,
     assert_frozen_encoder,
@@ -16,6 +18,7 @@ from neurobench_age.pipelines.frozen_probe import (
     build_head_optimizer,
     encoder_state_sha256,
     extract_frozen_representations,
+    inspect_cached_representation_metadata,
     load_cached_representations,
     load_reve_encoder,
     write_cached_representations,
@@ -23,6 +26,8 @@ from neurobench_age.pipelines.frozen_probe import (
 from neurobench_age.pipelines.frozen_probe_training import (
     APPROVED_HEADS,
     CachedSubjectRecord,
+    FrozenProbeRunResult,
+    ValidatedRepresentationStore,
     audit_frozen_probe_inventory,
     build_frozen_probe_head,
     predict_cached_subjects,
@@ -32,6 +37,9 @@ from neurobench_age.pipelines.frozen_probe_training import (
     validate_training_records,
 )
 from neurobench_age.research.protocol import TrainingContract
+
+
+TRAINING_SOURCE_SHA256 = "1" * 64
 
 
 class TinyEncoder(nn.Module):
@@ -218,6 +226,114 @@ def test_cache_rejects_payload_hash_mismatch(tmp_path: Path) -> None:
 
     with pytest.raises(FrozenEncoderError, match="payload hash"):
         load_cached_representations(tmp_path, identity)
+
+
+def test_cache_metadata_inspection_reports_exact_declared_bytes_without_loading_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    identity = _identity()
+    tensors = {
+        -2: torch.randn(3, 4, 5, dtype=torch.float32),
+        -1: torch.randn(3, 4, 5, dtype=torch.float64),
+    }
+    write_cached_representations(tmp_path, identity, tensors, evidence=_evidence())
+    monkeypatch.setattr(torch, "load", lambda *args, **kwargs: pytest.fail("payload loaded"))
+
+    metadata = inspect_cached_representation_metadata(tmp_path, identity)
+
+    assert tuple(metadata) == (-2, -1)
+    assert metadata[-2].shape == (3, 4, 5)
+    assert metadata[-2].dtype == torch.float32
+    assert metadata[-2].nbytes == tensors[-2].numel() * tensors[-2].element_size()
+    assert metadata[-1].nbytes == tensors[-1].numel() * tensors[-1].element_size()
+
+
+def test_representation_store_loads_both_layers_once_and_preserves_tensor_objects(
+    tmp_path: Path,
+) -> None:
+    records = _tiny_training_records(tmp_path)
+    loaded_by_subject: dict[str, dict[int, torch.Tensor]] = {}
+    calls: list[tuple[str, tuple[int, ...]]] = []
+
+    def strict_loader(cache_root, identity, *, required_layers):
+        calls.append((identity.subject_id, tuple(required_layers)))
+        loaded = load_cached_representations(
+            cache_root, identity, required_layers=required_layers
+        )
+        loaded_by_subject[identity.subject_id] = loaded
+        return loaded
+
+    store = ValidatedRepresentationStore.build(
+        records=records,
+        cache_root=tmp_path,
+        available_memory_bytes=16 * 1024**3,
+        strict_loader=strict_loader,
+    )
+
+    assert calls == [(record.subject_id, (-2, -1)) for record in records]
+    assert store.projected_bytes == store.actual_retained_bytes
+    assert store.subject_count == len(records)
+    for record in records:
+        for layer in (-2, -1):
+            assert store.tensor(record.subject_id, layer) is loaded_by_subject[
+                record.subject_id
+            ][layer]
+    with pytest.raises(FrozenEncoderError, match="absent subject"):
+        store.tensor("sub-absent", -1)
+    with pytest.raises(FrozenEncoderError, match="absent layer"):
+        store.tensor(records[0].subject_id, -3)
+
+
+def test_representation_store_rejects_insufficient_memory_before_loading(
+    tmp_path: Path,
+) -> None:
+    records = _tiny_training_records(tmp_path)
+    calls = 0
+
+    def strict_loader(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("must not load")
+
+    projected = sum(
+        tensor.nbytes
+        for record in records
+        for tensor in inspect_cached_representation_metadata(
+            tmp_path, record.cache_identity
+        ).values()
+    )
+    with pytest.raises(FrozenEncoderError, match="insufficient available RAM"):
+        ValidatedRepresentationStore.build(
+            records=records,
+            cache_root=tmp_path,
+            available_memory_bytes=projected + 8 * 1024**3 - 1,
+            strict_loader=strict_loader,
+        )
+    assert calls == 0
+
+
+def test_available_memory_provider_supports_linux_macos_and_rejects_invalid(
+    tmp_path: Path,
+) -> None:
+    meminfo = tmp_path / "meminfo"
+    meminfo.write_text("MemTotal: 1000 kB\nMemAvailable: 123 kB\n")
+    assert training_module._available_memory_bytes(
+        platform_name="linux", proc_meminfo_path=meminfo
+    ) == 123 * 1024
+
+    vm_stat = (
+        "Mach Virtual Memory Statistics: (page size of 4096 bytes)\n"
+        "Pages free: 10.\nPages inactive: 20.\nPages speculative: 3.\n"
+    )
+    assert training_module._available_memory_bytes(
+        platform_name="darwin", vm_stat_output=vm_stat
+    ) == 33 * 4096
+
+    meminfo.write_text("MemTotal: 1000 kB\n")
+    with pytest.raises(FrozenEncoderError, match="available host memory"):
+        training_module._available_memory_bytes(
+            platform_name="linux", proc_meminfo_path=meminfo
+        )
 
 
 def test_cache_writer_requires_complete_frozen_extraction_evidence(
@@ -448,11 +564,14 @@ def test_training_run_is_validation_only_auditable_and_exactly_resumable(
         run_dir=run_dir,
         training=_tiny_training_contract(),
         device="cpu",
+        training_source_sha256=TRAINING_SOURCE_SHA256,
     )
 
     assert first.reused is False
     manifest = first.manifest
     assert manifest["status"] == "complete"
+    assert manifest["schema_version"] == 2
+    assert manifest["training_source_sha256"] == TRAINING_SOURCE_SHA256
     assert manifest["head_name"] == "mean_linear"
     assert manifest["seed"] == 33
     assert manifest["run_identity"]["cache_contract"] == {
@@ -487,6 +606,7 @@ def test_training_run_is_validation_only_auditable_and_exactly_resumable(
         run_dir=run_dir,
         training=_tiny_training_contract(),
         device="cpu",
+        training_source_sha256=TRAINING_SOURCE_SHA256,
     )
 
     assert second.reused is True
@@ -504,7 +624,173 @@ def test_training_run_is_validation_only_auditable_and_exactly_resumable(
             run_dir=run_dir,
             training=_tiny_training_contract(),
             device="cpu",
+            training_source_sha256=TRAINING_SOURCE_SHA256,
         )
+
+
+def test_store_backed_training_is_numerically_identical_to_disk_reference(
+    tmp_path: Path,
+) -> None:
+    cache_root = tmp_path / "cache"
+    records = _tiny_training_records(cache_root)
+    training = replace(_tiny_training_contract(), max_epochs=2, patience=2)
+    disk = train_frozen_probe_run(
+        head_name="mean_linear",
+        seed=33,
+        records=records,
+        cache_root=cache_root,
+        run_dir=tmp_path / "disk",
+        training=training,
+        device="cpu",
+        training_source_sha256=TRAINING_SOURCE_SHA256,
+    )
+    store = ValidatedRepresentationStore.build(
+        records=records,
+        cache_root=cache_root,
+        available_memory_bytes=16 * 1024**3,
+    )
+    memory = train_frozen_probe_run(
+        head_name="mean_linear",
+        seed=33,
+        records=records,
+        cache_root=cache_root,
+        run_dir=tmp_path / "memory",
+        training=training,
+        device="cpu",
+        training_source_sha256=TRAINING_SOURCE_SHA256,
+        representation_store=store,
+    )
+
+    assert memory.manifest["validation_history"] == disk.manifest["validation_history"]
+    assert memory.manifest["selected_epoch"] == disk.manifest["selected_epoch"]
+    assert (
+        memory.manifest["selected_validation_pearson"]
+        == disk.manifest["selected_validation_pearson"]
+    )
+    disk_state = torch.load(
+        tmp_path / "disk/head_checkpoint.pt", map_location="cpu", weights_only=True
+    )["state_dict"]
+    memory_state = torch.load(
+        tmp_path / "memory/head_checkpoint.pt", map_location="cpu", weights_only=True
+    )["state_dict"]
+    assert all(torch.equal(disk_state[key], memory_state[key]) for key in disk_state)
+
+
+def test_training_source_change_blocks_exact_resume(tmp_path: Path) -> None:
+    cache_root = tmp_path / "cache"
+    records = _tiny_training_records(cache_root)
+    run_dir = tmp_path / "run"
+    train_frozen_probe_run(
+        head_name="mean_linear",
+        seed=33,
+        records=records,
+        cache_root=cache_root,
+        run_dir=run_dir,
+        training=replace(_tiny_training_contract(), max_epochs=1, patience=1),
+        device="cpu",
+        training_source_sha256=TRAINING_SOURCE_SHA256,
+    )
+
+    with pytest.raises(FrozenEncoderError, match="identity does not match"):
+        train_frozen_probe_run(
+            head_name="mean_linear",
+            seed=33,
+            records=records,
+            cache_root=cache_root,
+            run_dir=run_dir,
+            training=replace(_tiny_training_contract(), max_epochs=1, patience=1),
+            device="cpu",
+            training_source_sha256="2" * 64,
+        )
+
+
+def test_epoch_progress_event_is_complete_and_json_safe(tmp_path: Path) -> None:
+    cache_root = tmp_path / "cache"
+    records = _tiny_training_records(cache_root)
+    store = ValidatedRepresentationStore.build(
+        records=records,
+        cache_root=cache_root,
+        available_memory_bytes=16 * 1024**3,
+    )
+    events: list[dict[str, object]] = []
+    train_frozen_probe_run(
+        head_name="mean_linear",
+        seed=33,
+        records=records,
+        cache_root=cache_root,
+        run_dir=tmp_path / "run",
+        training=replace(_tiny_training_contract(), max_epochs=1, patience=1),
+        device="cpu",
+        training_source_sha256=TRAINING_SOURCE_SHA256,
+        representation_store=store,
+        progress_sink=lambda event: events.append(dict(event)),
+    )
+
+    epoch = next(event for event in events if event["event"] == "epoch_complete")
+    assert set(epoch) == {
+        "event",
+        "head_name",
+        "seed",
+        "epoch",
+        "max_epochs",
+        "training_window_mse",
+        "validation_subject_mse",
+        "validation_subject_pearson",
+        "best_epoch",
+        "best_validation_pearson",
+        "epochs_without_improvement",
+        "patience",
+        "elapsed_seconds",
+    }
+    assert "test" not in json.dumps(epoch)
+    json.dumps(epoch, allow_nan=False)
+
+
+def test_study_preflight_rejects_late_stale_run_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_root = tmp_path / "cache"
+    records = _tiny_training_records(cache_root)
+    output_root = tmp_path / "runs"
+    training = replace(_tiny_training_contract(), max_epochs=1, patience=1)
+    late_run = output_root / "mean_linear/seed-34"
+    train_frozen_probe_run(
+        head_name="mean_linear",
+        seed=34,
+        records=records,
+        cache_root=cache_root,
+        run_dir=late_run,
+        training=training,
+        device="cpu",
+        training_source_sha256="2" * 64,
+    )
+    before = {
+        path.relative_to(output_root).as_posix(): path.read_bytes()
+        for path in output_root.rglob("*")
+        if path.is_file()
+    }
+    monkeypatch.setattr(
+        torch.optim,
+        "AdamW",
+        lambda *args, **kwargs: pytest.fail("optimizer created before preflight"),
+    )
+
+    with pytest.raises(FrozenEncoderError, match="identity does not match"):
+        train_frozen_probe_study(
+            records=records,
+            cache_root=cache_root,
+            output_root=output_root,
+            training=training,
+            device="cpu",
+            training_source_sha256=TRAINING_SOURCE_SHA256,
+            available_memory_bytes=16 * 1024**3,
+        )
+    after = {
+        path.relative_to(output_root).as_posix(): path.read_bytes()
+        for path in output_root.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
 
 
 def test_training_rejects_mixed_cache_provenance_before_fitting(tmp_path: Path) -> None:
@@ -524,6 +810,7 @@ def test_training_rejects_mixed_cache_provenance_before_fitting(tmp_path: Path) 
             run_dir=tmp_path / "run",
             training=_tiny_training_contract(),
             device="cpu",
+            training_source_sha256=TRAINING_SOURCE_SHA256,
         )
 
 
@@ -541,6 +828,8 @@ def test_study_requires_exact_hash_valid_forty_run_inventory(tmp_path: Path) -> 
         output_root=output_root,
         training=training,
         device="cpu",
+        training_source_sha256=TRAINING_SOURCE_SHA256,
+        available_memory_bytes=16 * 1024**3,
     )
 
     assert inventory["status"] == "complete"
@@ -557,6 +846,7 @@ def test_study_requires_exact_hash_valid_forty_run_inventory(tmp_path: Path) -> 
         output_root=output_root,
         records=records,
         training=training,
+        training_source_sha256=TRAINING_SOURCE_SHA256,
     ) == inventory
 
     extra = output_root / "unexpected-head"
@@ -566,5 +856,61 @@ def test_study_requires_exact_hash_valid_forty_run_inventory(tmp_path: Path) -> 
             output_root=output_root,
             records=records,
             training=training,
+            training_source_sha256=TRAINING_SOURCE_SHA256,
         )
-    audit_frozen_probe_inventory,
+
+
+def test_study_loads_each_of_900_payloads_once_across_40_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    records = tuple(
+        CachedSubjectRecord(
+            subject_id=f"sub-{index:04d}",
+            split="train" if index < 800 else "validation",
+            age=float(index + 1),
+            cache_identity=_identity(f"sub-{index:04d}"),
+        )
+        for index in range(900)
+    )
+    metadata = {
+        -2: CachedTensorMetadata((1, 1, 1), torch.float32, 4),
+        -1: CachedTensorMetadata((1, 1, 1), torch.float32, 4),
+    }
+    load_calls: list[str] = []
+    run_calls: list[tuple[str, int]] = []
+
+    def strict_loader(cache_root, identity, *, required_layers):
+        load_calls.append(identity.subject_id)
+        return {-2: torch.zeros(1, 1, 1), -1: torch.zeros(1, 1, 1)}
+
+    def fake_train(**kwargs):
+        run_calls.append((kwargs["head_name"], kwargs["seed"]))
+        assert kwargs["representation_store"].subject_count == 900
+        return FrozenProbeRunResult(manifest={}, reused=False)
+
+    monkeypatch.setattr(training_module, "train_frozen_probe_run", fake_train)
+    monkeypatch.setattr(
+        training_module,
+        "audit_frozen_probe_inventory",
+        lambda **kwargs: {
+            "status": "complete",
+            "run_count": 40,
+            "checkpoint_inventory_sha256": "f" * 64,
+        },
+    )
+
+    result = train_frozen_probe_study(
+        records=records,
+        cache_root=tmp_path / "unused-cache",
+        output_root=(tmp_path / "runs").resolve(),
+        training=replace(_tiny_training_contract(), max_epochs=1, patience=1),
+        device="cpu",
+        training_source_sha256=TRAINING_SOURCE_SHA256,
+        available_memory_bytes=16 * 1024**3,
+        store_metadata_inspector=lambda *args, **kwargs: metadata,
+        store_strict_loader=strict_loader,
+    )
+
+    assert result["run_count"] == 40
+    assert load_calls == [record.subject_id for record in records]
+    assert len(run_calls) == 40

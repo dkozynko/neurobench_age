@@ -62,7 +62,7 @@ def _runtime_provenance(
     if not revision:
         raise ExternalHoldoutError("Git revision is empty")
     return RuntimeProvenance(
-        source_tree_sha256=source_tree_sha256(repository_root),
+        training_source_sha256=source_tree_sha256(repository_root),
         git_revision=revision,
         git_dirty=dirty,
         environment_sha256=_sha256_file(environment_path),
