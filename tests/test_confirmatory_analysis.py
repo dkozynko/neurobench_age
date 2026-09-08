@@ -255,10 +255,12 @@ def _write_completed_study(tmp_path: Path) -> dict[str, Path]:
                 f"{head_name}:{seed}".encode()
             ).hexdigest()
             run_body = {
-                "schema_version": 2,
+                "schema_version": 3,
                 "status": "complete",
                 "head_name": head_name,
                 "seed": seed,
+                "representation_protocol_sha256": protocol.sha256,
+                "training_protocol_sha256": "9" * 64,
                 "training_source_sha256": "c" * 64,
                 "run_identity_sha256": "1" * 64,
                 "checkpoint_sha256": checkpoint_sha256,
@@ -281,6 +283,8 @@ def _write_completed_study(tmp_path: Path) -> dict[str, Path]:
                 {
                     "head_name": head_name,
                     "seed": seed,
+                    "representation_protocol_sha256": protocol.sha256,
+                    "training_protocol_sha256": "9" * 64,
                     "training_source_sha256": "c" * 64,
                     "run_identity_sha256": "1" * 64,
                     "run_manifest_sha256": run_manifest["run_manifest_sha256"],
@@ -290,8 +294,10 @@ def _write_completed_study(tmp_path: Path) -> dict[str, Path]:
                 }
             )
     checkpoint_body = {
-        "schema_version": 2,
+        "schema_version": 3,
         "status": "complete",
+        "representation_protocol_sha256": protocol.sha256,
+        "training_protocol_sha256": "9" * 64,
         "training_source_sha256": "c" * 64,
         "heads": list(APPROVED_HEADS),
         "seeds": list(SEEDS),
@@ -348,6 +354,7 @@ def _write_completed_study(tmp_path: Path) -> dict[str, Path]:
         {
             "study_id": protocol.study_id,
             "protocol_sha256": protocol.sha256,
+            "training_protocol_sha256": "9" * 64,
             "representation_source_sha256": "8" * 64,
             "training_source_sha256": "c" * 64,
             "git_revision": "synthetic-revision",
@@ -405,10 +412,11 @@ def _write_completed_study(tmp_path: Path) -> dict[str, Path]:
                 path = prediction_root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 body = {
-                    "schema_version": 2,
+                    "schema_version": 3,
                     "study_id": protocol.study_id,
                     "lock_sha256": lock["lock_sha256"],
                     "protocol_sha256": protocol.sha256,
+                    "training_protocol_sha256": "9" * 64,
                     "training_source_sha256": "c" * 64,
                     "environment_sha256": _sha256_file(environment_path),
                     "mipdb_manifest_sha256": _sha256_file(manifest_path),
@@ -438,10 +446,12 @@ def _write_completed_study(tmp_path: Path) -> dict[str, Path]:
                     }
                 )
     inventory_body = {
-        "schema_version": 1,
+        "schema_version": 3,
         "status": "complete",
         "study_id": protocol.study_id,
         "lock_sha256": lock["lock_sha256"],
+        "protocol_sha256": protocol.sha256,
+        "training_protocol_sha256": "9" * 64,
         "heads": list(APPROVED_HEADS),
         "seeds": list(SEEDS),
         "subjects": primary,
@@ -455,9 +465,11 @@ def _write_completed_study(tmp_path: Path) -> dict[str, Path]:
     inventory_path = prediction_root / "prediction_inventory.json"
     inventory_path.write_text(json.dumps(inventory, sort_keys=True) + "\n")
     completion_body = {
-        "schema_version": 1,
+        "schema_version": 3,
         "study_id": protocol.study_id,
         "lock_sha256": lock["lock_sha256"],
+        "protocol_sha256": protocol.sha256,
+        "training_protocol_sha256": "9" * 64,
         "prediction_inventory_sha256": inventory["prediction_inventory_sha256"],
         "status": "complete",
     }

@@ -27,6 +27,9 @@ from neurobench_age.research.study_lock import (
     load_study_lock,
     record_resumable_failure,
 )
+from neurobench_age.research.training_protocol import (
+    load_frozen_probe_training_protocol,
+)
 
 
 def _sha256_file(path: Path) -> str:
@@ -86,10 +89,23 @@ def _resolve_device(requested: str) -> str:
 
 
 def _validate_protocol_and_power(
-    *, protocol: object, lock: dict[str, object], manifest_path: Path
+    *,
+    protocol: object,
+    training_protocol: object,
+    lock: dict[str, object],
+    manifest_path: Path,
 ) -> dict[str, object]:
     if lock.get("protocol_sha256") != getattr(protocol, "sha256", None):
         raise ExternalHoldoutError("sealed lock does not match --protocol")
+    if (
+        getattr(training_protocol, "representation_protocol_sha256", None)
+        != getattr(protocol, "sha256", None)
+        or lock.get("training_protocol_sha256")
+        != getattr(training_protocol, "sha256", None)
+    ):
+        raise ExternalHoldoutError(
+            "sealed lock does not match --training-protocol"
+        )
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         primary = manifest["cohorts"]["primary"]
@@ -122,6 +138,7 @@ def _validate_protocol_and_power(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--protocol", required=True, type=Path)
+    parser.add_argument("--training-protocol", required=True, type=Path)
     parser.add_argument("--lock", required=True, type=Path)
     parser.add_argument("--checkpoint-root", required=True, type=Path)
     parser.add_argument("--checkpoint-inventory", required=True, type=Path)
@@ -153,9 +170,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         repository_root = Path(__file__).resolve().parents[1]
         protocol = load_study_protocol(args.protocol)
+        training_protocol = load_frozen_probe_training_protocol(
+            args.training_protocol
+        )
         lock = load_study_lock(args.lock)
         power = _validate_protocol_and_power(
-            protocol=protocol, lock=lock, manifest_path=args.mipdb_manifest
+            protocol=protocol,
+            training_protocol=training_protocol,
+            lock=lock,
+            manifest_path=args.mipdb_manifest,
         )
         runtime = _runtime_provenance(repository_root, args.environment)
         device = _resolve_device(args.device)

@@ -14,6 +14,7 @@ from typing import Any, Mapping, Sequence
 LOCK_FIELDS = (
     "study_id",
     "protocol_sha256",
+    "training_protocol_sha256",
     "representation_source_sha256",
     "training_source_sha256",
     "git_revision",
@@ -36,6 +37,7 @@ LOCK_FIELDS = (
 )
 HASH_FIELDS = (
     "protocol_sha256",
+    "training_protocol_sha256",
     "representation_source_sha256",
     "training_source_sha256",
     "encoder_checkpoint_sha256",
@@ -98,6 +100,8 @@ def load_checkpoint_inventory(path: Path) -> dict[str, Any]:
     required = {
         "schema_version",
         "status",
+        "representation_protocol_sha256",
+        "training_protocol_sha256",
         "training_source_sha256",
         "heads",
         "seeds",
@@ -114,10 +118,15 @@ def load_checkpoint_inventory(path: Path) -> dict[str, Any]:
     }
     if inventory["checkpoint_inventory_sha256"] != canonical_sha256(body):
         raise StudyLockError("checkpoint inventory digest does not match its content")
-    if not _is_sha256(inventory["training_source_sha256"]):
-        raise StudyLockError("checkpoint inventory training source is invalid")
+    for field in (
+        "representation_protocol_sha256",
+        "training_protocol_sha256",
+        "training_source_sha256",
+    ):
+        if not _is_sha256(inventory[field]):
+            raise StudyLockError(f"checkpoint inventory {field} is invalid")
     if (
-        inventory["schema_version"] != 2
+        inventory["schema_version"] != 3
         or inventory["status"] != "complete"
         or tuple(inventory["heads"]) != HEADS
         or tuple(inventory["seeds"]) != tuple(range(33, 43))
@@ -133,6 +142,8 @@ def load_checkpoint_inventory(path: Path) -> dict[str, Any]:
     run_fields = {
         "head_name",
         "seed",
+        "representation_protocol_sha256",
+        "training_protocol_sha256",
         "training_source_sha256",
         "run_identity_sha256",
         "run_manifest_sha256",
@@ -148,6 +159,8 @@ def load_checkpoint_inventory(path: Path) -> dict[str, Any]:
             raise StudyLockError("checkpoint inventory contains duplicate runs")
         actual_pairs.add(pair)
         for field in (
+            "representation_protocol_sha256",
+            "training_protocol_sha256",
             "training_source_sha256",
             "run_identity_sha256",
             "run_manifest_sha256",
@@ -157,6 +170,13 @@ def load_checkpoint_inventory(path: Path) -> dict[str, Any]:
                 raise StudyLockError(f"checkpoint inventory run {field} is invalid")
         if run["training_source_sha256"] != inventory["training_source_sha256"]:
             raise StudyLockError("checkpoint inventory contains mixed training sources")
+        if (
+            run["representation_protocol_sha256"]
+            != inventory["representation_protocol_sha256"]
+            or run["training_protocol_sha256"]
+            != inventory["training_protocol_sha256"]
+        ):
+            raise StudyLockError("checkpoint inventory contains mixed protocols")
         if (
             isinstance(run["selected_epoch"], bool)
             or not isinstance(run["selected_epoch"], int)

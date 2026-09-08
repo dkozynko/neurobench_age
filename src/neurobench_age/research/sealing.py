@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 import hashlib
 import json
 from pathlib import Path
@@ -26,6 +27,7 @@ from neurobench_age.pipelines.representation_materialization import (
     preprocessing_contract_sha256,
 )
 from neurobench_age.research.protocol import StudyProtocol
+from neurobench_age.research.training_protocol import FrozenProbeTrainingProtocol
 
 from .study_lock import (
     StudyLockError,
@@ -108,6 +110,14 @@ def verify_checkpoint_artifacts(
             != inventory["training_source_sha256"]
             or manifest.get("training_source_sha256")
             != record["training_source_sha256"]
+            or manifest.get("representation_protocol_sha256")
+            != inventory["representation_protocol_sha256"]
+            or manifest.get("representation_protocol_sha256")
+            != record["representation_protocol_sha256"]
+            or manifest.get("training_protocol_sha256")
+            != inventory["training_protocol_sha256"]
+            or manifest.get("training_protocol_sha256")
+            != record["training_protocol_sha256"]
             or manifest.get("run_identity_sha256") != record["run_identity_sha256"]
             or manifest.get("selected_epoch") != record["selected_epoch"]
             or manifest.get("checkpoint_sha256") != record["checkpoint_sha256"]
@@ -124,7 +134,7 @@ def verify_checkpoint_artifacts(
             raise StudyLockError(f"checkpoint is unreadable: {checkpoint_path}") from error
         if (
             not isinstance(checkpoint, dict)
-            or checkpoint.get("schema_version") != 2
+            or checkpoint.get("schema_version") != 3
             or not isinstance(checkpoint.get("state_dict"), dict)
             or checkpoint.get("head_name") != head_name
             or checkpoint.get("seed") != seed
@@ -132,6 +142,10 @@ def verify_checkpoint_artifacts(
             or checkpoint.get("run_identity_sha256") != record["run_identity_sha256"]
             or checkpoint.get("training_source_sha256")
             != inventory["training_source_sha256"]
+            or checkpoint.get("representation_protocol_sha256")
+            != inventory["representation_protocol_sha256"]
+            or checkpoint.get("training_protocol_sha256")
+            != inventory["training_protocol_sha256"]
         ):
             raise StudyLockError(f"checkpoint payload identity differs: {checkpoint_path}")
     return inventory
@@ -191,7 +205,7 @@ def _validate_checkpoint_contracts(
     checkpoint_root: Path,
     inventory: Mapping[str, Any],
     training_manifest: Mapping[str, Any],
-    protocol: StudyProtocol,
+    training_protocol: FrozenProbeTrainingProtocol,
 ) -> None:
     cache_contract = {
         field: training_manifest[field]
@@ -204,18 +218,8 @@ def _validate_checkpoint_contracts(
             "source_tree_sha256",
         )
     }
-    training_contract = {
-        "seeds": list(protocol.training.seeds),
-        "optimizer": protocol.training.optimizer,
-        "learning_rate": protocol.training.learning_rate,
-        "weight_decay": protocol.training.weight_decay,
-        "batch_size": protocol.training.batch_size,
-        "max_epochs": protocol.training.max_epochs,
-        "patience": protocol.training.patience,
-        "loss": protocol.training.loss,
-        "checkpoint_metric": protocol.training.checkpoint_metric,
-        "metric_mode": protocol.training.metric_mode,
-    }
+    training_contract = asdict(training_protocol)
+    training_contract["seeds"] = list(training_protocol.seeds)
     expected_subjects = []
     for subject in training_manifest["subjects"]:
         identity = RepresentationCacheIdentity(
@@ -245,9 +249,13 @@ def _validate_checkpoint_contracts(
         manifest = _load_json(path, "checkpoint run manifest")
         identity = manifest.get("run_identity")
         expected_identity = {
-            "schema_version": 2,
+            "schema_version": 3,
             "head_name": record["head_name"],
             "seed": record["seed"],
+            "representation_protocol_sha256": inventory[
+                "representation_protocol_sha256"
+            ],
+            "training_protocol_sha256": training_protocol.sha256,
             "training_source_sha256": inventory["training_source_sha256"],
             "cache_contract": cache_contract,
             "training": training_contract,
@@ -290,6 +298,7 @@ def _repository_provenance(repository_root: Path) -> tuple[str, str, bool]:
 def derive_study_payload(
     *,
     protocol: StudyProtocol,
+    training_protocol: FrozenProbeTrainingProtocol,
     repository_root: Path,
     environment_path: Path,
     hbn_subject_manifest_path: Path,
@@ -304,6 +313,11 @@ def derive_study_payload(
     output_root: Path,
 ) -> dict[str, Any]:
     """Derive a strict lock payload from mutually verified study artifacts."""
+
+    if training_protocol.representation_protocol_sha256 != protocol.sha256:
+        raise StudyLockError(
+            "training protocol does not reference the supplied representation protocol"
+        )
 
     source_sha256, git_revision, git_dirty = _repository_provenance(repository_root)
     environment_path = Path(environment_path)
@@ -335,11 +349,15 @@ def derive_study_payload(
     )
     if inventory["training_source_sha256"] != source_sha256:
         raise StudyLockError("checkpoint training source differs from the sealing source")
+    if inventory["representation_protocol_sha256"] != protocol.sha256:
+        raise StudyLockError("checkpoint representation protocol differs")
+    if inventory["training_protocol_sha256"] != training_protocol.sha256:
+        raise StudyLockError("checkpoint training protocol differs")
     _validate_checkpoint_contracts(
         checkpoint_root=checkpoint_root,
         inventory=inventory,
         training_manifest=training_manifest,
-        protocol=protocol,
+        training_protocol=training_protocol,
     )
 
     mipdb_manifest = _load_json(mipdb_manifest_path, "finalized MIPDB manifest")
@@ -414,6 +432,7 @@ def derive_study_payload(
     return {
         "study_id": protocol.study_id,
         "protocol_sha256": protocol.sha256,
+        "training_protocol_sha256": training_protocol.sha256,
         "representation_source_sha256": training_manifest["source_tree_sha256"],
         "training_source_sha256": source_sha256,
         "git_revision": git_revision,
@@ -437,7 +456,7 @@ def derive_study_payload(
             "mipdb_extrapolation": subject_hashes["extrapolation"],
         },
         "heads": list(APPROVED_HEADS),
-        "seeds": list(protocol.training.seeds),
+        "seeds": list(training_protocol.seeds),
         "preprocessing_sha256": expected_preprocessing_sha256,
         "statistics_sha256": protocol.statistics_sha256,
         "output_root": str(external_output.resolve()),

@@ -568,6 +568,15 @@ def _load_resources(
         "checkpoint_inventory_sha256"
     ]:
         raise ConfirmatoryAnalysisError("checkpoint inventory provenance differs from lock")
+    if (
+        inventory["representation_protocol_sha256"] != lock["protocol_sha256"]
+        or inventory["training_protocol_sha256"]
+        != lock["training_protocol_sha256"]
+        or inventory["training_source_sha256"] != lock["training_source_sha256"]
+    ):
+        raise ConfirmatoryAnalysisError(
+            "checkpoint protocol provenance differs from lock"
+        )
     checkpoint_hashes: dict[tuple[str, int], str] = {}
     resources_by_head: dict[str, list[dict[str, Any]]] = {
         head_name: [] for head_name in APPROVED_HEADS
@@ -601,6 +610,12 @@ def _load_resources(
             or manifest.get("selected_epoch") != record["selected_epoch"]
             or manifest.get("run_manifest_sha256")
             != record["run_manifest_sha256"]
+            or manifest.get("representation_protocol_sha256")
+            != lock["protocol_sha256"]
+            or manifest.get("training_protocol_sha256")
+            != lock["training_protocol_sha256"]
+            or manifest.get("training_source_sha256")
+            != lock["training_source_sha256"]
             or not isinstance(parameters, Mapping)
             or parameters.get("total") != record["head_parameter_count"]
             or parameters.get("trainable") != record["head_parameter_count"]
@@ -653,6 +668,7 @@ _PREDICTION_FIELDS = {
     "study_id",
     "lock_sha256",
     "protocol_sha256",
+    "training_protocol_sha256",
     "training_source_sha256",
     "environment_sha256",
     "mipdb_manifest_sha256",
@@ -686,8 +702,12 @@ def _load_prediction_series(
     )
     if (
         inventory.get("status") != "complete"
+        or inventory.get("schema_version") != 3
         or inventory.get("study_id") != lock["study_id"]
         or inventory.get("lock_sha256") != lock["lock_sha256"]
+        or inventory.get("protocol_sha256") != lock["protocol_sha256"]
+        or inventory.get("training_protocol_sha256")
+        != lock["training_protocol_sha256"]
         or tuple(inventory.get("heads", ())) != APPROVED_HEADS
         or tuple(inventory.get("seeds", ())) != EXPECTED_SEEDS
         or tuple(inventory.get("subjects", ())) != subject_ids
@@ -707,7 +727,11 @@ def _load_prediction_series(
     _validate_hashed_object(completion, "marker_sha256", "evaluation completion marker")
     if (
         completion.get("status") != "complete"
+        or completion.get("schema_version") != 3
         or completion.get("lock_sha256") != lock["lock_sha256"]
+        or completion.get("protocol_sha256") != lock["protocol_sha256"]
+        or completion.get("training_protocol_sha256")
+        != lock["training_protocol_sha256"]
         or completion.get("prediction_inventory_sha256")
         != inventory["prediction_inventory_sha256"]
     ):
@@ -753,6 +777,7 @@ def _load_prediction_series(
         "study_id": lock["study_id"],
         "lock_sha256": lock["lock_sha256"],
         "protocol_sha256": lock["protocol_sha256"],
+        "training_protocol_sha256": lock["training_protocol_sha256"],
         "training_source_sha256": lock["training_source_sha256"],
         "environment_sha256": lock["environment_sha256"],
         "mipdb_manifest_sha256": lock["mipdb_manifest_sha256"],
@@ -779,7 +804,7 @@ def _load_prediction_series(
             raise ConfirmatoryAnalysisError("prediction inventory hash differs from record")
         expected = {
             **common_expected,
-            "schema_version": 2,
+            "schema_version": 3,
             "head_name": head_name,
             "seed": seed,
             "subject_id": subject_id,
@@ -974,11 +999,12 @@ def analyze_confirmatory_study(
         adequately_powered=not manifest_evidence["cohort"]["underpowered"],
     )
     report_body: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 3,
         "status": "complete",
         "study_id": lock["study_id"],
         "lock_sha256": lock["lock_sha256"],
         "protocol_sha256": protocol.sha256,
+        "training_protocol_sha256": lock["training_protocol_sha256"],
         "statistics_sha256": lock["statistics_sha256"],
         "prediction_inventory_sha256": _load_json(
             prediction_root / "prediction_inventory.json", "prediction inventory"

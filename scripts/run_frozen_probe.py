@@ -17,6 +17,10 @@ from neurobench_age.pipelines.frozen_probe_training import (
     train_frozen_probe_study,
 )
 from neurobench_age.research.protocol import ProtocolError, load_study_protocol
+from neurobench_age.research.training_protocol import (
+    FrozenProbeTrainingProtocolError,
+    load_frozen_probe_training_protocol,
+)
 
 
 def _resolve_device(requested: str) -> str:
@@ -32,6 +36,7 @@ def _resolve_device(requested: str) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--protocol", required=True, type=Path)
+    parser.add_argument("--training-protocol", required=True, type=Path)
     parser.add_argument("--training-manifest", required=True, type=Path)
     parser.add_argument("--cache-root", required=True, type=Path)
     parser.add_argument("--output-root", required=True, type=Path)
@@ -46,6 +51,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.output_root.resolve().is_relative_to(canonical_results):
             raise FrozenEncoderError("output-root must be outside results/canonical")
         protocol = load_study_protocol(args.protocol)
+        training_protocol = load_frozen_probe_training_protocol(
+            args.training_protocol
+        )
+        if training_protocol.representation_protocol_sha256 != protocol.sha256:
+            raise FrozenProbeTrainingProtocolError(
+                "training protocol does not reference the supplied representation protocol"
+            )
         training_source_sha256 = source_tree_sha256(repository_root)
         records = load_frozen_probe_training_manifest(
             args.training_manifest, protocol=protocol
@@ -54,14 +66,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             records=records,
             cache_root=args.cache_root,
             output_root=args.output_root,
-            training=protocol.training,
+            training=training_protocol,
             device=_resolve_device(args.device),
             training_source_sha256=training_source_sha256,
             progress_sink=lambda event: print(
                 json.dumps(event, sort_keys=True, allow_nan=False), flush=True
             ),
         )
-    except (OSError, ProtocolError, FrozenEncoderError) as error:
+    except (
+        OSError,
+        ProtocolError,
+        FrozenProbeTrainingProtocolError,
+        FrozenEncoderError,
+    ) as error:
         parser.error(str(error))
 
     print(
@@ -70,6 +87,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "status": inventory["status"],
                 "run_count": inventory["run_count"],
                 "protocol_sha256": protocol.sha256,
+                "training_protocol_sha256": training_protocol.sha256,
                 "training_source_sha256": training_source_sha256,
                 "checkpoint_inventory_sha256": inventory[
                     "checkpoint_inventory_sha256"

@@ -25,8 +25,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _checkpoint_inventory(tmp_path: Path) -> tuple[Path, str]:
     body = {
-        "schema_version": 2,
+        "schema_version": 3,
         "status": "complete",
+        "representation_protocol_sha256": "a" * 64,
+        "training_protocol_sha256": "9" * 64,
         "training_source_sha256": "b" * 64,
         "heads": list(APPROVED_HEADS),
         "seeds": list(range(33, 43)),
@@ -35,6 +37,8 @@ def _checkpoint_inventory(tmp_path: Path) -> tuple[Path, str]:
             {
                 "head_name": head_name,
                 "seed": seed,
+                "representation_protocol_sha256": "a" * 64,
+                "training_protocol_sha256": "9" * 64,
                 "training_source_sha256": "b" * 64,
                 "run_identity_sha256": "1" * 64,
                 "run_manifest_sha256": "2" * 64,
@@ -62,6 +66,7 @@ def _payload(tmp_path: Path) -> dict[str, object]:
     return {
         "study_id": "reve_age_external_frozen_probe_v1",
         "protocol_sha256": digest,
+        "training_protocol_sha256": "9" * 64,
         "representation_source_sha256": "8" * 64,
         "training_source_sha256": "b" * 64,
         "git_revision": "revision",
@@ -126,6 +131,23 @@ def test_checkpoint_artifact_audit_rejects_self_hashed_inventory_without_files(
             checkpoint_root=tmp_path / "runs",
             inventory_path=inventory_path,
         )
+
+
+def test_checkpoint_inventory_carries_both_protocol_identities(tmp_path: Path) -> None:
+    inventory_path, _ = _checkpoint_inventory(tmp_path)
+
+    from neurobench_age.research.study_lock import load_checkpoint_inventory
+
+    inventory = load_checkpoint_inventory(inventory_path)
+
+    assert inventory["schema_version"] == 3
+    assert inventory["representation_protocol_sha256"] == "a" * 64
+    assert inventory["training_protocol_sha256"] == "9" * 64
+    assert all(
+        run["representation_protocol_sha256"] == "a" * 64
+        and run["training_protocol_sha256"] == "9" * 64
+        for run in inventory["runs"]
+    )
 
 
 def test_production_sealing_cli_is_artifact_derived() -> None:

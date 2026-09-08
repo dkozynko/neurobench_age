@@ -27,6 +27,7 @@ from neurobench_age.pipelines.frozen_probe_training import (
     APPROVED_HEADS,
     CachedSubjectRecord,
     FrozenProbeRunResult,
+    GlobalWindowBatchPlan,
     ValidatedRepresentationStore,
     audit_frozen_probe_inventory,
     build_frozen_probe_head,
@@ -36,10 +37,87 @@ from neurobench_age.pipelines.frozen_probe_training import (
     train_frozen_probe_study,
     validate_training_records,
 )
-from neurobench_age.research.protocol import TrainingContract
+from neurobench_age.research.training_protocol import (
+    FrozenProbeTrainingProtocol,
+    load_frozen_probe_training_protocol,
+)
 
 
+ROOT = Path(__file__).resolve().parents[1]
+TRAINING_PROTOCOL_PATH = (
+    ROOT / "configs" / "research" / "neuralbench_frozen_probe_training.json"
+)
 TRAINING_SOURCE_SHA256 = "1" * 64
+
+
+def test_global_window_batches_cover_every_window_and_cross_subjects() -> None:
+    records = (
+        CachedSubjectRecord("sub-a", "train", 8.0, _identity("sub-a")),
+        CachedSubjectRecord("sub-b", "train", 11.0, _identity("sub-b")),
+        CachedSubjectRecord("sub-c", "train", 14.0, _identity("sub-c")),
+    )
+    tensors = {
+        "sub-a": torch.tensor([[[10.0]], [[11.0]]]),
+        "sub-b": torch.tensor([[[20.0]], [[21.0]], [[22.0]]]),
+        "sub-c": torch.tensor([[[30.0]]]),
+    }
+    plan = GlobalWindowBatchPlan.build(records, tensors=tensors, batch_size=4)
+
+    first = plan.permuted_batches(
+        generator=torch.Generator(device="cpu").manual_seed(33)
+    )
+    repeated = plan.permuted_batches(
+        generator=torch.Generator(device="cpu").manual_seed(33)
+    )
+
+    assert first == repeated
+    assert plan.total_windows == 6
+    assert plan.steps_per_epoch == 2
+    assert [len(batch) for batch in first] == [4, 2]
+    assert sorted(reference for batch in first for reference in batch) == [
+        (0, 0),
+        (0, 1),
+        (1, 0),
+        (1, 1),
+        (1, 2),
+        (2, 0),
+    ]
+    assert any(len({subject for subject, _ in batch}) > 1 for batch in first)
+
+
+def test_global_window_batch_materialization_preserves_permutation_order() -> None:
+    records = (
+        CachedSubjectRecord("sub-a", "train", 8.0, _identity("sub-a")),
+        CachedSubjectRecord("sub-b", "train", 11.0, _identity("sub-b")),
+    )
+    tensors = {
+        "sub-a": torch.tensor([[[10.0]], [[11.0]]]),
+        "sub-b": torch.tensor([[[20.0]], [[21.0]]]),
+    }
+    plan = GlobalWindowBatchPlan.build(records, tensors=tensors, batch_size=3)
+    references = ((1, 1), (0, 0), (1, 0))
+
+    batch, targets = plan.materialize(references, tensors=tensors)
+
+    assert batch.tolist() == [[[21.0]], [[10.0]], [[20.0]]]
+    assert targets.tolist() == [11.0, 8.0, 11.0]
+
+
+@pytest.mark.parametrize(
+    "tensors",
+    [
+        {},
+        {"sub-a": torch.empty(0, 1, 1)},
+        {"sub-a": torch.ones(2, 1)},
+    ],
+)
+def test_global_window_plan_rejects_missing_empty_or_invalid_tensors(
+    tensors: dict[str, torch.Tensor],
+) -> None:
+    records = (CachedSubjectRecord("sub-a", "train", 8.0, _identity("sub-a")),)
+
+    with pytest.raises(FrozenEncoderError, match="global window"):
+        GlobalWindowBatchPlan.build(records, tensors=tensors, batch_size=2)
 
 
 class TinyEncoder(nn.Module):
@@ -534,19 +612,61 @@ def _tiny_training_records(cache_root: Path) -> tuple[CachedSubjectRecord, ...]:
     return tuple(records)
 
 
-def _tiny_training_contract() -> TrainingContract:
-    return TrainingContract(
-        seeds=tuple(range(33, 43)),
-        optimizer="AdamW",
-        learning_rate=0.05,
-        weight_decay=0.0001,
+def _tiny_training_contract() -> FrozenProbeTrainingProtocol:
+    protocol = load_frozen_probe_training_protocol(TRAINING_PROTOCOL_PATH)
+    return replace(
+        protocol,
+        optimizer=replace(
+            protocol.optimizer,
+            learning_rate=0.05,
+            weight_decay=0.0001,
+        ),
+        scheduler=replace(protocol.scheduler, max_learning_rate=0.05),
         batch_size=2,
         max_epochs=5,
         patience=2,
-        loss="MSELoss",
-        checkpoint_metric="validation_pearson",
-        metric_mode="max",
+        sha256="2" * 64,
     )
+
+
+def test_training_run_uses_one_cycle_global_batches_and_gradient_clipping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_root = tmp_path / "cache"
+    records = _tiny_training_records(cache_root)
+    training = replace(_tiny_training_contract(), max_epochs=1, patience=1)
+    clipping_calls: list[float] = []
+    original_clip = torch.nn.utils.clip_grad_norm_
+
+    def traced_clip(parameters, max_norm, *args, **kwargs):
+        clipping_calls.append(float(max_norm))
+        return original_clip(parameters, max_norm, *args, **kwargs)
+
+    monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", traced_clip)
+
+    result = train_frozen_probe_run(
+        head_name="mean_linear",
+        seed=33,
+        records=records,
+        cache_root=cache_root,
+        run_dir=tmp_path / "run",
+        training=training,
+        device="cpu",
+        training_source_sha256=TRAINING_SOURCE_SHA256,
+    )
+
+    manifest = result.manifest
+    assert manifest["schema_version"] == 3
+    assert manifest["representation_protocol_sha256"] == "a" * 64
+    assert manifest["training_protocol_sha256"] == training.sha256
+    assert manifest["training_unit"] == "globally_shuffled_window"
+    assert manifest["batching"]["steps_per_epoch"] == 5
+    assert manifest["optimizer_steps"] == 5
+    assert manifest["scheduler_steps"] == 5
+    assert clipping_calls == [1.0] * 5
+    assert manifest["optimizer"]["scheduler"]["name"] == "OneCycleLR"
+    assert manifest["optimizer"]["scheduler"]["total_steps"] == 5
+    assert manifest["validation_history"][0]["learning_rate"] > 0
 
 
 def test_training_run_is_validation_only_auditable_and_exactly_resumable(
@@ -570,7 +690,9 @@ def test_training_run_is_validation_only_auditable_and_exactly_resumable(
     assert first.reused is False
     manifest = first.manifest
     assert manifest["status"] == "complete"
-    assert manifest["schema_version"] == 2
+    assert manifest["schema_version"] == 3
+    assert manifest["representation_protocol_sha256"] == "a" * 64
+    assert manifest["training_protocol_sha256"] == "2" * 64
     assert manifest["training_source_sha256"] == TRAINING_SOURCE_SHA256
     assert manifest["head_name"] == "mean_linear"
     assert manifest["seed"] == 33
@@ -591,6 +713,7 @@ def test_training_run_is_validation_only_auditable_and_exactly_resumable(
     assert manifest["head_parameters"]["trainable"] > 0
     assert manifest["head_parameters"]["total"] == manifest["head_parameters"]["trainable"]
     assert manifest["optimizer"]["name"] == "AdamW"
+    assert manifest["optimizer"]["scheduler"]["name"] == "OneCycleLR"
     assert len(manifest["validation_history"]) >= 1
     assert all("test" not in key for row in manifest["validation_history"] for key in row)
     assert manifest["runtime_seconds"] >= 0.0
@@ -633,7 +756,7 @@ def test_store_backed_training_is_numerically_identical_to_disk_reference(
 ) -> None:
     cache_root = tmp_path / "cache"
     records = _tiny_training_records(cache_root)
-    training = replace(_tiny_training_contract(), max_epochs=2, patience=2)
+    training = replace(_tiny_training_contract(), max_epochs=3, patience=3)
     disk = train_frozen_probe_run(
         head_name="mean_linear",
         seed=33,
@@ -740,6 +863,9 @@ def test_epoch_progress_event_is_complete_and_json_safe(tmp_path: Path) -> None:
         "best_validation_pearson",
         "epochs_without_improvement",
         "patience",
+        "learning_rate",
+        "optimizer_steps",
+        "scheduler_steps",
         "elapsed_seconds",
     }
     assert "test" not in json.dumps(epoch)
@@ -833,6 +959,10 @@ def test_study_requires_exact_hash_valid_forty_run_inventory(tmp_path: Path) -> 
     )
 
     assert inventory["status"] == "complete"
+    assert inventory["schema_version"] == 3
+    assert inventory["representation_protocol_sha256"] == "a" * 64
+    assert inventory["training_protocol_sha256"] == training.sha256
+    assert inventory["training_source_sha256"] == TRAINING_SOURCE_SHA256
     assert inventory["run_count"] == 40
     assert len(inventory["runs"]) == 40
     assert {
@@ -842,6 +972,11 @@ def test_study_requires_exact_hash_valid_forty_run_inventory(tmp_path: Path) -> 
         for head_name in APPROVED_HEADS
         for seed in range(33, 43)
     }
+    assert all(
+        run["representation_protocol_sha256"] == "a" * 64
+        and run["training_protocol_sha256"] == training.sha256
+        for run in inventory["runs"]
+    )
     assert audit_frozen_probe_inventory(
         output_root=output_root,
         records=records,

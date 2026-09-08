@@ -66,11 +66,13 @@ def _write_checkpoints(root: Path) -> tuple[Path, dict[str, object]]:
             checkpoint_path = run_dir / "head_checkpoint.pt"
             torch.save(
                 {
-                    "schema_version": 2,
+                    "schema_version": 3,
                     "state_dict": head.state_dict(),
                     "head_name": head_name,
                     "seed": seed,
                     "selected_epoch": 1,
+                    "representation_protocol_sha256": "a" * 64,
+                    "training_protocol_sha256": "9" * 64,
                     "run_identity_sha256": "1" * 64,
                     "training_source_sha256": "c" * 64,
                 },
@@ -80,6 +82,8 @@ def _write_checkpoints(root: Path) -> tuple[Path, dict[str, object]]:
                 {
                     "head_name": head_name,
                     "seed": seed,
+                    "representation_protocol_sha256": "a" * 64,
+                    "training_protocol_sha256": "9" * 64,
                     "training_source_sha256": "c" * 64,
                     "run_identity_sha256": "1" * 64,
                     "run_manifest_sha256": "2" * 64,
@@ -91,8 +95,10 @@ def _write_checkpoints(root: Path) -> tuple[Path, dict[str, object]]:
                 }
             )
     body = {
-        "schema_version": 2,
+        "schema_version": 3,
         "status": "complete",
+        "representation_protocol_sha256": "a" * 64,
+        "training_protocol_sha256": "9" * 64,
         "training_source_sha256": "c" * 64,
         "heads": list(APPROVED_HEADS),
         "seeds": list(range(33, 43)),
@@ -161,6 +167,7 @@ def _fixture(
     payload = {
         "study_id": "reve_age_external_frozen_probe_v1",
         "protocol_sha256": "a" * 64,
+        "training_protocol_sha256": "9" * 64,
         "representation_source_sha256": "8" * 64,
         "training_source_sha256": "c" * 64,
         "git_revision": "synthetic-revision",
@@ -499,6 +506,14 @@ def test_external_holdout_cli_runs_only_the_locked_primary_inventory(
         ),
     )
     monkeypatch.setattr(
+        module,
+        "load_frozen_probe_training_protocol",
+        lambda path: SimpleNamespace(
+            sha256="9" * 64,
+            representation_protocol_sha256="a" * 64,
+        ),
+    )
+    monkeypatch.setattr(
         module, "_runtime_provenance", lambda *args: fixture["runtime"]
     )
     provider_arguments = {}
@@ -515,6 +530,8 @@ def test_external_holdout_cli_runs_only_the_locked_primary_inventory(
         [
             "--protocol",
             str(tmp_path / "protocol.json"),
+            "--training-protocol",
+            str(tmp_path / "training-protocol.json"),
             "--lock",
             str(fixture["lock_path"]),
             "--checkpoint-root",
@@ -569,7 +586,14 @@ def test_external_holdout_cli_rejects_malformed_primary_cohort(
                 sha256="a" * 64,
                 datasets=SimpleNamespace(minimum_primary_subjects=50),
             ),
-            lock={"protocol_sha256": "a" * 64},
+            training_protocol=SimpleNamespace(
+                sha256="9" * 64,
+                representation_protocol_sha256="a" * 64,
+            ),
+            lock={
+                "protocol_sha256": "a" * 64,
+                "training_protocol_sha256": "9" * 64,
+            },
             manifest_path=manifest_path,
         )
 
@@ -588,6 +612,14 @@ def test_external_cli_records_resumable_failure_after_started_transition(
         ),
     )
     monkeypatch.setattr(
+        module,
+        "load_frozen_probe_training_protocol",
+        lambda path: SimpleNamespace(
+            sha256="9" * 64,
+            representation_protocol_sha256="a" * 64,
+        ),
+    )
+    monkeypatch.setattr(
         module, "_runtime_provenance", lambda *args: fixture["runtime"]
     )
 
@@ -603,6 +635,7 @@ def test_external_cli_records_resumable_failure_after_started_transition(
         module.main(
             [
                 "--protocol", str(tmp_path / "protocol.json"),
+                "--training-protocol", str(tmp_path / "training-protocol.json"),
                 "--lock", str(fixture["lock_path"]),
                 "--checkpoint-root", str(fixture["checkpoint_root"]),
                 "--checkpoint-inventory", str(fixture["inventory_path"]),

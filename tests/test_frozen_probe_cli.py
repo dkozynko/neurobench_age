@@ -20,14 +20,14 @@ from neurobench_age.research.study_lock import canonical_sha256
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TRAINING_PROTOCOL_PATH = (
+    ROOT / "configs" / "research" / "neuralbench_frozen_probe_training.json"
+)
 
 
 def _protocol(tmp_path: Path):
     payload = json.loads(
         (ROOT / "configs/research/external_frozen_probe.json").read_text()
-    )
-    payload["training"].update(
-        {"batch_size": 2, "max_epochs": 1, "patience": 1}
     )
     path = tmp_path / "protocol.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -144,6 +144,8 @@ def test_frozen_probe_cli_runs_exact_matrix_and_exact_resume(
     arguments = [
         "--protocol",
         str(protocol_path),
+        "--training-protocol",
+        str(TRAINING_PROTOCOL_PATH),
         "--training-manifest",
         str(manifest_path),
         "--cache-root",
@@ -166,8 +168,44 @@ def test_frozen_probe_cli_runs_exact_matrix_and_exact_resume(
     summary = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert summary["run_count"] == 40
     assert summary["protocol_sha256"]
+    assert summary["training_protocol_sha256"]
 
     source = script_path.read_text(encoding="utf-8")
+    assert 'add_argument("--training-protocol", required=True' in source
     assert 'add_argument("--test' not in source
     assert 'add_argument("--seed' not in source
     assert 'add_argument("--head' not in source
+
+
+def test_frozen_probe_cli_rejects_training_protocol_for_another_representation_protocol(
+    tmp_path: Path, capsys
+) -> None:
+    protocol_path, _, manifest_path, cache_root = _write_inputs(tmp_path)
+    payload = json.loads(protocol_path.read_text(encoding="utf-8"))
+    payload["study_id"] = "different-representation-protocol"
+    protocol_path.write_text(json.dumps(payload), encoding="utf-8")
+    script_path = ROOT / "scripts/run_frozen_probe.py"
+    spec = importlib.util.spec_from_file_location("run_frozen_probe", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    with pytest.raises(SystemExit):
+        module.main(
+            [
+                "--protocol",
+                str(protocol_path),
+                "--training-protocol",
+                str(TRAINING_PROTOCOL_PATH),
+                "--training-manifest",
+                str(manifest_path),
+                "--cache-root",
+                str(cache_root),
+                "--output-root",
+                str(tmp_path / "runs"),
+                "--device",
+                "cpu",
+            ]
+        )
+
+    assert "does not reference the supplied representation protocol" in capsys.readouterr().err

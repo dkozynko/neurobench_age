@@ -24,7 +24,8 @@ from neurobench_age.heads.math import (
     MeanRichStatsResidualHead,
     MultiQueryRichStatsResidualHead,
 )
-from neurobench_age.research.protocol import StudyProtocol, TrainingContract
+from neurobench_age.research.protocol import StudyProtocol
+from neurobench_age.research.training_protocol import FrozenProbeTrainingProtocol
 
 from .frozen_probe import (
     FrozenEncoderError,
@@ -93,6 +94,128 @@ class CachedSubjectRecord:
             raise FrozenEncoderError(
                 "record subject_id does not match its cache identity"
             )
+
+
+@dataclass(frozen=True)
+class GlobalWindowBatchPlan:
+    """Immutable mapping from global window positions to cached subjects."""
+
+    subject_ids: tuple[str, ...]
+    subject_ages: tuple[float, ...]
+    references: tuple[tuple[int, int], ...]
+    batch_size: int
+
+    @classmethod
+    def build(
+        cls,
+        records: Sequence[CachedSubjectRecord],
+        *,
+        tensors: Mapping[str, torch.Tensor],
+        batch_size: int,
+    ) -> GlobalWindowBatchPlan:
+        normalized = tuple(records)
+        if (
+            not normalized
+            or isinstance(batch_size, bool)
+            or not isinstance(batch_size, int)
+            or batch_size <= 0
+        ):
+            raise FrozenEncoderError("global window batch plan is invalid")
+        subject_ids = tuple(record.subject_id for record in normalized)
+        if (
+            any(
+                not isinstance(record, CachedSubjectRecord)
+                or record.split != "train"
+                for record in normalized
+            )
+            or len(subject_ids) != len(set(subject_ids))
+            or set(tensors) != set(subject_ids)
+        ):
+            raise FrozenEncoderError("global window batch plan records are invalid")
+        expected_tail: tuple[int, ...] | None = None
+        expected_dtype: torch.dtype | None = None
+        references: list[tuple[int, int]] = []
+        for subject_index, subject_id in enumerate(subject_ids):
+            tensor = tensors[subject_id]
+            if (
+                not isinstance(tensor, torch.Tensor)
+                or tensor.device.type != "cpu"
+                or tensor.ndim != 3
+                or tensor.shape[0] <= 0
+            ):
+                raise FrozenEncoderError(
+                    "global window batch plan requires non-empty CPU tensors"
+                )
+            tail = tuple(tensor.shape[1:])
+            if expected_tail is None:
+                expected_tail = tail
+                expected_dtype = tensor.dtype
+            elif tail != expected_tail or tensor.dtype != expected_dtype:
+                raise FrozenEncoderError(
+                    "global window batch plan tensors are inconsistent"
+                )
+            references.extend(
+                (subject_index, window_index)
+                for window_index in range(tensor.shape[0])
+            )
+        return cls(
+            subject_ids=subject_ids,
+            subject_ages=tuple(float(record.age) for record in normalized),
+            references=tuple(references),
+            batch_size=batch_size,
+        )
+
+    @property
+    def total_windows(self) -> int:
+        return len(self.references)
+
+    @property
+    def steps_per_epoch(self) -> int:
+        return math.ceil(self.total_windows / self.batch_size)
+
+    def permuted_batches(
+        self, *, generator: torch.Generator
+    ) -> tuple[tuple[tuple[int, int], ...], ...]:
+        order = torch.randperm(self.total_windows, generator=generator).tolist()
+        shuffled = tuple(self.references[index] for index in order)
+        return tuple(
+            shuffled[start : start + self.batch_size]
+            for start in range(0, len(shuffled), self.batch_size)
+        )
+
+    def materialize(
+        self,
+        references: Sequence[tuple[int, int]],
+        *,
+        tensors: Mapping[str, torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        normalized = tuple(references)
+        if not normalized or len(normalized) > self.batch_size:
+            raise FrozenEncoderError("global window batch references are invalid")
+        windows: list[torch.Tensor] = []
+        ages: list[float] = []
+        for subject_index, window_index in normalized:
+            if (
+                isinstance(subject_index, bool)
+                or not isinstance(subject_index, int)
+                or subject_index < 0
+                or subject_index >= len(self.subject_ids)
+            ):
+                raise FrozenEncoderError("global window subject index is invalid")
+            tensor = tensors.get(self.subject_ids[subject_index])
+            if (
+                not isinstance(tensor, torch.Tensor)
+                or isinstance(window_index, bool)
+                or not isinstance(window_index, int)
+                or window_index < 0
+                or window_index >= tensor.shape[0]
+            ):
+                raise FrozenEncoderError("global window index is invalid")
+            windows.append(tensor[window_index : window_index + 1])
+            ages.append(self.subject_ages[subject_index])
+        batch = torch.cat(windows, dim=0)
+        targets = torch.tensor(ages, dtype=batch.dtype)
+        return batch, targets
 
 
 def validate_training_records(
@@ -474,9 +597,26 @@ class FrozenProbeRunResult:
     reused: bool
 
 
-def _strict_training_contract(training: TrainingContract) -> None:
-    if training.optimizer != "AdamW":
+def _strict_training_contract(training: FrozenProbeTrainingProtocol) -> None:
+    if training.optimizer.name != "AdamW":
         raise FrozenEncoderError("frozen-probe optimizer must be AdamW")
+    if (
+        training.batching.unit != "global_window"
+        or training.batching.shuffle != "seeded_randperm"
+        or training.batching.drop_last
+    ):
+        raise FrozenEncoderError(
+            "frozen-probe training must use seeded global-window batches"
+        )
+    if (
+        training.scheduler.name != "OneCycleLR"
+        or training.scheduler.interval != "step"
+        or training.scheduler.frequency != 1
+        or training.scheduler.anneal_strategy != "cos"
+    ):
+        raise FrozenEncoderError(
+            "frozen-probe scheduler must be step-wise cosine OneCycleLR"
+        )
     if training.loss != "MSELoss":
         raise FrozenEncoderError("frozen-probe loss must be MSELoss")
     if training.checkpoint_metric != "validation_pearson" or training.metric_mode != "max":
@@ -487,8 +627,15 @@ def _strict_training_contract(training: TrainingContract) -> None:
         training.batch_size <= 0
         or training.max_epochs <= 0
         or training.patience <= 0
-        or training.learning_rate <= 0
-        or training.weight_decay < 0
+        or training.optimizer.learning_rate <= 0
+        or training.optimizer.weight_decay < 0
+        or training.scheduler.max_learning_rate <= 0
+        or training.scheduler.pct_start <= 0
+        or training.scheduler.pct_start >= 1
+        or training.scheduler.div_factor <= 0
+        or training.scheduler.final_div_factor <= 0
+        or training.gradient_clip_norm <= 0
+        or not _is_sha256(training.sha256)
     ):
         raise FrozenEncoderError("frozen-probe training settings are invalid")
 
@@ -498,7 +645,7 @@ def _run_identity(
     head_name: str,
     seed: int,
     records: Sequence[CachedSubjectRecord],
-    training: TrainingContract,
+    training: FrozenProbeTrainingProtocol,
     training_source_sha256: str,
 ) -> dict[str, Any]:
     if not isinstance(training_source_sha256, str) or not _is_sha256(
@@ -529,9 +676,11 @@ def _run_identity(
                 "training records contain mixed cache provenance"
             )
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "head_name": head_name,
         "seed": seed,
+        "representation_protocol_sha256": first_identity.protocol_sha256,
+        "training_protocol_sha256": training.sha256,
         "training_source_sha256": training_source_sha256,
         "cache_contract": cache_contract,
         "training": training_payload,
@@ -583,7 +732,7 @@ def _load_completed_run(
         raise FrozenEncoderError(f"existing run manifest is invalid: {run_dir}") from error
     if (
         not isinstance(manifest, dict)
-        or manifest.get("schema_version") != 2
+        or manifest.get("schema_version") != 3
         or manifest.get("status") != "complete"
     ):
         raise FrozenEncoderError(f"existing run completion marker is invalid: {run_dir}")
@@ -621,7 +770,7 @@ def train_frozen_probe_run(
     records: Sequence[CachedSubjectRecord],
     cache_root: Path,
     run_dir: Path,
-    training: TrainingContract,
+    training: FrozenProbeTrainingProtocol,
     device: str,
     training_source_sha256: str,
     representation_store: ValidatedRepresentationStore | None = None,
@@ -657,15 +806,23 @@ def train_frozen_probe_run(
     validation_records = tuple(
         record for record in records if record.split == "validation"
     )
-    sample = (
-        representation_store.tensor(train_records[0].subject_id, required_layer)
-        if representation_store is not None
-        else load_cached_representations(
-            cache_root,
-            train_records[0].cache_identity,
-            required_layers=(required_layer,),
-        )[required_layer]
+    train_tensors: dict[str, torch.Tensor] = {}
+    for record in train_records:
+        train_tensors[record.subject_id] = (
+            representation_store.tensor(record.subject_id, required_layer)
+            if representation_store is not None
+            else load_cached_representations(
+                cache_root,
+                record.cache_identity,
+                required_layers=(required_layer,),
+            )[required_layer]
+        )
+    batch_plan = GlobalWindowBatchPlan.build(
+        train_records,
+        tensors=train_tensors,
+        batch_size=training.batch_size,
     )
+    sample = train_tensors[train_records[0].subject_id]
     if sample.ndim != 3 or sample.shape[-1] <= 0:
         raise FrozenEncoderError(
             "cached representation must have shape [windows, tokens, features]"
@@ -676,8 +833,8 @@ def train_frozen_probe_run(
     head_parameters = [parameter for parameter in head.parameters() if parameter.requires_grad]
     optimizer = torch.optim.AdamW(
         head_parameters,
-        lr=training.learning_rate,
-        weight_decay=training.weight_decay,
+        lr=training.optimizer.learning_rate,
+        weight_decay=training.optimizer.weight_decay,
     )
     optimizer_ids = {
         id(parameter)
@@ -686,6 +843,16 @@ def train_frozen_probe_run(
     }
     if optimizer_ids != {id(parameter) for parameter in head_parameters}:
         raise FrozenEncoderError("optimizer does not own exactly the trainable head parameters")
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer,
+        max_lr=training.scheduler.max_learning_rate,
+        epochs=training.max_epochs,
+        steps_per_epoch=batch_plan.steps_per_epoch,
+        pct_start=training.scheduler.pct_start,
+        anneal_strategy=training.scheduler.anneal_strategy,
+        div_factor=training.scheduler.div_factor,
+        final_div_factor=training.scheduler.final_div_factor,
+    )
     loss_function = nn.MSELoss()
     order_generator = torch.Generator(device="cpu").manual_seed(seed)
     if device.startswith("cuda") and torch.cuda.is_available():
@@ -699,6 +866,8 @@ def train_frozen_probe_run(
                 "head_name": head_name,
                 "seed": seed,
                 "max_epochs": training.max_epochs,
+                "total_training_windows": batch_plan.total_windows,
+                "steps_per_epoch": batch_plan.steps_per_epoch,
             }
         )
     history: list[dict[str, float | int]] = []
@@ -706,48 +875,42 @@ def train_frozen_probe_run(
     best_epoch = 0
     best_state: dict[str, torch.Tensor] | None = None
     epochs_without_improvement = 0
+    optimizer_steps = 0
+    scheduler_steps = 0
 
     for epoch_index in range(training.max_epochs):
         head.train()
         epoch_loss_sum = 0.0
         epoch_windows = 0
-        subject_order = torch.randperm(
-            len(train_records), generator=order_generator
-        ).tolist()
-        for subject_offset in subject_order:
-            record = train_records[subject_offset]
-            cached = (
-                representation_store.tensor(record.subject_id, required_layer)
-                if representation_store is not None
-                else load_cached_representations(
-                    cache_root,
-                    record.cache_identity,
-                    required_layers=(required_layer,),
-                )[required_layer]
+        for references in batch_plan.permuted_batches(generator=order_generator):
+            batch, targets = batch_plan.materialize(
+                references,
+                tensors=train_tensors,
             )
-            if cached.ndim != 3 or cached.shape[-1] != sample.shape[-1] or cached.shape[0] == 0:
-                raise FrozenEncoderError("training cache tensors have inconsistent shapes")
-            window_order = torch.randperm(
-                cached.shape[0], generator=order_generator
+            batch = batch.to(device)
+            targets = targets.to(device)
+            optimizer.zero_grad(set_to_none=True)
+            predictions = head(batch).reshape(-1)
+            loss = loss_function(predictions, targets)
+            if not torch.isfinite(loss):
+                raise FrozenEncoderError("training produced a non-finite loss")
+            loss.backward()
+            gradient_norm = torch.nn.utils.clip_grad_norm_(
+                head_parameters,
+                training.gradient_clip_norm,
             )
-            for start in range(0, cached.shape[0], training.batch_size):
-                indices = window_order[start : start + training.batch_size]
-                batch = cached[indices].to(device)
-                targets = torch.full(
-                    (batch.shape[0],),
-                    float(record.age),
-                    dtype=batch.dtype,
-                    device=device,
-                )
-                optimizer.zero_grad(set_to_none=True)
-                predictions = head(batch).reshape(-1)
-                loss = loss_function(predictions, targets)
-                if not torch.isfinite(loss):
-                    raise FrozenEncoderError("training produced a non-finite loss")
-                loss.backward()
-                optimizer.step()
-                epoch_loss_sum += float(loss.detach().cpu()) * batch.shape[0]
-                epoch_windows += batch.shape[0]
+            if not torch.isfinite(gradient_norm):
+                raise FrozenEncoderError("training produced a non-finite gradient norm")
+            optimizer.step()
+            optimizer_steps += 1
+            scheduler.step()
+            scheduler_steps += 1
+            epoch_loss_sum += float(loss.detach().cpu()) * batch.shape[0]
+            epoch_windows += batch.shape[0]
+
+        expected_steps = (epoch_index + 1) * batch_plan.steps_per_epoch
+        if optimizer_steps != expected_steps or scheduler_steps != expected_steps:
+            raise FrozenEncoderError("optimizer and scheduler step counts drifted")
 
         validation_rows = predict_cached_subjects(
             head,
@@ -769,6 +932,7 @@ def train_frozen_probe_run(
                 "training_window_mse": epoch_loss_sum / epoch_windows,
                 "validation_subject_mse": validation_mse,
                 "validation_subject_pearson": validation_pearson,
+                "learning_rate": float(optimizer.param_groups[0]["lr"]),
             }
         )
         comparable = validation_pearson if math.isfinite(validation_pearson) else -float("inf")
@@ -803,6 +967,9 @@ def train_frozen_probe_run(
                     ),
                     "epochs_without_improvement": epochs_without_improvement,
                     "patience": training.patience,
+                    "learning_rate": history[-1]["learning_rate"],
+                    "optimizer_steps": optimizer_steps,
+                    "scheduler_steps": scheduler_steps,
                     "elapsed_seconds": time.perf_counter() - started,
                 }
             )
@@ -828,22 +995,30 @@ def train_frozen_probe_run(
         checkpoint_path = transaction_dir / "head_checkpoint.pt"
         torch.save(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "state_dict": best_state,
                 "head_name": head_name,
                 "seed": seed,
                 "selected_epoch": best_epoch,
+                "representation_protocol_sha256": records[
+                    0
+                ].cache_identity.protocol_sha256,
+                "training_protocol_sha256": training.sha256,
                 "run_identity_sha256": identity_sha256,
                 "training_source_sha256": training_source_sha256,
             },
             checkpoint_path,
         )
         manifest_body: dict[str, Any] = {
-            "schema_version": 2,
+            "schema_version": 3,
             "status": "complete",
             "head_name": head_name,
             "layer_index": required_layer,
             "seed": seed,
+            "representation_protocol_sha256": records[
+                0
+            ].cache_identity.protocol_sha256,
+            "training_protocol_sha256": training.sha256,
             "training_source_sha256": training_source_sha256,
             "run_identity": identity,
             "run_identity_sha256": identity_sha256,
@@ -856,13 +1031,33 @@ def train_frozen_probe_run(
                 ),
             },
             "optimizer": {
-                "name": training.optimizer,
-                "learning_rate": training.learning_rate,
-                "weight_decay": training.weight_decay,
-                "scheduler": "none",
+                "name": training.optimizer.name,
+                "learning_rate": training.optimizer.learning_rate,
+                "weight_decay": training.optimizer.weight_decay,
+                "scheduler": {
+                    "name": training.scheduler.name,
+                    "max_learning_rate": training.scheduler.max_learning_rate,
+                    "pct_start": training.scheduler.pct_start,
+                    "anneal_strategy": training.scheduler.anneal_strategy,
+                    "div_factor": training.scheduler.div_factor,
+                    "final_div_factor": training.scheduler.final_div_factor,
+                    "interval": training.scheduler.interval,
+                    "frequency": training.scheduler.frequency,
+                    "total_steps": batch_plan.steps_per_epoch
+                    * training.max_epochs,
+                },
             },
             "loss": training.loss,
-            "training_unit": "window",
+            "training_unit": "globally_shuffled_window",
+            "batching": {
+                "batch_size": training.batch_size,
+                "drop_last": training.batching.drop_last,
+                "shuffle": training.batching.shuffle,
+                "total_training_windows": batch_plan.total_windows,
+                "steps_per_epoch": batch_plan.steps_per_epoch,
+            },
+            "optimizer_steps": optimizer_steps,
+            "scheduler_steps": scheduler_steps,
             "validation_unit": "subject_arithmetic_mean_of_windows",
             "checkpoint_selection": {
                 "metric": training.checkpoint_metric,
@@ -915,7 +1110,7 @@ def audit_frozen_probe_inventory(
     *,
     output_root: Path,
     records: Sequence[CachedSubjectRecord],
-    training: TrainingContract,
+    training: FrozenProbeTrainingProtocol,
     training_source_sha256: str,
 ) -> Mapping[str, Any]:
     """Require and hash exactly four heads by ten predeclared seeds."""
@@ -953,6 +1148,7 @@ def audit_frozen_probe_inventory(
         )
 
     runs: list[dict[str, Any]] = []
+    representation_protocol_sha256 = records[0].cache_identity.protocol_sha256
     for (head_name, seed), run_dir in expected_paths.items():
         identity_sha256 = _canonical_sha256(
             _run_identity(
@@ -974,6 +1170,8 @@ def audit_frozen_probe_inventory(
             {
                 "head_name": head_name,
                 "seed": seed,
+                "representation_protocol_sha256": representation_protocol_sha256,
+                "training_protocol_sha256": training.sha256,
                 "training_source_sha256": training_source_sha256,
                 "run_identity_sha256": identity_sha256,
                 "run_manifest_sha256": manifest["run_manifest_sha256"],
@@ -983,8 +1181,10 @@ def audit_frozen_probe_inventory(
             }
         )
     inventory_body: dict[str, Any] = {
-        "schema_version": 2,
+        "schema_version": 3,
         "status": "complete",
+        "representation_protocol_sha256": representation_protocol_sha256,
+        "training_protocol_sha256": training.sha256,
         "training_source_sha256": training_source_sha256,
         "heads": list(APPROVED_HEADS),
         "seeds": list(range(33, 43)),
@@ -1033,7 +1233,7 @@ def train_frozen_probe_study(
     records: Sequence[CachedSubjectRecord],
     cache_root: Path,
     output_root: Path,
-    training: TrainingContract,
+    training: FrozenProbeTrainingProtocol,
     device: str,
     training_source_sha256: str,
     progress_sink: Callable[[Mapping[str, Any]], None] | None = None,

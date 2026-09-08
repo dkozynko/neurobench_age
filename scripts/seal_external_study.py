@@ -10,6 +10,10 @@ from typing import Sequence
 
 from neurobench_age.research.protocol import load_study_protocol
 from neurobench_age.research.sealing import derive_study_payload
+from neurobench_age.research.training_protocol import (
+    FrozenProbeTrainingProtocolError,
+    load_frozen_probe_training_protocol,
+)
 from neurobench_age.research.study_lock import (
     StudyLockError,
     seal_study,
@@ -19,6 +23,7 @@ from neurobench_age.research.study_lock import (
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--protocol", required=True, type=Path)
+    parser.add_argument("--training-protocol", required=True, type=Path)
     parser.add_argument("--environment", required=True, type=Path)
     parser.add_argument("--hbn-subject-manifest", required=True, type=Path)
     parser.add_argument("--hbn-training-manifest", required=True, type=Path)
@@ -51,8 +56,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if any(not path.is_absolute() for path in artifact_paths):
             raise StudyLockError("all artifact, data, output, and lock paths must be absolute")
         protocol = load_study_protocol(args.protocol)
+        training_protocol = load_frozen_probe_training_protocol(
+            args.training_protocol
+        )
         payload = derive_study_payload(
             protocol=protocol,
+            training_protocol=training_protocol,
             repository_root=Path(__file__).resolve().parents[1],
             environment_path=args.environment,
             hbn_subject_manifest_path=args.hbn_subject_manifest,
@@ -67,7 +76,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_root=args.output_root,
         )
         lock = seal_study(args.lock, payload)
-    except (OSError, ValueError, StudyLockError) as error:
+    except (
+        OSError,
+        ValueError,
+        FrozenProbeTrainingProtocolError,
+        StudyLockError,
+    ) as error:
         parser.error(str(error))
     print(json.dumps(lock, indent=2, sort_keys=True))
     return 0

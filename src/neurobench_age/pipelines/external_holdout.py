@@ -265,6 +265,14 @@ def _load_heads(
         raise ExternalHoldoutError("checkpoint inventory does not match sealed study")
     if inventory["training_source_sha256"] != lock["training_source_sha256"]:
         raise ExternalHoldoutError("checkpoint inventory training source does not match")
+    if inventory["representation_protocol_sha256"] != lock["protocol_sha256"]:
+        raise ExternalHoldoutError(
+            "checkpoint inventory representation protocol does not match"
+        )
+    if inventory["training_protocol_sha256"] != lock["training_protocol_sha256"]:
+        raise ExternalHoldoutError(
+            "checkpoint inventory training protocol does not match"
+        )
     loaded: list[_LoadedHead] = []
     for record in inventory["runs"]:
         head_name = record["head_name"]
@@ -282,7 +290,7 @@ def _load_heads(
             raise ExternalHoldoutError(f"head checkpoint is unreadable: {checkpoint_path}") from error
         if (
             not isinstance(payload, Mapping)
-            or payload.get("schema_version") != 2
+            or payload.get("schema_version") != 3
             or not isinstance(payload.get("state_dict"), Mapping)
         ):
             raise ExternalHoldoutError(f"head checkpoint payload is invalid: {checkpoint_path}")
@@ -293,6 +301,10 @@ def _load_heads(
             or payload.get("run_identity_sha256") != record["run_identity_sha256"]
             or payload.get("training_source_sha256")
             != lock["training_source_sha256"]
+            or payload.get("representation_protocol_sha256")
+            != lock["protocol_sha256"]
+            or payload.get("training_protocol_sha256")
+            != lock["training_protocol_sha256"]
         ):
             raise ExternalHoldoutError(f"head checkpoint identity does not match: {checkpoint_path}")
         linear_weight = payload["state_dict"].get("linear.weight")
@@ -345,10 +357,11 @@ def _prediction_static_fields(
     loaded_head: _LoadedHead,
 ) -> dict[str, Any]:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "study_id": lock["study_id"],
         "lock_sha256": lock["lock_sha256"],
         "protocol_sha256": lock["protocol_sha256"],
+        "training_protocol_sha256": lock["training_protocol_sha256"],
         "training_source_sha256": lock["training_source_sha256"],
         "environment_sha256": lock["environment_sha256"],
         "mipdb_manifest_sha256": lock["mipdb_manifest_sha256"],
@@ -461,9 +474,11 @@ def _ensure_started(
     if state["state"] == "sealed":
         state = transition_study(lock_path, "started")
     marker_body = {
-        "schema_version": 1,
+        "schema_version": 3,
         "study_id": lock["study_id"],
         "lock_sha256": lock["lock_sha256"],
+        "protocol_sha256": lock["protocol_sha256"],
+        "training_protocol_sha256": lock["training_protocol_sha256"],
         "state": "started",
         "started_at_utc": state["updated_at_utc"],
     }
@@ -523,10 +538,12 @@ def _complete(
     if actual_paths != expected_paths:
         raise ExternalHoldoutError("external prediction file inventory is not exact")
     body: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 3,
         "status": "complete",
         "study_id": lock["study_id"],
         "lock_sha256": lock["lock_sha256"],
+        "protocol_sha256": lock["protocol_sha256"],
+        "training_protocol_sha256": lock["training_protocol_sha256"],
         "heads": list(APPROVED_HEADS),
         "seeds": list(range(33, 43)),
         "subjects": [subject.subject_id for subject in subjects],
@@ -541,9 +558,11 @@ def _complete(
     else:
         _publish_json_create_only(inventory_path, inventory)
     completion_body = {
-        "schema_version": 1,
+        "schema_version": 3,
         "study_id": lock["study_id"],
         "lock_sha256": lock["lock_sha256"],
+        "protocol_sha256": lock["protocol_sha256"],
+        "training_protocol_sha256": lock["training_protocol_sha256"],
         "prediction_inventory_sha256": inventory["prediction_inventory_sha256"],
         "status": "complete",
     }

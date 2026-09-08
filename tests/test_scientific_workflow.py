@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
@@ -30,6 +31,9 @@ from neurobench_age.pipelines.representation_materialization import (
 )
 from neurobench_age.research.protocol import load_study_protocol
 from neurobench_age.research.study_lock import seal_study
+from neurobench_age.research.training_protocol import (
+    load_frozen_probe_training_protocol,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +67,20 @@ def _protocol(tmp_path: Path):
     path = tmp_path / "protocol.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path, load_study_protocol(path)
+
+
+def _training_protocol(protocol):
+    training = load_frozen_probe_training_protocol(
+        ROOT / "configs/research/neuralbench_frozen_probe_training.json"
+    )
+    return replace(
+        training,
+        representation_protocol_sha256=protocol.sha256,
+        batch_size=2,
+        max_epochs=1,
+        patience=1,
+        sha256="9" * 64,
+    )
 
 
 def _hbn_manifest(path: Path, data_root: Path) -> None:
@@ -121,6 +139,7 @@ def test_tiny_artifact_derived_sealed_study_runs_end_to_end(
     tmp_path: Path, monkeypatch
 ) -> None:
     protocol_path, protocol = _protocol(tmp_path)
+    training_protocol = _training_protocol(protocol)
     encoder = _TinyEncoder()
     hbn_root = tmp_path / "hbn"
     hbn_manifest_path = tmp_path / "hbn.csv"
@@ -157,7 +176,7 @@ def test_tiny_artifact_derived_sealed_study_runs_end_to_end(
         records=records,
         cache_root=representation_root,
         output_root=checkpoint_root,
-        training=protocol.training,
+        training=training_protocol,
         device="cpu",
         training_source_sha256=source_tree_sha256(ROOT),
         available_memory_bytes=16 * 1024**3,
@@ -210,6 +229,7 @@ def test_tiny_artifact_derived_sealed_study_runs_end_to_end(
     external_root = (tmp_path / "external").resolve()
     payload = sealing_module.derive_study_payload(
         protocol=protocol,
+        training_protocol=training_protocol,
         repository_root=ROOT,
         environment_path=environment_path,
         hbn_subject_manifest_path=hbn_manifest_path,
