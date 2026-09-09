@@ -178,6 +178,65 @@ def test_training_store_device_keeps_cpu_path_when_cuda_is_unavailable(
     assert moved_targets is targets
 
 
+def test_staged_training_batches_preserve_order_and_targets() -> None:
+    features = torch.arange(24, dtype=torch.float32).reshape(6, 2, 2)
+    targets = torch.arange(6, dtype=torch.float32) + 10
+    batches = (
+        torch.tensor([3, 1]),
+        torch.tensor([0, 2]),
+        torch.tensor([5, 4]),
+    )
+
+    staged = tuple(
+        training_module._iter_staged_training_batches(
+            batches,
+            features,
+            targets,
+            device="cpu",
+            chunk_windows=4,
+        )
+    )
+
+    expected_indices = torch.cat(batches)
+    expected_features = features.index_select(0, expected_indices)
+    expected_targets = targets.index_select(0, expected_indices)
+    assert torch.equal(torch.cat(tuple(batch for batch, _ in staged)), expected_features)
+    assert torch.equal(
+        torch.cat(tuple(batch_targets for _, batch_targets in staged)),
+        expected_targets,
+    )
+
+
+def test_staged_training_batches_reject_non_positive_chunk_size() -> None:
+    with pytest.raises(FrozenEncoderError, match="chunk"):
+        tuple(
+            training_module._iter_staged_training_batches(
+                (torch.tensor([0]),),
+                torch.zeros(1, 1, 1),
+                torch.zeros(1),
+                device="cpu",
+                chunk_windows=0,
+            )
+        )
+
+
+def test_finalize_epoch_training_loss_checks_state_and_returns_scalar() -> None:
+    parameters = [torch.nn.Parameter(torch.ones(2))]
+
+    assert training_module._finalize_epoch_training_loss(
+        torch.tensor(6.0),
+        epoch_windows=3,
+        head_parameters=parameters,
+    ) == 2.0
+
+    with pytest.raises(FrozenEncoderError, match="non-finite"):
+        training_module._finalize_epoch_training_loss(
+            torch.tensor(float("nan")),
+            epoch_windows=3,
+            head_parameters=parameters,
+        )
+
+
 @pytest.mark.parametrize(
     "tensors",
     [

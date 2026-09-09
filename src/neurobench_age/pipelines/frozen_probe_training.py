@@ -14,7 +14,7 @@ import sys
 import tempfile
 import time
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 import torch
 from torch import nn
@@ -50,6 +50,7 @@ _HEAD_LAYERS = {
     "mean_rich_stats_residual": -1,
     "multi_query_rich_stats": -1,
 }
+DEFAULT_GPU_STAGE_CHUNK_WINDOWS = 1024
 
 
 def required_layer_for_head(head_name: str) -> int:
@@ -837,6 +838,114 @@ def _prepare_training_store_device(
         return features, targets, "cpu"
 
 
+def _iter_staged_training_batches(
+    batch_indices: Sequence[torch.Tensor],
+    features: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    device: str,
+    chunk_windows: int = DEFAULT_GPU_STAGE_CHUNK_WINDOWS,
+) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+    """Yield the original batches while staging bounded CPU chunks to the device.
+
+    The caller still supplies the predeclared seeded batch sequence.  Consecutive
+    batches are gathered into one bounded chunk, transferred once, and then
+    sliced back into the original batches.  This reduces CPU-to-GPU transfer
+    overhead without changing batch membership, order, optimizer steps, or
+    scheduler steps.
+    """
+
+    if (
+        isinstance(chunk_windows, bool)
+        or not isinstance(chunk_windows, int)
+        or chunk_windows <= 0
+    ):
+        raise FrozenEncoderError("GPU staging chunk size must be a positive integer")
+    if (
+        not isinstance(features, torch.Tensor)
+        or not isinstance(targets, torch.Tensor)
+        or features.ndim != 3
+        or targets.ndim != 1
+        or features.shape[0] != targets.shape[0]
+        or features.device != targets.device
+    ):
+        raise FrozenEncoderError("GPU staging feature and target stores are invalid")
+
+    target_device = torch.device(device)
+    use_cuda_target = device.startswith("cuda") and torch.cuda.is_available()
+
+    def stage_chunk(
+        pending: Sequence[torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        joined_indices = torch.cat(tuple(index.to(features.device) for index in pending))
+        chunk_features = features.index_select(0, joined_indices)
+        chunk_targets = targets.index_select(0, joined_indices)
+        if use_cuda_target and chunk_features.device.type == "cpu":
+            pinned = False
+            try:
+                chunk_features = chunk_features.pin_memory()
+                chunk_targets = chunk_targets.pin_memory()
+                pinned = True
+            except RuntimeError:
+                # Some containers have a low memlock limit.  Correctness does
+                # not depend on pinning, so retain the pageable chunk.
+                pass
+            chunk_features = chunk_features.to(device, non_blocking=pinned)
+            chunk_targets = chunk_targets.to(device, non_blocking=pinned)
+        elif chunk_features.device != target_device:
+            chunk_features = chunk_features.to(device)
+            chunk_targets = chunk_targets.to(device)
+        return chunk_features, chunk_targets
+
+    pending: list[torch.Tensor] = []
+    pending_windows = 0
+    for indices in batch_indices:
+        if (
+            not isinstance(indices, torch.Tensor)
+            or indices.ndim != 1
+            or indices.numel() <= 0
+        ):
+            raise FrozenEncoderError("GPU staging batch indices are invalid")
+        batch_windows = int(indices.numel())
+        if pending and pending_windows + batch_windows > chunk_windows:
+            chunk_features, chunk_targets = stage_chunk(pending)
+            offset = 0
+            for pending_indices in pending:
+                count = int(pending_indices.numel())
+                yield chunk_features[offset : offset + count], chunk_targets[offset : offset + count]
+                offset += count
+            pending = []
+            pending_windows = 0
+        pending.append(indices)
+        pending_windows += batch_windows
+
+    if pending:
+        chunk_features, chunk_targets = stage_chunk(pending)
+        offset = 0
+        for pending_indices in pending:
+            count = int(pending_indices.numel())
+            yield chunk_features[offset : offset + count], chunk_targets[offset : offset + count]
+            offset += count
+
+
+def _finalize_epoch_training_loss(
+    epoch_loss_sum: torch.Tensor,
+    *,
+    epoch_windows: int,
+    head_parameters: Sequence[torch.Tensor],
+) -> float:
+    """Validate one completed epoch with one scalar device synchronization."""
+
+    if epoch_windows <= 0:
+        raise FrozenEncoderError("training epoch contained no windows")
+    finite_state = torch.isfinite(epoch_loss_sum).all()
+    for parameter in head_parameters:
+        finite_state = finite_state & torch.isfinite(parameter).all()
+    if not bool(finite_state.detach().cpu()):
+        raise FrozenEncoderError("training produced a non-finite loss or parameter")
+    return float((epoch_loss_sum / epoch_windows).detach().cpu())
+
+
 def _pearson_from_rows(rows: Sequence[Mapping[str, float | str]]) -> float:
     if len(rows) < 2:
         return float("nan")
@@ -1051,38 +1160,37 @@ def train_frozen_probe_run(
 
     for epoch_index in range(training.max_epochs):
         head.train()
-        epoch_loss_sum = 0.0
+        epoch_loss_sum = torch.zeros((), device=device, dtype=torch.float64)
         epoch_windows = 0
-        for flat_indices in batch_plan.permuted_batch_indices(
-            generator=order_generator
+        for batch, targets in _iter_staged_training_batches(
+            batch_plan.permuted_batch_indices(generator=order_generator),
+            train_features,
+            train_targets,
+            device=device,
         ):
-            device_indices = flat_indices.to(train_features.device)
-            batch = train_features.index_select(0, device_indices)
-            targets = train_targets.index_select(0, device_indices)
-            batch = batch.to(device)
-            targets = targets.to(device)
             optimizer.zero_grad(set_to_none=True)
             predictions = head(batch).reshape(-1)
             loss = loss_function(predictions, targets)
-            if not torch.isfinite(loss):
-                raise FrozenEncoderError("training produced a non-finite loss")
             loss.backward()
-            gradient_norm = torch.nn.utils.clip_grad_norm_(
+            torch.nn.utils.clip_grad_norm_(
                 head_parameters,
                 training.gradient_clip_norm,
             )
-            if not torch.isfinite(gradient_norm):
-                raise FrozenEncoderError("training produced a non-finite gradient norm")
             optimizer.step()
             optimizer_steps += 1
             scheduler.step()
             scheduler_steps += 1
-            epoch_loss_sum += float(loss.detach().cpu()) * batch.shape[0]
+            epoch_loss_sum.add_(loss.detach().to(torch.float64) * batch.shape[0])
             epoch_windows += batch.shape[0]
 
         expected_steps = (epoch_index + 1) * batch_plan.steps_per_epoch
         if optimizer_steps != expected_steps or scheduler_steps != expected_steps:
             raise FrozenEncoderError("optimizer and scheduler step counts drifted")
+        epoch_training_mse = _finalize_epoch_training_loss(
+            epoch_loss_sum,
+            epoch_windows=epoch_windows,
+            head_parameters=head_parameters,
+        )
 
         validation_rows = predict_cached_subjects(
             head,
@@ -1102,7 +1210,7 @@ def train_frozen_probe_run(
         history.append(
             {
                 "epoch": epoch_index + 1,
-                "training_window_mse": epoch_loss_sum / epoch_windows,
+                "training_window_mse": epoch_training_mse,
                 "validation_subject_mse": validation_mse,
                 "validation_subject_pearson": validation_pearson,
                 "learning_rate": float(optimizer.param_groups[0]["lr"]),

@@ -35,6 +35,7 @@ from neurobench_age.research.training_protocol import FrozenProbeTrainingProtoco
 from .frozen_probe import FrozenEncoderError
 from .frozen_probe_training import (
     CachedSubjectRecord,
+    DEFAULT_GPU_STAGE_CHUNK_WINDOWS,
     FrozenProbeRunResult,
     GlobalWindowBatchPlan,
     ValidatedRepresentationStore,
@@ -681,6 +682,13 @@ def run_capacity_data_regime(
                 "resource": {
                     "requested_device": device,
                     "training_store_device": flat_store[2],
+                    "training_batch_device": device,
+                    "training_transfer_strategy": (
+                        "chunked_cpu_to_cuda"
+                        if flat_store[2] == "cpu" and device.startswith("cuda")
+                        else "resident_store"
+                    ),
+                    "gpu_stage_chunk_windows": DEFAULT_GPU_STAGE_CHUNK_WINDOWS,
                     "inference_device": device,
                 },
             }
@@ -802,6 +810,13 @@ def run_capacity_pilot(
         "resource": {
             "requested_device": device,
             "training_store_device": flat_store[2],
+            "training_batch_device": device,
+            "training_transfer_strategy": (
+                "chunked_cpu_to_cuda"
+                if flat_store[2] == "cpu" and device.startswith("cuda")
+                else "resident_store"
+            ),
+            "gpu_stage_chunk_windows": DEFAULT_GPU_STAGE_CHUNK_WINDOWS,
             "inference_device": device,
         },
         "pilot": True,
