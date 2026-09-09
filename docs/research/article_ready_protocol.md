@@ -282,20 +282,22 @@ untested method.
 
 ## Result record
 
-Values remain placeholders until the sealed artifacts exist.
+The sealed artifacts produced the following audited record.
 
 | Quantity | Value |
 | --- | --- |
-| Eligible MIPDB subjects before pilot allocation | `TBD_AFTER_EXECUTION` |
-| Engineering pilot subjects | `TBD_AFTER_EXECUTION` |
-| Primary MIPDB subjects before QC | `TBD_AFTER_EXECUTION` |
-| Primary MIPDB subjects after QC | `TBD_AFTER_EXECUTION` |
-| Extrapolation subjects | `TBD_AFTER_EXECUTION` |
-| Underpowered flag | `TBD_AFTER_EXECUTION` |
-| Completed HBN head runs | `TBD_AFTER_EXECUTION` |
-| External prediction count | `TBD_AFTER_EXECUTION` |
-| Per-head paired effect and interval | `TBD_AFTER_EXECUTION` |
-| Adjusted p-values and decision | `TBD_AFTER_EXECUTION` |
+| Eligible MIPDB subjects before pilot allocation | 109 after 17 missing-recording exclusions |
+| Engineering pilot subjects | 10 |
+| Primary MIPDB subjects before signal QC | 79 |
+| Primary MIPDB subjects after QC | 75 |
+| Extrapolation subjects | 20 |
+| Underpowered flag | false (minimum 50) |
+| Completed HBN head runs | 40 |
+| External prediction count | 3,000 |
+| Earlier-layer linear paired effect | +0.0085, 95% CI [-0.0189, 0.0359] |
+| Rich-statistics residual paired effect | +0.0320, 95% CI [-0.0498, 0.1253] |
+| Multi-query paired effect | +0.0096, 95% CI [-0.1135, 0.1539] |
+| Confirmatory decision | no head established stable improvement; this does not establish equivalence |
 
 ## Limitations that must accompany interpretation
 

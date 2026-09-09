@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "article": "Stability of age probing in REVE and the limits of increasingly complex representation heads",
+  "schema_version": 2,
+  "research_focus": "Stability of age probing in REVE and the limits of increasingly complex representation heads",
   "primary_claim": "Matched gains must be stable across seeds and survive predeclared validation gates; isolated screening wins are not sufficient.",
   "canonical_manifest": "data/age_medium_1000_nested.csv",
   "baseline": "mean_linear",
@@ -18,6 +18,16 @@
     "finalist/final_gate.json",
     "finalist/final_comparison.json"
   ],
+  "prospective": {
+    "status": "complete",
+    "primary_subjects": 75,
+    "run_count": 40,
+    "prediction_count": 3000,
+    "analysis_sha256": "7747a16e11629164b524b2113ab2230d260012022fc46f68540c7f7578c2a3b6",
+    "prediction_inventory_sha256": "3ec0042d613fc2d36937d7349081beb0739c4fb3da349e1229e17f226e187830",
+    "artifact_manifest": "prospective/artifact_manifest.json",
+    "artifact_manifest_sha256": "472784323d244712bc1abe590c3081df05a1609231371f59d939ceefc4d2460a"
+  },
   "external_artifacts": {
     "raw_data": "HBN recordings and pretrained REVE weights",
     "checkpoints": "selected checkpoint hashes are retained in compact evidence; files remain external",

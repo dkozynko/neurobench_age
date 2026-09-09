@@ -1,0 +1,18 @@
+Frozen probing is often used to ask what information a foundation-model
+representation makes accessible, but increasing probe expressivity can confound
+representation quality with the probe's capacity to fit a development dataset.
+We study age decoding from frozen \REVE{} EEG representations under a sealed,
+predeclared external-evaluation protocol. Four heads---a final-layer
+mean-pooled linear baseline, an earlier-layer linear probe, a residual head over
+rich token statistics, and a two-query rich-statistics head---were trained with
+the same HBN development split and \ProbeSeeds{} optimization seeds. The frozen
+checkpoints were then evaluated once on \PrimarySubjects{} primary MIPDB
+subjects, yielding an exact inventory of \ExternalPredictions{} subject-level
+predictions. The baseline obtained mean Pearson correlation
+\BaselinePearson{}. Candidate mean paired improvements were
+\LayerLinearPearsonDelta{}, \RichResidualPearsonDelta{}, and
+\MultiQueryPearsonDelta{}, but every hierarchical-bootstrap interval included
+zero. Consequently, no tested complex head established a stable external gain
+under the conjunctive decision rule. This result does not establish equivalence;
+it shows that favorable average seed comparisons were insufficient evidence of
+robust generalization across both optimization seeds and external subjects.

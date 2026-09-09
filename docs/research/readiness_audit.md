@@ -1,109 +1,82 @@
 # Scientific experiment readiness audit
 
-Date: 2026-09-05
+Date: 2026-09-09
 
 ## Verdict
 
-The repository is code-ready for the real-data engineering pilot and HBN
-frozen-representation run. It is not yet evidence-complete: no real MIPDB
-primary subject has been evaluated, the 40 real head runs do not yet exist, and
-the external study has not been sealed or started.
+The sealed prospective frozen-representation study is evidence-complete. The
+exact four-head by ten-seed checkpoint inventory contains 40 runs, external
+evaluation contains 3,000 predictions for 75 primary MIPDB subjects, and the
+confirmatory analysis is complete. No tested complex head established a stable
+external gain under the predeclared joint rule; this does not establish
+equivalence.
 
-The prospective claim therefore remains undecided. Existing HBN R5 results are
-retrospective secondary evidence only.
+The operational workflow is closed. Any additional experiment must receive a
+new protocol and evidence identity rather than modifying the sealed result.
 
-## Implemented controls
+## Completed controls
 
-- One strict executable protocol fixes the encoder, layers, four heads, ten
-  seeds, preprocessing, checkpoint selection, inferential procedure, and
-  decision threshold.
-- The MIPDB inventory is model-free and content-addressed. HBN age support is derived from HBN
-  training subjects in the canonical manifest rather than supplied as a free
-  runtime override.
-- The ten-subject MIPDB pilot is deterministic, permanently disjoint from the
-  external cohorts, target-free in its output, and create-only.
-- A second target-free pass applies the frozen signal QC contract to every
-  non-pilot candidate and publishes the finalized cohort before sealing.
-- MIPDB `task-block01` parsing requires marker `90`, alternating `20`/`30`
-  condition boundaries, exact `E1`--`E128` EEG channels, no mapped bad channel,
-  no interpolation, and no cross-condition window.
-- HBN representation materialization excludes R5 before resolving signal
-  paths, rejects duplicate subjects, uses one global channel order, and caches
-  only layers `-2` and `-1` from a verified frozen encoder.
-- Head fitting receives cached train/validation representations only. Its CLI
-  exposes no head, seed, or test-split override and requires the exact 40-run
-  matrix.
-- The external runner validates the sealed lock and complete checkpoint
-  inventory, writes `evaluation_started.json`, and only then invokes lazy MIPDB
-  signal loading and REVE extraction. Existing predictions are immutable.
-- Confirmatory analysis requires the complete matched subject/seed inventory
-  and applies the predeclared hierarchical bootstrap, exact randomization test,
-  Holm correction, and joint stability rule.
-- Adequate primary cohort size is part of that joint rule; underpowered results
-  remain descriptive and cannot populate `established_heads`.
-- Production sealing derives every lock field from verified artifacts and
-  cross-checks raw acquisition hashes, pilot/final QC, HBN training evidence,
-  and all 40 run manifests/checkpoints.
-- Runtime outputs, datasets, checkpoints, package-build directories, and caches
-  are ignored or required outside the versioned canonical evidence tree.
+- The executable representation protocol fixed the encoder, layers, four heads,
+  preprocessing, cohorts, inferential procedure, and decision thresholds.
+- A separate final training protocol fixed seeds 33--42, global seeded window
+  shuffling, AdamW, OneCycleLR, gradient clipping, a 40-epoch maximum, patience
+  7, and earliest-best validation checkpoint selection.
+- MIPDB inventory, pilot allocation, acquisition files, target-free QC, and
+  cohort lists were content-addressed before primary inference.
+- The ten-subject pilot was permanently disjoint from primary and extrapolation
+  cohorts and produced no age-prediction metric.
+- HBN representation materialization excluded R5, verified raw-file identities,
+  cached only layers -2 and -1, and supplied immutable train/validation inputs
+  to head fitting.
+- Artifact-derived sealing verified the encoder state, environment, source tree,
+  HBN manifests, MIPDB acquisition/QC manifests, subject lists, all 40 run
+  manifests, and all selected checkpoint hashes.
+- External evaluation wrote its start marker before lazy primary-cohort
+  extraction, allowed exact resume only, and created an immutable inventory of
+  3,000 unique head--seed--subject records.
+- Confirmatory analysis started only after completion and applied the
+  predeclared hierarchical bootstrap, exact seed-randomization test, Holm
+  correction, and conjunctive stability decision.
+- A strict compact importer now recomputes the complete hash chain and decision
+  before retaining aggregate evidence. It excludes sample-level predictions,
+  participant IDs, external paths, model binaries, caches, logs, and secrets.
 
-## Verification evidence
+## Audited production identities
 
-The following checks were run from the current uncommitted source tree:
+| Artifact | Identity |
+| --- | --- |
+| Study lock | `3694bcb11480aefdb1f29248ff456a8e918adba56025dfc582fb5d6f5a9b4174` |
+| Checkpoint inventory | `dcd8a18b74c4b0373527b2c01330099bb2c76e819013e2396790004a9e3b24f5` |
+| Prediction inventory | `3ec0042d613fc2d36937d7349081beb0739c4fb3da349e1229e17f226e187830` |
+| Confirmatory analysis | `7747a16e11629164b524b2113ab2230d260012022fc46f68540c7f7578c2a3b6` |
+| Compact artifact manifest | `472784323d244712bc1abe590c3081df05a1609231371f59d939ceefc4d2460a` |
 
-- Complete default-environment suite: 565 tests passed before the final audit
-  fixes.
-- Current default environment: 578 tests passed, including a complete synthetic
-  artifact-derived sealed workflow with 40 miniature runs and 2,000 immutable
-  predictions.
-- Clean package build: source distribution and wheel built successfully.
-- Lock consistency: `uv lock --check` resolved 115 packages without drift.
-- Python byte-compilation: all files under `src`, `scripts`, and `tests`
-  compiled successfully.
-- Shell syntax: both shell launchers passed `bash -n`.
-- Diff hygiene: `git diff --check HEAD` reported no whitespace errors.
-- Secret scan: no Hugging Face token, cloud access-key pattern, or private-key
-  header was found in the worktree (excluding the dependency lock).
-- Size audit: the largest tracked blob is approximately 171 KB; the Git pack is
-  under 1 MB. The approximately 572 KB `uv.lock` is expected dependency
-  metadata, not experiment data or a model artifact.
+## Result boundary
 
-PyTorch needs shared-memory access on this macOS host. A sandboxed direct import
-failed with an OpenMP shared-memory error; the same isolated environment passed
-the full suite outside that sandbox. This is a host sandbox constraint, not a
-repository failure, but GPU execution should still begin with the pilot smoke
-test on the actual compute host.
+The baseline mean Pearson was 0.644. All three candidates had positive mean
+paired deltas and passed the Holm-adjusted one-sided threshold, but every 95%
+hierarchical-bootstrap interval crossed zero. The result supports a bounded
+statement about failure to establish stable external improvement. It does not
+show that the probes are equivalent, that the true effects are zero, or that
+other heads cannot help.
 
-## Required execution sequence
+MIPDB is an external frozen-probe evaluation, not an official NeuralBench score.
+Official NeuralBench full fine-tuning remains secondary reproduction evidence,
+and previously inspected HBN R5 results remain retrospective.
 
-1. Mount HBN and the pinned MIPDB/NEMAR snapshot outside Git.
-2. Build the content-addressed MIPDB draft inventory from the canonical HBN manifest.
-3. Run only the ten-subject MIPDB pilot and manually inspect channel, event,
-   duration, window, and representation-shape QC.
-4. If the pilot fails, diagnose the adapter without viewing or retaining an age
-   prediction metric. A protocol change requires a new protocol identity.
-5. Run target-free QC over all remaining candidates and publish the finalized
-   MIPDB cohort and power status.
-6. Materialize HBN train/validation representations; confirm R5 was untouched.
-7. Train the four heads for seeds 33--42 and audit the exact 40 checkpoints.
-8. From a clean worktree, run artifact-derived sealing over the environment,
-   acquisition manifests, QC reports, subject lists, encoder state, and runs.
-9. Seal the study. Do not modify code, dependencies, cohorts, thresholds, or
-   checkpoints afterward.
-10. Launch the external runner once. Resume only after an infrastructure failure
-   and only against the same lock and immutable artifacts.
-11. Run aggregate confirmatory analysis only after the complete prediction
-    inventory and completion marker exist.
+## Remaining scientific limitations
 
-Exact commands and path variables are maintained in
-`docs/research/article_ready_protocol.md`.
-
-## Remaining evidence, not code, blockers
-
-- The exact MIPDB release snapshot and real channel/event compatibility have
-  not been verified by the production pilot.
-- Real REVE encoder state hash and HBN cache identities have not been recorded.
-- The exact 40 real head checkpoints have not been produced.
-- Effective MIPDB primary cohort size and the underpowered flag are unknown.
-- Primary MIPDB inference has not started; no prospective external metric or
-  superiority conclusion exists.
+- Cross-dataset shift mixes representation accessibility with differences in
+  acquisition hardware, montage, recruitment, demographics, duration, and
+  signal quality.
+- Ten seeds characterize only the selected optimization procedure and produce a
+  discrete exact randomization distribution.
+- Primary inference is restricted to ages inside HBN training support; the 20
+  extrapolation subjects are outside the confirmatory estimand.
+- The published REVE source list does not name MIPDB, but this is evidence rather
+  than a cryptographic guarantee of encoder-level independence.
+- Correlation is not calibration: negative external R-squared and slopes above
+  one caution against clinical brain-age interpretation.
+- The retained HBN snapshot identities were revalidated during production, but
+  raw acquisitions and full training manifests remain external and must be
+  preserved with their content hashes.

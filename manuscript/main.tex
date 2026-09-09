@@ -1,0 +1,53 @@
+\ifdefined\pdfinfoomitdate\pdfinfoomitdate=1\fi
+\ifdefined\pdftrailerid\pdftrailerid{}\fi
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{natbib}
+\usepackage[hidelinks]{hyperref}
+
+\hypersetup{
+  pdftitle={When More Expressive Probes Do Not Generalize},
+  pdfauthor={Anonymous},
+  pdfsubject={Frozen EEG representation probing},
+  pdfkeywords={EEG, foundation models, representation probing, age decoding}
+}
+
+\input{macros}
+\input{generated/results_macros}
+
+\title{When More Expressive Probes Do Not Generalize:\\
+Stable Age Decoding from Frozen EEG Representations}
+\author{Anonymous}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\input{sections/abstract}
+\end{abstract}
+
+\input{sections/introduction}
+\input{sections/related_work}
+\input{sections/datasets}
+\input{sections/methods}
+\input{sections/results}
+\input{sections/discussion}
+\input{sections/limitations}
+\input{sections/conclusion}
+\input{sections/reproducibility}
+
+\appendix
+\input{sections/supplementary}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+\end{document}

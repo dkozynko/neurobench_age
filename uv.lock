@@ -1535,6 +1535,9 @@ external = [
     { name = "mne-bids" },
     { name = "openneuro-py" },
 ]
+manuscript = [
+    { name = "matplotlib" },
+]
 pipeline = [
     { name = "lightning" },
     { name = "scipy" },
@@ -1556,6 +1559,7 @@ test = [
 requires-dist = [
     { name = "lightning", marker = "extra == 'pipeline'", specifier = ">=2.0" },
     { name = "lightning", marker = "extra == 'test'", specifier = ">=2.0" },
+    { name = "matplotlib", marker = "extra == 'manuscript'", specifier = ">=3.11,<4" },
     { name = "mne", marker = "extra == 'external'", specifier = ">=1.8" },
     { name = "mne-bids", marker = "extra == 'external'", specifier = ">=0.16" },
     { name = "neuralbench", marker = "extra == 'reve'", specifier = "==0.2.3" },
@@ -1569,7 +1573,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'pipeline'", specifier = ">=2.0" },
     { name = "torch", marker = "extra == 'test'", specifier = ">=2.0" },
 ]
-provides-extras = ["test", "pipeline", "reve", "external"]
+provides-extras = ["test", "pipeline", "reve", "external", "manuscript"]
 
 [[package]]
 name = "nibabel"

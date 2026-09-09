@@ -1,0 +1,24 @@
+\section{Reproducibility and Artifact Integrity}
+
+The experiment used an immutable study lock, a complete content-addressed
+checkpoint inventory, create-only external predictions, and analysis permitted
+only after an exact completion marker. The retained compact bundle contains no
+raw EEG, model weights, checkpoints, representation caches, participant-level
+predictions, or private storage paths. Instead it records counts, aggregate and
+per-seed statistics, bounded resource summaries, and the hashes needed to bind
+those summaries to the external artifacts.
+
+All reported primary values, table rows, and figures are generated from the
+compact confirmatory artifact. Hand-authored section files reference LaTeX
+commands rather than duplicating result literals. The source analysis identity
+is \texttt{\SourceAnalysisHash}; the full external prediction inventory
+identity is \texttt{\PredictionInventoryHash}. A renderer validates the compact
+manifest, writes into a temporary directory, hashes every payload, and publishes
+only a complete bundle. Fixed ordering, plotting configuration, fonts, and PDF
+metadata make two clean asset builds byte-identical.
+
+The codebase also keeps evidence classes explicit. Prospective MIPDB evidence
+supports the confirmatory conclusion; official NeuralBench-style end-to-end
+experiments support reproduction context; historical HBN test results remain
+retrospective. This prevents an already inspected split from silently becoming
+new confirmatory evidence.

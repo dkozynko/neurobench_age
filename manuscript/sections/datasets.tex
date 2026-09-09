@@ -1,0 +1,37 @@
+\section{Datasets and Evidence Boundaries}
+
+\paragraph{HBN development data.}
+The Healthy Brain Network is a large transdiagnostic pediatric resource with
+multimodal measurements, including EEG \citep{alexander2017hbn}. Only the
+predeclared HBN train and validation subjects were used to fit heads and select
+checkpoints. The repeatedly inspected HBN R5 split was excluded from candidate
+selection and is retained solely as retrospective context. Compact source
+artifacts available for this report preserve hashes of the HBN subject and
+training manifests but intentionally do not reproduce participant-level rows.
+
+\paragraph{MIPDB external data.}
+The Mobile Imaging and Modeling Population-Based Dataset includes high-density
+task-based and task-free EEG across development \citep{langer2017mipdb}. The
+study pinned the NEMAR dataset identity \texttt{nm000153} and content-addressed
+the selected acquisition snapshot. A deterministic \PilotSubjects{}-subject
+pilot was used only for engineering and target-free signal checks. After
+predeclared signal QC, \PrimarySubjects{} subjects within HBN training-age
+support formed the primary cohort; \ExtrapolationSubjects{} out-of-support
+subjects were reserved for descriptive boundary analyses and were not part of
+the confirmatory result.
+
+\begin{table}[t]
+  \centering
+  \caption{Externally retained cohort counts. Participant-level identities are
+  excluded from the repository bundle.}
+  \label{tab:cohorts}
+  \input{generated/cohort_summary}
+\end{table}
+
+\paragraph{Prospective versus secondary evidence.}
+No MIPDB primary sample was passed through the study model before the evaluation
+start marker. The primary prediction inventory was create-only and analysis was
+permitted only after exact completion. In contrast, NeuralBench full fine-tuning
+results are secondary reproduction evidence because the encoder is trainable,
+and historical HBN R5 comparisons are retrospective because repeated access
+eliminates an untouched-holdout interpretation.

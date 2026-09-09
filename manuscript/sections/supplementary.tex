@@ -1,0 +1,45 @@
+\section{Supplementary Protocol Detail}
+
+\subsection{Fail-closed study lifecycle}
+
+The external workflow progressed through sealed, started, and completed states.
+Sealing bound the representation protocol, final training protocol, source tree,
+environment, REVE checkpoint, HBN manifests, MIPDB acquisition and QC manifests,
+subject lists, preprocessing, statistical specification, and all selected head
+checkpoints. A started study could not be resealed. Infrastructure failures
+could append diagnostic records and resume only against the same identities;
+they could not replace an existing valid prediction.
+
+The external evaluator had no optimizer, scheduler, checkpoint selection, or
+aggregate metric capability. It first validated the lock and exact checkpoint
+matrix, wrote the start marker, and then lazily extracted representations for
+missing primary subjects. Completion required one immutable prediction for each
+head--seed--subject triple. Confirmatory analysis refused incomplete or extra
+entries.
+
+\subsection{Interpretation of the joint criterion}
+
+The five decision conditions answer complementary questions. Cohort adequacy
+prevents a small post-QC sample from supporting superiority. Holm adjustment
+controls the family-wise error rate across the three candidate comparisons.
+The bootstrap lower bound requires the paired mean effect to remain positive
+when both seeds and subjects vary. The win count guards against an average
+driven by a minority of seeds, and the worst-seed threshold limits severe
+optimization instability. The rule is intentionally stricter than selecting a
+head by mean validation or external performance.
+
+In this study, all candidates failed the bootstrap-lower-bound condition. The
+multi-query candidate additionally exhibited losses on two seeds, although its
+worst observed delta remained above the predeclared floor. Because the rule is
+conjunctive, passing the adjusted test, win-count, and worst-seed checks cannot
+compensate for an interval that includes zero.
+
+\subsection{Evidence taxonomy}
+
+The primary analysis compares frozen heads on MIPDB. The separate
+NeuralBench-compatible training schedule aligns optimization mechanics, not the
+overall benchmark task: official end-to-end NeuralBench training updates the
+encoder, whereas the present encoder never receives a gradient. Historical HBN
+screens motivated the choice of candidate families but are not used to estimate
+the prospective effect. This distinction is necessary to avoid both benchmark
+mislabeling and post-selection inference on repeatedly viewed outcomes.

@@ -34,6 +34,9 @@ external = [
   "mne-bids>=0.16",
   "openneuro-py>=2026.7.1,<2027",
 ]
+manuscript = [
+  "matplotlib>=3.11,<4",
+]
 
 [project.scripts]
 neurobench-baseline = "neurobench_age.core.baseline:main"

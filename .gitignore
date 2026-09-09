@@ -27,3 +27,15 @@
 
 # Superpowers planning notes are local working documents, not content
 /docs/superpowers/
+
+# Local LaTeX build products (generated source tables and figure PDFs are tracked)
+/manuscript/*.aux
+/manuscript/*.bbl
+/manuscript/*.blg
+/manuscript/*.fdb_latexmk
+/manuscript/*.fls
+/manuscript/*.log
+/manuscript/*.out
+/manuscript/*.synctex.gz
+/manuscript/*.toc
+/manuscript/main.pdf

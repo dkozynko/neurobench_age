@@ -1,0 +1,26 @@
+\section{Limitations}
+
+The external cohort is modest relative to the number of sources of EEG
+heterogeneity. HBN and MIPDB differ in recruitment, acquisition hardware,
+recording procedures, demographic composition, and potentially data quality.
+External performance therefore combines representation accessibility with
+domain shift; it cannot isolate a single causal source of error.
+
+The inference covers ten optimization seeds and four prespecified heads. It
+does not cover all initializations, regularization strengths, checkpoint rules,
+architectures, REVE layers, or pooling functions. The bootstrap quantifies
+uncertainty under the implemented seed-and-subject resampling scheme, while the
+randomization test treats seed as the sign-flip unit. With only ten seeds, the
+randomization distribution is necessarily discrete.
+
+The MIPDB primary analysis is restricted to ages within HBN training support.
+The extrapolation cohort was not included in the confirmatory comparison, so no
+claim is made about out-of-support ages. The published REVE source list does not
+name MIPDB among pretraining datasets, but absence from that list is evidence,
+not a cryptographic guarantee of encoder-level independence.
+
+Chronological-age decoding should not be confused with validation of a clinical
+brain-age biomarker. Negative $R^2$ and non-ideal calibration in this external
+cohort show that correlation can coexist with substantial absolute error and
+systematic scaling. Finally, the present result does not establish equivalence,
+a true zero effect, or the absence of benefit from an untested method.

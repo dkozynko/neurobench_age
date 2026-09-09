@@ -31,7 +31,7 @@ configs/research/              prospective external-study configuration
 scripts/                       command-line entry points
 tests/                         contract and regression tests
 docs/research/                 study design and evidence registry
-results/canonical/             compact retrospective HBN evidence only
+results/canonical/             compact canonical evidence and artifact identities
 ```
 
 Raw EEG, pretrained weights, representation caches, checkpoints, prediction
@@ -82,14 +82,18 @@ maintained in
 
 ## Current evidence status
 
-- Prospective external cohort count: `TBD_AFTER_EXECUTION`
-- Completed frozen-head runs: `TBD_AFTER_EXECUTION`
-- External prediction inventory: `TBD_AFTER_EXECUTION`
-- Confirmatory result: `TBD_AFTER_EXECUTION`
+- Prospective external cohort: 75 primary subjects after target-free QC, plus a
+  separate 10-subject engineering pilot and 20-subject extrapolation cohort.
+- Completed frozen-head runs: 40 (four heads across seeds 33--42).
+- External prediction inventory: 3,000 exact head--seed--subject records;
+  inventory identity `3ec0042d613fc2d36937d7349081beb0739c4fb3da349e1229e17f226e187830`.
+- Confirmatory analysis identity:
+  `7747a16e11629164b524b2113ab2230d260012022fc46f68540c7f7578c2a3b6`.
+- Confirmatory conclusion: no tested complex head established a stable external
+  gain under the predeclared joint rule; this does not establish equivalence.
 
-These placeholders must be replaced only from audited artifacts produced by the
-sealed workflow. The repository does not currently claim a positive or negative
-external result.
+Only compact canonical evidence is retained here. Participant-level predictions,
+checkpoints, caches, raw recordings, and logs remain outside Git.
 
 The latest code-versus-evidence readiness boundary is recorded in
 [`docs/research/readiness_audit.md`](docs/research/readiness_audit.md).

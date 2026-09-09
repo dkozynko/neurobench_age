@@ -1,0 +1,34 @@
+{
+  "files": {
+    "bootstrap_intervals.pdf": {
+      "bytes": 26975,
+      "sha256": "aea8c239821387dec164d7da3d3c84a6ab11f07d0c2b9ebcfd1b59978b306653"
+    },
+    "calibration_summary.pdf": {
+      "bytes": 30976,
+      "sha256": "3bf3d4489ed0dc616475f3d639f3809901933b82e9451ce4e958e838c48edec4"
+    },
+    "cohort_summary.tex": {
+      "bytes": 274,
+      "sha256": "009b07d35dab59fe97177784f67563e20d167eb94c5faefdb3acec0a1355bfaa"
+    },
+    "confirmatory_comparisons.tex": {
+      "bytes": 441,
+      "sha256": "66f54f9d52e07945a3bde6209bc641d7685f7db55c154d3b3584a377684ae26f"
+    },
+    "main_metrics.tex": {
+      "bytes": 419,
+      "sha256": "522ac25f5d9b875ef809a4ee2ea99e67cc211e6d5b9470c47bfeba9d08d650c9"
+    },
+    "results_macros.tex": {
+      "bytes": 2406,
+      "sha256": "bddfc7aa33baa97879904c30184e1335dd11ab76a56f99c96b63fbd740cfe603"
+    },
+    "seed_deltas.pdf": {
+      "bytes": 34448,
+      "sha256": "099392a227bf8e4a6bc9d154e73034f346bb4f5e37ba99426369007d5494a7c3"
+    }
+  },
+  "schema_version": 1,
+  "source_analysis_sha256": "7747a16e11629164b524b2113ab2230d260012022fc46f68540c7f7578c2a3b6"
+}

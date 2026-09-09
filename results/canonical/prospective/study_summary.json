@@ -1,0 +1,333 @@
+{
+  "cohorts": {
+    "hbn_counts_retained": false,
+    "minimum_primary_subjects": 50,
+    "mipdb_extrapolation_subjects": 20,
+    "mipdb_pilot_subjects": 10,
+    "mipdb_primary_subjects": 75,
+    "primary_underpowered": false
+  },
+  "conclusion": "No tested complex head established a stable external gain under the predeclared protocol; this does not establish equivalence.",
+  "established_heads": [],
+  "identities": {
+    "analysis_sha256": "7747a16e11629164b524b2113ab2230d260012022fc46f68540c7f7578c2a3b6",
+    "checkpoint_inventory_sha256": "dcd8a18b74c4b0373527b2c01330099bb2c76e819013e2396790004a9e3b24f5",
+    "lock_sha256": "3694bcb11480aefdb1f29248ff456a8e918adba56025dfc582fb5d6f5a9b4174",
+    "mipdb_primary_subject_list_sha256": "be9fc4d4a88d5a183e50a3d61b1f79ded4e88879181c9f6bb42a31af8ea9188e",
+    "prediction_inventory_sha256": "3ec0042d613fc2d36937d7349081beb0739c4fb3da349e1229e17f226e187830",
+    "protocol_sha256": "66e0ae3139f2fb1da4ccef26fefd6c78678a47aa4ad2fcceb491eee11cb6cd21",
+    "statistics_sha256": "20fc2d9a909fa2dbe974327f55a0ef1bb75945249a31cc6013c8ba5ffaaa86f1",
+    "training_protocol_sha256": "c5e57ec872a934434f05e358cb7c5d6d98b9fcb3da4fb7af213c54f0e623b6f7"
+  },
+  "inventory": {
+    "heads": [
+      "mean_linear",
+      "mean_layer_linear",
+      "mean_rich_stats_residual",
+      "multi_query_rich_stats"
+    ],
+    "prediction_count": 3000,
+    "run_count": 40,
+    "seeds": [
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42
+    ]
+  },
+  "provenance_evidence": {
+    "hbn_subject_manifest": "a5542dcbd49c0d6e0e591594c777bb66fb6cf80b61ac63f6639928d48225a7ac",
+    "hbn_training_manifest": "d8e4a4a5316bca2b03ca1d7e2dd41f76f5826949596ac4667112f8c02be6fefe",
+    "mipdb_cohort_qc": "f2759ebbcd755d317cd51d6ac3613f5e7f0bfa85b14d632b9063dc2b598059ab",
+    "mipdb_manifest": "1b5a0fb8d3db0fbece458389f7b37095c39306fe0517abc4eb08de9d0696402b",
+    "mipdb_pilot_qc": "29de0d44f6863ded1a1565a2eae182cc53c3f256e564bc590006714dc60defa7"
+  },
+  "resource_summary": {
+    "mean_layer_linear": {
+      "head_parameter_count": 513,
+      "peak_accelerator_memory_bytes_max": 25329607168,
+      "peak_process_rss_bytes_max": 108144955392,
+      "per_seed": [
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 108138807296,
+          "runtime_seconds": 89.0605299079325,
+          "seed": 33
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 108139896832,
+          "runtime_seconds": 83.32937196292914,
+          "seed": 34
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 108141064192,
+          "runtime_seconds": 93.82419439009391,
+          "seed": 35
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 108141424640,
+          "runtime_seconds": 69.11868448508903,
+          "seed": 36
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 108141776896,
+          "runtime_seconds": 92.95927743194625,
+          "seed": 37
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 108142845952,
+          "runtime_seconds": 92.49869906902313,
+          "seed": 38
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 108143243264,
+          "runtime_seconds": 94.3441665309947,
+          "seed": 39
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 108144062464,
+          "runtime_seconds": 81.38630271004513,
+          "seed": 40
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 108144320512,
+          "runtime_seconds": 57.39473758894019,
+          "seed": 41
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 108144955392,
+          "runtime_seconds": 58.851676197955385,
+          "seed": 42
+        }
+      ],
+      "training_runtime_seconds_mean": 81.27676402749493,
+      "training_runtime_seconds_total": 812.7676402749494
+    },
+    "mean_linear": {
+      "head_parameter_count": 513,
+      "peak_accelerator_memory_bytes_max": 25329607168,
+      "peak_process_rss_bytes_max": 82968928256,
+      "per_seed": [
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 82963087360,
+          "runtime_seconds": 87.39650399703532,
+          "seed": 33
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 82963963904,
+          "runtime_seconds": 79.01229020394385,
+          "seed": 34
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 82964561920,
+          "runtime_seconds": 83.64155900198966,
+          "seed": 35
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 82965684224,
+          "runtime_seconds": 89.06692626303993,
+          "seed": 36
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 82965962752,
+          "runtime_seconds": 92.45375845115632,
+          "seed": 37
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 82966257664,
+          "runtime_seconds": 96.46792507101782,
+          "seed": 38
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 82967097344,
+          "runtime_seconds": 97.6817640340887,
+          "seed": 39
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 82967793664,
+          "runtime_seconds": 96.3025968130678,
+          "seed": 40
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 82968412160,
+          "runtime_seconds": 94.84027819987386,
+          "seed": 41
+        },
+        {
+          "peak_accelerator_memory_bytes": 25329607168,
+          "peak_process_rss_bytes": 82968928256,
+          "runtime_seconds": 85.31086285598576,
+          "seed": 42
+        }
+      ],
+      "training_runtime_seconds_mean": 90.21744648911991,
+      "training_runtime_seconds_total": 902.174464891199
+    },
+    "mean_rich_stats_residual": {
+      "head_parameter_count": 2561,
+      "peak_accelerator_memory_bytes_max": 25361589760,
+      "peak_process_rss_bytes_max": 108196290560,
+      "per_seed": [
+        {
+          "peak_accelerator_memory_bytes": 25361589760,
+          "peak_process_rss_bytes": 108194402304,
+          "runtime_seconds": 102.9255885349121,
+          "seed": 33
+        },
+        {
+          "peak_accelerator_memory_bytes": 25361589760,
+          "peak_process_rss_bytes": 108194713600,
+          "runtime_seconds": 103.15511424187571,
+          "seed": 34
+        },
+        {
+          "peak_accelerator_memory_bytes": 25361589760,
+          "peak_process_rss_bytes": 108195221504,
+          "runtime_seconds": 94.6215003929101,
+          "seed": 35
+        },
+        {
+          "peak_accelerator_memory_bytes": 25361589760,
+          "peak_process_rss_bytes": 108195663872,
+          "runtime_seconds": 107.51753789908253,
+          "seed": 36
+        },
+        {
+          "peak_accelerator_memory_bytes": 25361589760,
+          "peak_process_rss_bytes": 108195844096,
+          "runtime_seconds": 126.63088106713258,
+          "seed": 37
+        },
+        {
+          "peak_accelerator_memory_bytes": 25361589760,
+          "peak_process_rss_bytes": 108196085760,
+          "runtime_seconds": 107.22292014281265,
+          "seed": 38
+        },
+        {
+          "peak_accelerator_memory_bytes": 25361589760,
+          "peak_process_rss_bytes": 108196200448,
+          "runtime_seconds": 87.65758555894718,
+          "seed": 39
+        },
+        {
+          "peak_accelerator_memory_bytes": 25361589760,
+          "peak_process_rss_bytes": 108196290560,
+          "runtime_seconds": 105.79987140605226,
+          "seed": 40
+        },
+        {
+          "peak_accelerator_memory_bytes": 25361589760,
+          "peak_process_rss_bytes": 108196290560,
+          "runtime_seconds": 96.70961839519441,
+          "seed": 41
+        },
+        {
+          "peak_accelerator_memory_bytes": 25361589760,
+          "peak_process_rss_bytes": 108196290560,
+          "runtime_seconds": 106.74597283313051,
+          "seed": 42
+        }
+      ],
+      "training_runtime_seconds_mean": 103.898659047205,
+      "training_runtime_seconds_total": 1038.98659047205
+    },
+    "multi_query_rich_stats": {
+      "head_parameter_count": 6657,
+      "peak_accelerator_memory_bytes_max": 25671141888,
+      "peak_process_rss_bytes_max": 108361515008,
+      "per_seed": [
+        {
+          "peak_accelerator_memory_bytes": 25671141888,
+          "peak_process_rss_bytes": 108361515008,
+          "runtime_seconds": 220.87201487692073,
+          "seed": 33
+        },
+        {
+          "peak_accelerator_memory_bytes": 25671141888,
+          "peak_process_rss_bytes": 108361515008,
+          "runtime_seconds": 234.6401489339769,
+          "seed": 34
+        },
+        {
+          "peak_accelerator_memory_bytes": 25671141888,
+          "peak_process_rss_bytes": 108361515008,
+          "runtime_seconds": 273.06351467990316,
+          "seed": 35
+        },
+        {
+          "peak_accelerator_memory_bytes": 25671141888,
+          "peak_process_rss_bytes": 108361515008,
+          "runtime_seconds": 277.506405120017,
+          "seed": 36
+        },
+        {
+          "peak_accelerator_memory_bytes": 25671141888,
+          "peak_process_rss_bytes": 108361515008,
+          "runtime_seconds": 272.73293435107917,
+          "seed": 37
+        },
+        {
+          "peak_accelerator_memory_bytes": 25671141888,
+          "peak_process_rss_bytes": 108361515008,
+          "runtime_seconds": 205.401490209857,
+          "seed": 38
+        },
+        {
+          "peak_accelerator_memory_bytes": 25671141888,
+          "peak_process_rss_bytes": 108361515008,
+          "runtime_seconds": 254.30578773003072,
+          "seed": 39
+        },
+        {
+          "peak_accelerator_memory_bytes": 25671141888,
+          "peak_process_rss_bytes": 108361515008,
+          "runtime_seconds": 273.96401689294726,
+          "seed": 40
+        },
+        {
+          "peak_accelerator_memory_bytes": 25671141888,
+          "peak_process_rss_bytes": 108361515008,
+          "runtime_seconds": 213.77492620702833,
+          "seed": 41
+        },
+        {
+          "peak_accelerator_memory_bytes": 25671141888,
+          "peak_process_rss_bytes": 108361515008,
+          "runtime_seconds": 242.00392771698534,
+          "seed": 42
+        }
+      ],
+      "training_runtime_seconds_mean": 246.82651667187457,
+      "training_runtime_seconds_total": 2468.2651667187456
+    }
+  },
+  "schema_version": 1,
+  "status": "complete",
+  "study_id": "reve_age_external_frozen_probe_v1",
+  "summary_sha256": "c546c884ae19f0fb0225b709a07d76215f9378f08bccf01924958179138164ef"
+}

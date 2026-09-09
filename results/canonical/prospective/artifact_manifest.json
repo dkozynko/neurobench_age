@@ -1,0 +1,13 @@
+{
+  "files": {
+    "confirmatory_analysis.json": {
+      "bytes": 61804,
+      "sha256": "6a51ee5b3a9022502b69b45ed8217a1fead56719cfff0eb11a82b877c25a5d16"
+    },
+    "study_summary.json": {
+      "bytes": 11361,
+      "sha256": "337c1502ff2838f96020cb06efaceca31fcceebf3e115791f51402944e7681f8"
+    }
+  },
+  "schema_version": 1
+}

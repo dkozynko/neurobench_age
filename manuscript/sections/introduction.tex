@@ -1,0 +1,31 @@
+\section{Introduction}
+
+EEG foundation models promise reusable representations across heterogeneous
+montages, recording systems, cohorts, and downstream tasks. REVE was designed
+for this setting through large-scale masked pretraining and position encodings
+that accommodate varying electrode layouts \citep{elouahidi2025reve}. At the
+same time, a good downstream score does not by itself identify what a frozen
+representation makes readily accessible: a sufficiently flexible head may learn
+dataset-specific structure that a linear readout cannot exploit.
+
+Age is a useful stress test. It is continuously valued, strongly reflected in
+EEG physiology, and studied as a marker of maturation and aging
+\citep{sun2019brainage,vandenbosch2019age}. Yet age decoding is also vulnerable
+to acquisition and cohort shift. A result that improves on an internal split
+may fail when hardware, recruitment, and recording details change.
+
+We therefore ask a deliberately narrow question: when the REVE encoder,
+development data, preprocessing, optimization seeds, and checkpoint rule are
+held fixed, do more expressive representation heads improve reliably over a
+mean-pooled linear probe? The study separates three evidence classes. The
+primary evidence is a prospective frozen-probe comparison developed on HBN and
+evaluated once on a sealed MIPDB cohort. Official NeuralBench-style end-to-end
+experiments provide reproduction context, while previously inspected HBN test
+results are retrospective only. MIPDB is not an official NeuralBench score.
+
+Our contribution is methodological as much as numerical. We combine a matched
+four-head design, exact repeated-seed inventories, subject- and seed-aware
+uncertainty, a one-sided randomization test with multiplicity correction, and a
+conjunctive stability criterion. The outcome illustrates why average gains and
+small adjusted $p$-values should not be interpreted as stable representation
+improvements when external uncertainty remains broad.
