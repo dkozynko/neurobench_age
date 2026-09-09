@@ -91,6 +91,54 @@ Every output location is create-only or exact-resume. A changed protocol,
 manifest, source tree, environment, checkpoint, subject inventory, or existing
 artifact is a hard error.
 
+## Controlled MIPDB aggregate supplement
+
+The aggregate supplement is metadata-only evidence for cohort transparency; it
+is not an official NeuralBench score and it does not change the sealed
+prediction estimand. Acquire `participants.tsv` and the pinned source manifest
+first, in restricted storage. Do not download the full EEG tree merely to
+produce cohort counts. The source identity must name a concrete NEMAR release
+(`vX.Y.Z` or `snapshot-*`), never `latest`, and must include the source-manifest
+digest and the digest of the finalized local MIPDB manifest.
+
+After the study state is `completed`, create a candidate outside the repository
+and outside the raw-data root:
+
+```bash
+python scripts/build_mipdb_aggregate.py candidate \
+  --participants "$MIPDB_METADATA/participants.tsv" \
+  --source-manifest-file "$MIPDB_METADATA/manifest.json" \
+  --draft-manifest "$MIPDB_DRAFT_MANIFEST" \
+  --final-manifest "$MIPDB_MANIFEST" \
+  --cohort-qc "$MIPDB_COHORT_QC" \
+  --source-identity "$MIPDB_METADATA/source_identity.json" \
+  --source-hashes "$STUDY_ROOT/source_hashes.json" \
+  --study-lock "$STUDY_LOCK" \
+  --candidate-output "$STUDY_ROOT/restricted/mipdb_aggregate_candidate.json"
+```
+
+The command verifies the completed study lock, exact file hashes, finalized
+cohort membership, target-free QC window counts, one task-block recording per
+selected subject, and the disclosure rule `k=5`. Candidate output contains only
+suppressed/unsuppressed aggregate cells and integer recording/window totals;
+participant IDs, exact ages, paths, predictions, and signal values are not
+written. A separate reviewer must approve the candidate's digest and release
+scope. Publication additionally requires an append-only release ledger and is
+controlled-access only in schema version 1:
+
+```bash
+python scripts/build_mipdb_aggregate.py publish \
+  --candidate "$STUDY_ROOT/restricted/mipdb_aggregate_candidate.json" \
+  --approval "$STUDY_ROOT/restricted/mipdb_aggregate_approval.json" \
+  --release-ledger "$STUDY_ROOT/restricted/mipdb_aggregate_release_ledger.json" \
+  --publish-output "$STUDY_ROOT/restricted/mipdb_aggregate_approved.json"
+```
+
+The approved aggregate is available only to the named audience authorized by
+the approval record. The Git repository retains code, schemas, tests, and
+manuscript wording, not restricted participant-level metadata or the aggregate
+itself.
+
 ## Execution sequence
 
 ### 1. Content-addressed MIPDB inventory

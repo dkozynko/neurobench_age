@@ -40,6 +40,13 @@ new protocol and evidence identity rather than modifying the sealed result.
 - A strict compact importer now recomputes the complete hash chain and decision
   before retaining aggregate evidence. It excludes sample-level predictions,
   participant IDs, external paths, model binaries, caches, logs, and secrets.
+- The metadata-first MIPDB aggregate workflow is implemented separately from
+  the primary estimand. It validates a concrete NEMAR release, the completed
+  study lock, finalized cohort-QC hashes, target-free window counts, optional
+  allowlisted sex categories, $k=5$ suppression, secondary suppression, and a
+  controlled-review approval plus append-only release ledger. No restricted
+  aggregate has been generated or placed in Git without the corresponding
+  access-controlled source artifacts.
 
 ## Audited production identities
 

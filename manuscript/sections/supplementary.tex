@@ -43,3 +43,30 @@ encoder, whereas the present encoder never receives a gradient. Historical HBN
 screens motivated the choice of candidate families but are not used to estimate
 the prospective effect. This distinction is necessary to avoid both benchmark
 mislabeling and post-selection inference on repeatedly viewed outcomes.
+
+\subsection{Evidence map and availability boundary}
+
+The following map states which evidence supports which claim. It is included to
+prevent a secondary benchmark result or a repeatedly inspected split from being
+read as part of the sealed external estimand.
+
+\paragraph{Primary prospective.} Frozen REVE heads on sealed MIPDB, comprising
+40 runs and 3,000 subject-level predictions. This supports the confirmatory
+statement about stable external gains under the declared protocol.
+
+\paragraph{Secondary reproduction.} NeuralBench-compatible end-to-end runs with
+a trainable encoder. These provide reproduction and implementation context, not
+a frozen-probe or MIPDB score.
+
+\paragraph{Retrospective secondary.} Previously inspected HBN R5 screens. These
+provide motivation and implementation history, not untouched confirmation.
+
+The compact release preserves protocol and artifact identities while excluding
+raw recordings, model weights, participant identifiers, and subject-level
+predictions. This boundary is deliberate: it permits source and analysis
+audits without turning a restricted neuroimaging dataset into a public data
+copy. A metadata-first, access-controlled aggregate supplement may add primary
+cohort demographics, recording counts, and window counts after dataset-terms
+and disclosure review. Its candidate is bound to the completed study lock,
+finalized cohort-QC artifact, pinned NEMAR source identity, and a suppression
+policy with minimum cell size $k=5$; it is not an official NeuralBench score.

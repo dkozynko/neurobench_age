@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neurobench-age.invalid/schemas/mipdb_aggregate_supplement.schema.json",
+  "title": "MIPDB aggregate supplement candidate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_class",
+    "dataset_identity",
+    "source_hashes",
+    "cohort_states",
+    "age_bins",
+    "demographics",
+    "recording_window_summary",
+    "suppression_policy",
+    "release_scope_sha256",
+    "candidate_digest_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "release_class": {"const": "controlled_review"},
+    "dataset_identity": {"$ref": "#/$defs/datasetIdentity"},
+    "source_hashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "study_lock_sha256",
+        "protocol_sha256",
+        "training_protocol_sha256",
+        "mipdb_manifest_sha256",
+        "cohort_qc_sha256",
+        "preprocessing_sha256"
+      ],
+      "properties": {
+        "study_lock_sha256": {"$ref": "#/$defs/sha256"},
+        "protocol_sha256": {"$ref": "#/$defs/sha256"},
+        "training_protocol_sha256": {"$ref": "#/$defs/sha256"},
+        "mipdb_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "cohort_qc_sha256": {"$ref": "#/$defs/sha256"},
+        "preprocessing_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "cohort_states": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "all_metadata_rows",
+        "eligible_before_pilot",
+        "pilot",
+        "primary_pre_qc",
+        "primary_post_qc",
+        "extrapolation"
+      ],
+      "properties": {
+        "all_metadata_rows": {"$ref": "#/$defs/countCell"},
+        "eligible_before_pilot": {"$ref": "#/$defs/countCell"},
+        "pilot": {"$ref": "#/$defs/countCell"},
+        "primary_pre_qc": {"$ref": "#/$defs/countCell"},
+        "primary_post_qc": {"$ref": "#/$defs/countCell"},
+        "extrapolation": {"$ref": "#/$defs/countCell"}
+      }
+    },
+    "age_bins": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/binCell"},
+      "minItems": 1,
+      "maxItems": 9
+    },
+    "demographics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sex": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/demographicCell"},
+          "minItems": 1,
+          "maxItems": 4
+        }
+      }
+    },
+    "recording_window_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recordings", "windows"],
+      "properties": {
+        "recordings": {"$ref": "#/$defs/summary"},
+        "windows": {"$ref": "#/$defs/summary"}
+      }
+    },
+    "suppression_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_cell_count", "cross_tabs_enabled", "numeric_unit"],
+      "properties": {
+        "minimum_cell_count": {"const": 5},
+        "cross_tabs_enabled": {"const": false},
+        "numeric_unit": {"const": "integer_count"}
+      }
+    },
+    "release_scope_sha256": {"$ref": "#/$defs/sha256"},
+    "candidate_digest_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "datasetIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "dataset_id",
+        "release_id",
+        "source_uri",
+        "source_manifest_sha256",
+        "mipdb_inventory_sha256"
+      ],
+      "properties": {
+        "provider": {"const": "NEMAR"},
+        "dataset_id": {"const": "nm000153"},
+        "release_id": {
+          "type": "string",
+          "minLength": 1,
+          "not": {"const": "latest"},
+          "pattern": "^(v[0-9]+\\.[0-9]+\\.[0-9]+|snapshot-[A-Za-z0-9._-]+)$"
+        },
+        "source_uri": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://data\\.nemar\\.org/nm000153/(v[0-9]+\\.[0-9]+\\.[0-9]+|snapshot-[A-Za-z0-9._-]+)/.+$"
+        },
+        "source_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "mipdb_inventory_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "countCell": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["count", "suppressed"],
+          "properties": {
+            "count": {"const": 0},
+            "suppressed": {"const": true}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["count", "suppressed"],
+          "properties": {
+            "count": {"type": "integer", "minimum": 5},
+            "suppressed": {"const": false}
+          }
+        }
+      ]
+    },
+    "binCell": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "count", "suppressed"],
+          "properties": {
+            "label": {
+              "enum": ["0-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70+", "unknown"]
+            },
+            "count": {"const": 0},
+            "suppressed": {"const": true}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "count", "suppressed"],
+          "properties": {
+            "label": {
+              "enum": ["0-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70+", "unknown"]
+            },
+            "count": {"type": "integer", "minimum": 5},
+            "suppressed": {"const": false}
+          }
+        }
+      ]
+    },
+    "demographicCell": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["category", "count", "suppressed"],
+          "properties": {
+            "category": {"enum": ["female", "male", "intersex", "unknown"]},
+            "count": {"const": 0},
+            "suppressed": {"const": true}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["category", "count", "suppressed"],
+          "properties": {
+            "category": {"enum": ["female", "male", "intersex", "unknown"]},
+            "count": {"type": "integer", "minimum": 5},
+            "suppressed": {"const": false}
+          }
+        }
+      ]
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject_count", "total_count"],
+      "properties": {
+        "subject_count": {"type": "integer", "minimum": 0},
+        "total_count": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

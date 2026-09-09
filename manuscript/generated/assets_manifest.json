@@ -1,8 +1,8 @@
 {
   "files": {
     "bootstrap_intervals.pdf": {
-      "bytes": 26975,
-      "sha256": "aea8c239821387dec164d7da3d3c84a6ab11f07d0c2b9ebcfd1b59978b306653"
+      "bytes": 26479,
+      "sha256": "8c82856733f68bc812eb6890c54827e73f995d98053b2832835b1962eada1d4b"
     },
     "calibration_summary.pdf": {
       "bytes": 30976,
@@ -13,20 +13,20 @@
       "sha256": "009b07d35dab59fe97177784f67563e20d167eb94c5faefdb3acec0a1355bfaa"
     },
     "confirmatory_comparisons.tex": {
-      "bytes": 383,
-      "sha256": "be9ebdeb35c3ba3d409329c9d5735f7ece707aced07af6195d13321fd606ff89"
+      "bytes": 403,
+      "sha256": "98f8a3cb873e24f8c10b4677b316afce426055b84f1db8121348bf68394dbea4"
     },
     "main_metrics.tex": {
-      "bytes": 423,
-      "sha256": "bef887c1e73c1d50b8899fe1a7652d9b19d8e8570229d8e5e9c822d35070268b"
+      "bytes": 429,
+      "sha256": "a6b81e7de76de587b6363ef0a48b4c5457e803919feeaec98b5065bb902802c5"
     },
     "results_macros.tex": {
       "bytes": 2588,
       "sha256": "07106ef4e21a0ffa5bb397be05894214407b8f45461aa5598573d4b0385ceb6b"
     },
     "seed_deltas.pdf": {
-      "bytes": 34448,
-      "sha256": "099392a227bf8e4a6bc9d154e73034f346bb4f5e37ba99426369007d5494a7c3"
+      "bytes": 33940,
+      "sha256": "a3b2097c8b319148e4262d1917d9e87401a6a661175168757a48ee7b3a4eb8af"
     }
   },
   "schema_version": 1,
