@@ -32,8 +32,11 @@ FUNCTION {venue}
 
 FUNCTION {format.entry}
 { author field.or.empty
-  title field.or.empty ". " * *
-  venue ". " * *
+  ". " *
+  title field.or.empty *
+  ". " *
+  venue *
+  ". " *
   year field.or.empty *
   volume empty$
     'skip$

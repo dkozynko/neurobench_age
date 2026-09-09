@@ -125,6 +125,7 @@ def test_git_candidate_index_excludes_prohibited_research_artifacts_and_secrets(
         path.read_text(encoding="utf-8", errors="ignore")
         for path in candidates
         if path not in sentinel_fixture_paths
+        and path.exists()
         and (path.suffix.casefold() in text_suffixes or path.name in {"Makefile", ".gitignore"})
     )
     assert not re.search(r"hf_[A-Za-z0-9]{20,}", combined)

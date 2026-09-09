@@ -74,7 +74,8 @@ and previously inspected HBN R5 results remain retrospective.
 - Primary inference is restricted to ages inside HBN training support; the 20
   extrapolation subjects are outside the confirmatory estimand.
 - The published REVE source list does not name MIPDB, but this is evidence rather
-  than a cryptographic guarantee of encoder-level independence.
+  than a cryptographic guarantee of encoder-level independence; residual encoder
+  pretraining uncertainty therefore remains.
 - Correlation is not calibration: negative external R-squared and slopes above
   one caution against clinical brain-age interpretation.
 - The retained HBN snapshot identities were revalidated during production, but

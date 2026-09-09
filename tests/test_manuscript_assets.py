@@ -11,6 +11,7 @@ from neurobench_age.analysis.confirmatory import (
     stable_improvement_decision,
 )
 from neurobench_age.research.study_lock import canonical_sha256
+from neurobench_age.analysis.manuscript_assets import latex_breakable_hash
 
 
 HEADS = (
@@ -22,6 +23,13 @@ HEADS = (
 SEEDS = tuple(range(33, 43))
 CANDIDATES = HEADS[1:]
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_latex_breakable_hash_preserves_identity_and_adds_safe_breaks() -> None:
+    value = "0123456789abcdef" * 4
+    rendered = latex_breakable_hash(value)
+    assert rendered.replace(r"\allowbreak{}", "") == value
+    assert rendered.count(r"\allowbreak{}") == 7
 
 
 def _write_json(path: Path, payload: dict) -> Path:

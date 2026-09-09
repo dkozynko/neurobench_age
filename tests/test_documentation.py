@@ -79,7 +79,9 @@ def test_docs_use_placeholders_and_bound_negative_claims() -> None:
     text = _research_docs()
     lower = _normalized(text)
 
-    assert "TBD_AFTER_EXECUTION" in text
+    assert "TBD_AFTER_EXECUTION" not in text
+    assert "75 primary subjects" in lower
+    assert "3,000" in text
     assert (
         "no tested complex head established a stable external gain under the "
         "predeclared protocol"

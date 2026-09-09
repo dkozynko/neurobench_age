@@ -10,11 +10,14 @@ CANONICAL = ROOT / "results" / "canonical"
 
 def test_canonical_results_have_an_explicit_index() -> None:
     index = json.loads((CANONICAL / "index.json").read_text(encoding="utf-8"))
-    assert index["schema_version"] == 1
-    assert index["article"]
+    assert index["schema_version"] == 2
+    assert index["research_focus"]
     assert index["primary_claim"]
     assert index["evidence"]
-    assert "head_comparison.json" in index["evidence"]
+    assert index["prospective"]["status"] == "complete"
+    assert index["prospective"]["primary_subjects"] == 75
+    assert index["prospective"]["run_count"] == 40
+    assert index["prospective"]["prediction_count"] == 3000
     assert "finalist/final_comparison.json" in index["evidence"]
 
 
