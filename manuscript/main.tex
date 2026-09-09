@@ -3,15 +3,39 @@
 \documentclass[11pt]{article}
 
 \usepackage[margin=1in]{geometry}
+\setlength{\emergencystretch}{3em}
 \usepackage[T1]{fontenc}
-\usepackage[utf8]{inputenc}
-\usepackage{lmodern}
 \usepackage{microtype}
-\usepackage{amsmath}
 \usepackage{booktabs}
 \usepackage{graphicx}
-\usepackage{natbib}
+\usepackage[numbers]{natbib}
 \usepackage[hidelinks]{hyperref}
+
+% Keep any package-internal mathematical scripts on font sizes present in the
+% offline bundle; the manuscript tables themselves use prose labels.
+\DeclareMathSizes{10.95}{10}{7}{5}
+\DeclareMathSizes{10}{10}{7}{5}
+\DeclareMathSizes{9}{9}{7}{5}
+
+% Use a locally installed system font when building on macOS without a full
+% TeX font bundle. A standard Latin Modern fallback keeps the source portable
+% on ordinary TeX installations.
+\IfFileExists{/System/Library/Fonts/Supplemental/Arial.ttf}{%
+  \DeclareFontFamily{T1}{sysarial}{}
+  \DeclareFontShape{T1}{sysarial}{m}{n}{<-> "[/System/Library/Fonts/Supplemental/Arial.ttf]"}{}
+  \DeclareFontShape{T1}{sysarial}{b}{n}{<-> "[/System/Library/Fonts/Supplemental/Arial.ttf]"}{}
+  \DeclareFontShape{T1}{sysarial}{bx}{n}{<-> "[/System/Library/Fonts/Supplemental/Arial.ttf]"}{}
+  \DeclareFontShape{T1}{sysarial}{m}{it}{<-> "[/System/Library/Fonts/Supplemental/Arial.ttf]"}{}
+  \DeclareFontShape{T1}{sysarial}{b}{it}{<-> "[/System/Library/Fonts/Supplemental/Arial.ttf]"}{}
+  \DeclareFontShape{T1}{sysarial}{bx}{it}{<-> "[/System/Library/Fonts/Supplemental/Arial.ttf]"}{}
+  \renewcommand{\rmdefault}{sysarial}
+  \renewcommand{\sfdefault}{sysarial}
+  \renewcommand{\ttdefault}{sysarial}
+  \renewcommand{\familydefault}{sysarial}
+  \AtBeginDocument{\fontencoding{T1}\fontfamily{sysarial}\selectfont}
+}{%
+  \usepackage{lmodern}
+}
 
 \hypersetup{
   pdftitle={When More Expressive Probes Do Not Generalize},
@@ -23,13 +47,16 @@
 \input{macros}
 \input{generated/results_macros}
 
-\title{When More Expressive Probes Do Not Generalize:\\
-Stable Age Decoding from Frozen EEG Representations}
-\author{Anonymous}
-\date{}
-
 \begin{document}
-\maketitle
+\fontencoding{T1}\fontfamily{sysarial}\selectfont
+\begin{center}
+{\bfseries\fontsize{14}{17}\selectfont
+When More Expressive Probes Do Not Generalize:\\
+Stable Age Decoding from Frozen EEG Representations\par}
+\vspace{0.5em}
+{\fontsize{11}{13}\selectfont Anonymous\par}
+\end{center}
+\mdseries\normalfont
 
 \begin{abstract}
 \input{sections/abstract}
@@ -48,6 +75,6 @@ Stable Age Decoding from Frozen EEG Representations}
 \appendix
 \input{sections/supplementary}
 
-\bibliographystyle{plainnat}
+\bibliographystyle{references}
 \bibliography{references}
 \end{document}

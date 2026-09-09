@@ -4,9 +4,9 @@
 
 The complete external inventory contained \ProbeRuns{} selected checkpoints and
 \ExternalPredictions{} subject-level predictions. The final-layer mean-linear
-baseline achieved mean Pearson $r=\BaselinePearson{}$, MAE
-\BaselineMAE{} years, RMSE \BaselineRMSE{} years, and $R^2=
-\BaselineRSquared{}$. Its mean calibration slope was
+baseline achieved mean Pearson correlation \BaselinePearson{}, MAE
+\BaselineMAE{} years, RMSE \BaselineRMSE{} years, and R-squared
+\BaselineRSquared{}. Its mean calibration slope was
 \BaselineCalibrationSlope{}, indicating that correlation alone did not imply
 well-calibrated age estimates.
 
@@ -30,7 +30,7 @@ Relative to the matched baseline, mean Pearson increased by
 \LayerLinearPearsonDelta{} for the penultimate-layer linear probe,
 \RichResidualPearsonDelta{} for the rich-statistics residual head, and
 \MultiQueryPearsonDelta{} for the multi-query head. All three Holm-adjusted
-one-sided $p$-values were below the predeclared threshold. Nevertheless, their
+one-sided p-values were below the predeclared threshold. Nevertheless, their
 95\% hierarchical-bootstrap intervals extended below zero: the respective
 lower bounds were \LayerLinearCILow{}, \RichResidualCILow{}, and
 \MultiQueryCILow{}. Thus none satisfied every required condition.

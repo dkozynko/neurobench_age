@@ -39,6 +39,11 @@ HEAD_LABELS = {
     "mean_rich_stats_residual": "Rich-statistics residual",
     "multi_query_rich_stats": "Multi-query rich-statistics",
 }
+COMPARISON_LABELS = {
+    "mean_layer_linear": "Layer-mixed",
+    "mean_rich_stats_residual": "Rich residual",
+    "multi_query_rich_stats": "Multi-query",
+}
 HEAD_MACRO_PREFIXES = {
     "mean_linear": "Baseline",
     "mean_layer_linear": "LayerLinear",
@@ -532,6 +537,15 @@ def latex_escape(value: str) -> str:
     return "".join(replacements.get(character, character) for character in value)
 
 
+def latex_breakable_hash(value: str) -> str:
+    """Format a hexadecimal identity with safe line-break opportunities."""
+
+    escaped = latex_escape(value)
+    return r"\allowbreak{}".join(
+        escaped[index : index + 8] for index in range(0, len(escaped), 8)
+    )
+
+
 def _finite_float(value: object, *, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be numeric")
@@ -591,8 +605,8 @@ def render_text_assets(analysis: Mapping[str, Any]) -> dict[str, str]:
             _macro("ProbeSeeds", str(len(EXPECTED_SEEDS))),
             _macro("ProbeRuns", str(len(EXPECTED_HEADS) * len(EXPECTED_SEEDS))),
             _macro("ExternalPredictions", str(len(EXPECTED_HEADS) * len(EXPECTED_SEEDS) * int(cohort["primary_subjects"]))),
-            _macro("SourceAnalysisHash", latex_escape(str(analysis["source_analysis_sha256"]))),
-            _macro("PredictionInventoryHash", latex_escape(str(analysis["prediction_inventory_sha256"]))),
+            _macro("SourceAnalysisHash", latex_breakable_hash(str(analysis["source_analysis_sha256"]))),
+            _macro("PredictionInventoryHash", latex_breakable_hash(str(analysis["prediction_inventory_sha256"]))),
         )
     )
     metric_macro_names = {
@@ -629,7 +643,7 @@ def render_text_assets(analysis: Mapping[str, Any]) -> dict[str, str]:
         "% Generated table; do not edit.",
         r"\begin{tabular}{lrrrrr}",
         r"\toprule",
-        r"Head & Pearson & MAE & RMSE & $R^2$ & Cal. slope \\",
+        r"Head & Pearson & MAE & RMSE & R-squared & Cal. slope \\",
         r"\midrule",
     ]
     for head in EXPECTED_HEADS:
@@ -650,7 +664,7 @@ def render_text_assets(analysis: Mapping[str, Any]) -> dict[str, str]:
         "% Generated table; do not edit.",
         r"\begin{tabular}{lrrrrrr}",
         r"\toprule",
-        r"Candidate & Mean $\Delta r$ & 95\% CI & Holm $p$ & W/T/L & Worst $\Delta r$ & Stable \\",
+        r"Candidate & Mean diff & 95\% CI & p & W/T/L & Worst & Stable \\",
         r"\midrule",
     ]
     for head in EXPECTED_HEADS[1:]:
@@ -659,7 +673,7 @@ def render_text_assets(analysis: Mapping[str, Any]) -> dict[str, str]:
         bootstrap = comparison["bootstrap"]
         comparison_rows.append(
             "{} & {} & {} & {} & {}/{}/{} & {} & {} \\\\".format(
-                latex_escape(HEAD_LABELS[head]),
+                latex_escape(COMPARISON_LABELS[head]),
                 format_decimal(paired["mean_pearson_delta"]),
                 format_interval(bootstrap["ci_low"], bootstrap["ci_high"]),
                 format_p_value(comparison["holm_adjusted_p_value"]),
