@@ -18,10 +18,10 @@ def test_supported_python_matches_neuralbench_requirement() -> None:
     assert project["requires-python"] == ">=3.12"
 
 
-def test_pytest_imports_src_layout_without_manual_pythonpath() -> None:
+def test_pytest_imports_project_and_src_layout_without_manual_pythonpath() -> None:
     pytest_options = _pyproject()["tool"]["pytest"]["ini_options"]
 
-    assert pytest_options["pythonpath"] == ["src"]
+    assert pytest_options["pythonpath"] == [".", "src"]
 
 
 def test_external_eeg_dependencies_are_declared_as_an_optional_group() -> None:
