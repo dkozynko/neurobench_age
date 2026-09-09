@@ -23,6 +23,9 @@ from neurobench_age.pipelines.frozen_probe import (
     load_reve_encoder,
     write_cached_representations,
 )
+from neurobench_age.pipelines.capacity_data_regime import (
+    build_capacity_data_regime_head,
+)
 from neurobench_age.pipelines.frozen_probe_training import (
     APPROVED_HEADS,
     CachedSubjectRecord,
@@ -739,6 +742,35 @@ def test_training_run_uses_one_cycle_global_batches_and_gradient_clipping(
     assert manifest["optimizer"]["scheduler"]["name"] == "OneCycleLR"
     assert manifest["optimizer"]["scheduler"]["total_steps"] == 5
     assert manifest["validation_history"][0]["learning_rate"] > 0
+
+
+def test_training_run_accepts_extension_head_builder_and_layer_resolver(
+    tmp_path: Path,
+) -> None:
+    cache_root = tmp_path / "cache"
+    records = _tiny_training_records(cache_root)
+    training = replace(_tiny_training_contract(), max_epochs=1, patience=1)
+
+    result = train_frozen_probe_run(
+        head_name="mean_mlp_residual_matched(hidden_dim=4)",
+        seed=33,
+        records=records,
+        cache_root=cache_root,
+        run_dir=tmp_path / "run",
+        training=training,
+        device="cpu",
+        training_source_sha256=TRAINING_SOURCE_SHA256,
+        head_builder=build_capacity_data_regime_head,
+        required_layer_resolver=lambda _: -1,
+        run_metadata={"extension_id": "reve_age_capacity_data_regime_v1", "training_size": 200},
+    )
+
+    assert result.manifest["head_name"] == "mean_mlp_residual_matched(hidden_dim=4)"
+    assert result.manifest["head_parameters"]["trainable"] == 19
+    assert result.manifest["run_context"] == {
+        "extension_id": "reve_age_capacity_data_regime_v1",
+        "training_size": 200,
+    }
 
 
 def test_training_run_is_validation_only_auditable_and_exactly_resumable(

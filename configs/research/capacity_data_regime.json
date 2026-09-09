@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "status": "final",
+  "extension_id": "reve_age_capacity_data_regime_v1",
+  "training_sizes": [200, 400, 800],
+  "future_endpoints": ["all_available"],
+  "seeds": [33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
+  "eligible_training_releases": ["R1", "R2", "R3", "R4", "R6", "R7", "R9", "R10"],
+  "validation_release": "R8",
+  "test_release": "R5",
+  "priority_salt": "capacity-data-regime-v1",
+  "heads": [
+    {"name": "mean_linear", "layer_index": -1, "aggregation": "mean", "hidden_dim": null},
+    {"name": "mean_rich_stats_residual", "layer_index": -1, "aggregation": "rich_statistics_residual", "hidden_dim": null},
+    {"name": "mean_mlp_residual_matched(hidden_dim=4)", "layer_index": -1, "aggregation": "mean_mlp_residual", "hidden_dim": 4}
+  ],
+  "training_protocol": {
+    "path": "configs/research/neuralbench_frozen_probe_training.json",
+    "sha256": "721f745080e262d7813d2a67056643afae89dbf1b259524e6d5d3951bba3b4d6"
+  },
+  "representation_protocol": {
+    "path": "configs/research/external_frozen_probe.json",
+    "sha256": "654923b15f9d4f4ccec0eb02637898b289bd8879326c71a96e5f6d88e698c60f"
+  },
+  "external": {
+    "primary_subject_count": 75,
+    "expected_run_count": 90,
+    "expected_prediction_count": 6750,
+    "allow_extrapolation": false
+  },
+  "preflight": {
+    "free_space_floor_bytes": 12884901888,
+    "free_space_cache_fraction": 0.25,
+    "free_space_output_multiplier": 2
+  },
+  "bootstrap": {
+    "iterations": 10000,
+    "seed": 20260909,
+    "confidence": 0.95,
+    "minimum_valid_replicates": 9950
+  }
+}

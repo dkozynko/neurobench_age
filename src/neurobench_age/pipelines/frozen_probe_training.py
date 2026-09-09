@@ -645,10 +645,11 @@ def predict_cached_subjects(
     batch_size: int,
     device: str,
     representation_store: ValidatedRepresentationStore | None = None,
+    required_layer_resolver: Callable[[str], int] = required_layer_for_head,
 ) -> tuple[dict[str, float | str], ...]:
     """Predict subject ages from one declared cached layer only."""
 
-    layer_index = required_layer_for_head(head_name)
+    layer_index = required_layer_resolver(head_name)
     if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
         raise FrozenEncoderError("batch_size must be a positive integer")
     if not records:
@@ -750,6 +751,7 @@ def _run_identity(
     records: Sequence[CachedSubjectRecord],
     training: FrozenProbeTrainingProtocol,
     training_source_sha256: str,
+    run_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(training_source_sha256, str) or not _is_sha256(
         training_source_sha256
@@ -778,7 +780,7 @@ def _run_identity(
             raise FrozenEncoderError(
                 "training records contain mixed cache provenance"
             )
-    return {
+    identity = {
         "schema_version": 3,
         "head_name": head_name,
         "seed": seed,
@@ -797,6 +799,9 @@ def _run_identity(
             for record in records
         ],
     }
+    if run_metadata is not None:
+        identity["run_metadata"] = dict(run_metadata)
+    return identity
 
 
 def _process_peak_rss_bytes() -> int:
@@ -906,11 +911,14 @@ def train_frozen_probe_run(
     training_source_sha256: str,
     representation_store: ValidatedRepresentationStore | None = None,
     flat_training_store: tuple[torch.Tensor, torch.Tensor, str] | None = None,
+    head_builder: Callable[..., nn.Module] = build_frozen_probe_head,
+    required_layer_resolver: Callable[[str], int] = required_layer_for_head,
+    run_metadata: Mapping[str, Any] | None = None,
     progress_sink: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> FrozenProbeRunResult:
     """Train one cache-only head and select the earliest best validation epoch."""
 
-    required_layer = required_layer_for_head(head_name)
+    required_layer = required_layer_resolver(head_name)
     records = validate_training_records(records)
     _strict_training_contract(training)
     if seed not in training.seeds:
@@ -921,6 +929,7 @@ def train_frozen_probe_run(
         records=records,
         training=training,
         training_source_sha256=training_source_sha256,
+        run_metadata=run_metadata,
     )
     identity_sha256 = _canonical_sha256(identity)
     run_dir = Path(run_dir)
@@ -989,7 +998,7 @@ def train_frozen_probe_run(
             raise FrozenEncoderError("shared flat training store is invalid")
 
     _configure_strict_determinism(seed)
-    head = build_frozen_probe_head(head_name, embed_dim=int(sample.shape[-1])).to(device)
+    head = head_builder(head_name, embed_dim=int(sample.shape[-1])).to(device)
     head_parameters = [parameter for parameter in head.parameters() if parameter.requires_grad]
     optimizer = torch.optim.AdamW(
         head_parameters,
@@ -1035,6 +1044,7 @@ def train_frozen_probe_run(
     best_score = -float("inf")
     best_epoch = 0
     best_state: dict[str, torch.Tensor] | None = None
+    best_validation_rows: tuple[dict[str, float | str], ...] | None = None
     epochs_without_improvement = 0
     optimizer_steps = 0
     scheduler_steps = 0
@@ -1082,6 +1092,7 @@ def train_frozen_probe_run(
             batch_size=training.batch_size,
             device=device,
             representation_store=representation_store,
+            required_layer_resolver=required_layer_resolver,
         )
         validation_pearson = _pearson_from_rows(validation_rows)
         validation_mse = sum(
@@ -1101,6 +1112,7 @@ def train_frozen_probe_run(
         if comparable > best_score:
             best_score = comparable
             best_epoch = epoch_index + 1
+            best_validation_rows = tuple(dict(row) for row in validation_rows)
             best_state = {
                 name: tensor.detach().cpu().clone()
                 for name, tensor in head.state_dict().items()
@@ -1140,6 +1152,8 @@ def train_frozen_probe_run(
 
     if best_state is None:
         raise FrozenEncoderError("training produced no finite validation Pearson")
+    if best_validation_rows is None:
+        raise FrozenEncoderError("training produced no selected validation predictions")
     head.load_state_dict(best_state)
     runtime_seconds = time.perf_counter() - started
     peak_accelerator_memory = (
@@ -1155,8 +1169,7 @@ def train_frozen_probe_run(
     )
     try:
         checkpoint_path = transaction_dir / "head_checkpoint.pt"
-        torch.save(
-            {
+        checkpoint_payload = {
                 "schema_version": 3,
                 "state_dict": best_state,
                 "head_name": head_name,
@@ -1168,9 +1181,10 @@ def train_frozen_probe_run(
                 "training_protocol_sha256": training.sha256,
                 "run_identity_sha256": identity_sha256,
                 "training_source_sha256": training_source_sha256,
-            },
-            checkpoint_path,
-        )
+        }
+        if run_metadata is not None:
+            checkpoint_payload["run_context"] = dict(run_metadata)
+        torch.save(checkpoint_payload, checkpoint_path)
         manifest_body: dict[str, Any] = {
             "schema_version": 3,
             "status": "complete",
@@ -1235,6 +1249,12 @@ def train_frozen_probe_run(
             "checkpoint_file": checkpoint_path.name,
             "checkpoint_sha256": _sha256_file(checkpoint_path),
         }
+        if run_metadata is not None:
+            manifest_body["run_context"] = dict(run_metadata)
+            manifest_body["selected_validation_subject_metrics"] = [
+                dict(row) for row in best_validation_rows
+            ]
+            manifest_body["observed_early_stopping_steps"] = optimizer_steps
         manifest = {
             **manifest_body,
             "run_manifest_sha256": _canonical_sha256(manifest_body),

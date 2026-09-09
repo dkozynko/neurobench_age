@@ -11,6 +11,20 @@ scientific estimand: the encoder is frozen and only representation heads are
 trained. The external MIPDB result must therefore not be compared as though it
 were an official NeuralBench leaderboard number.
 
+Recent EEG foundation-model studies make this distinction consequential.
+STST-JEPA reports strong age decoding with a lightweight attentive probe over
+frozen embeddings, but its validation is tied to its own pretraining and
+evaluation mixture rather than to a sealed cross-cohort head comparison
+\citep{segal2026ststjepa}. NeuroAtlas likewise finds that model rankings vary
+across EEG domains and that current pretrained models do not provide a
+uniformly superior out-of-the-box representation \citep{kontras2026neuroatlas}.
+More generally, comparisons of foundation models as EEG feature extractors
+show that the value of frozen features can differ from the value obtained after
+task-specific adaptation \citep{turgut2026feature}. These studies motivate
+testing readout capacity while holding the representation and data exposure
+fixed, rather than treating a single attentive or fine-tuned result as evidence
+that additional head capacity is generally beneficial.
+
 \paragraph{Representation probing.}
 Linear probes were introduced as deliberately restricted readouts of hidden
 representations \citep{alain2016probes}. Their restriction is informative: if a
@@ -27,6 +41,19 @@ brain-age measures capture maturational or health-related variation
 \citep{sun2019brainage,vandenbosch2019age}. We do not claim a clinical brain-age
 biomarker. Chronological age is used here as a continuous decoding target for
 testing the accessibility and external stability of frozen representations.
+Developmental EEG work has also demonstrated independent-cohort validation of
+age trajectories, while broader brain-age benchmarks show that performance can
+change substantially across acquisition sites and datasets
+\citep{iyer2024growthchart,tveitstol2026robustness}. This makes the external
+MIPDB evaluation part of the estimand rather than an optional replication.
+
+\paragraph{External validation and reproducibility.}
+External neuroimaging validation has a separate training-sample and
+evaluation-sample power problem; small external cohorts can produce both broad
+uncertainty and unstable effect estimates \citep{rosenblatt2024power}. Our
+subject-and-seed resampling and conjunctive decision rule are designed to keep
+that uncertainty visible when asking whether a richer head improves over the
+linear baseline.
 
 \paragraph{Nested uncertainty.}
 Neuroscience measurements often have multiple levels of variation, and treating
