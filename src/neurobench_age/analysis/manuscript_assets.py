@@ -35,12 +35,12 @@ EXPECTED_HEADS = (
 EXPECTED_SEEDS = tuple(range(33, 43))
 HEAD_LABELS = {
     "mean_linear": "Mean-pooled linear",
-    "mean_layer_linear": "Layer-mixed linear",
+    "mean_layer_linear": "Penultimate-layer linear",
     "mean_rich_stats_residual": "Rich-statistics residual",
     "multi_query_rich_stats": "Multi-query rich-statistics",
 }
 COMPARISON_LABELS = {
-    "mean_layer_linear": "Layer-mixed",
+    "mean_layer_linear": "Penultimate layer",
     "mean_rich_stats_residual": "Rich residual",
     "multi_query_rich_stats": "Multi-query",
 }
@@ -664,7 +664,7 @@ def render_text_assets(analysis: Mapping[str, Any]) -> dict[str, str]:
         "% Generated table; do not edit.",
         r"\begin{tabular}{lrrrrrr}",
         r"\toprule",
-        r"Candidate & Mean diff & 95\% CI & p & W/T/L & Worst & Stable \\",
+        r"Candidate & Mean diff & 95\% CI & Holm-adjusted p & W/T/L & Worst & Stable \\",
         r"\midrule",
     ]
     for head in EXPECTED_HEADS[1:]:

@@ -56,7 +56,8 @@ model or head selection and cannot provide untouched confirmation.
 The primary MIPDB cohort is the non-pilot cohort inside the age support of the
 HBN training set. Subjects outside that support are secondary extrapolation
 data. If fewer than 50 primary subjects survive the predeclared QC contract, the
-run is labelled underpowered and cannot establish confirmatory superiority.
+run cannot establish confirmatory superiority. This is a minimum-count gate,
+not a formal statistical power analysis.
 
 ## Runtime paths
 
@@ -258,15 +259,17 @@ python scripts/analyze_confirmatory.py \
 Analysis refuses an incomplete prediction inventory or mismatched provenance.
 It reports Pearson, MAE, RMSE, R², calibration, resource use, exclusions,
 cohort sizes, per-seed deltas, wins/ties/losses, worst-seed delta, and seed SD.
-An underpowered cohort still receives descriptive estimates, but the adequate
-cohort condition fails and `established_heads` must remain empty.
+A cohort below the minimum still receives descriptive estimates, but the
+minimum-size condition fails and `established_heads` must remain empty.
 
 ## Confirmatory decision rule
 
 For each complex head, the estimand is its mean paired external Pearson delta
 against `mean_linear` over the ten seeds. The analysis uses a hierarchical
-paired bootstrap with 10,000 iterations and seed `20260903`, an exact one-sided
-paired seed-randomization test, and Holm correction over the three comparisons.
+paired bootstrap with 10,000 iterations and seed `20260903`, a one-sided paired
+seed-level sign-flip permutation test, and Holm correction over the three
+comparisons. The sign-flip p-value is exact conditional on exchangeable or
+symmetric seed-level signs under its null model.
 
 A head establishes a stable external gain only when all four conditions hold:
 
@@ -291,7 +294,7 @@ The sealed artifacts produced the following audited record.
 | Primary MIPDB subjects before signal QC | 79 |
 | Primary MIPDB subjects after QC | 75 |
 | Extrapolation subjects | 20 |
-| Underpowered flag | false (minimum 50) |
+| Minimum-count gate | met (75 primary subjects; threshold 50) |
 | Completed HBN head runs | 40 |
 | External prediction count | 3,000 |
 | Earlier-layer linear paired effect | +0.0085, 95% CI [-0.0189, 0.0359] |

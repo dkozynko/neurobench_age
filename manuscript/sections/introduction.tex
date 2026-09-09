@@ -16,8 +16,8 @@ may fail when hardware, recruitment, and recording details change.
 
 We therefore ask a deliberately narrow question: when the REVE encoder,
 development data, preprocessing, optimization seeds, and checkpoint rule are
-held fixed, do more expressive representation heads improve reliably over a
-mean-pooled linear probe? The study separates three evidence classes. The
+held fixed, do alternative or richer representation heads improve reliably over
+a mean-pooled linear probe? The study separates three evidence classes. The
 primary evidence is a prospective frozen-probe comparison developed on HBN and
 evaluated once on a sealed MIPDB cohort. Official NeuralBench-style end-to-end
 experiments provide reproduction context, while previously inspected HBN test
@@ -25,7 +25,7 @@ results are retrospective only. MIPDB is not an official NeuralBench score.
 
 Our contribution is methodological as much as numerical. We combine a matched
 four-head design, exact repeated-seed inventories, subject- and seed-aware
-uncertainty, a one-sided randomization test with multiplicity correction, and a
-conjunctive stability criterion. The outcome illustrates why average gains and
-small adjusted p-values should not be interpreted as stable representation
-improvements when external uncertainty remains broad.
+uncertainty, a paired seed-level sign-flip test with multiplicity correction,
+and a conjunctive stability criterion. The outcome illustrates why average
+gains and small adjusted p-values should not be interpreted as stable
+representation improvements when external uncertainty remains broad.

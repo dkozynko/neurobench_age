@@ -44,7 +44,7 @@ def test_manuscript_has_complete_neutral_structure() -> None:
     assert (MANUSCRIPT / "references.bib").is_file()
     assert (MANUSCRIPT / "Makefile").is_file()
     main = (MANUSCRIPT / "main.tex").read_text(encoding="utf-8")
-    assert "When More Expressive Probes Do Not Generalize" in main
+    assert "When More Expressive Probes Do Not Establish Stable External Gains" in main
     assert r"\author{Anonymous}" in main
     for name in SECTIONS:
         path = MANUSCRIPT / "sections" / name

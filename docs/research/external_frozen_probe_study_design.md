@@ -247,11 +247,12 @@ Return percentile 95% intervals and retain the full bootstrap specification,
 not the full resample matrix. A failed or undefined resample is counted and its
 handling is reported.
 
-For each candidate, obtain an exact one-sided paired seed-randomization p-value
-from the ten observed seed deltas. Enumerate all `2^10` candidate/baseline label
-swaps (equivalently, sign flips of the paired seed deltas) and define the
+For each candidate, obtain a one-sided paired seed-level sign-flip permutation
+p-value, exact conditional on exchangeable or symmetric seed-level signs under
+the null model applied to the ten observed seed deltas. Enumerate all `2^10` sign
+flips of the paired seed deltas and define the
 p-value as the fraction of permuted mean deltas greater than or equal to the
-observed mean delta. This treats optimization seed as the randomization unit;
+observed mean delta. This treats optimization seed as the permutation unit;
 the hierarchical bootstrap separately represents uncertainty from both seeds
 and subjects.
 

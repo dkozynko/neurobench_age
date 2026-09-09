@@ -5,12 +5,15 @@
 We used the \texttt{brain-bzh/reve-base} checkpoint with encoder parameters
 frozen, evaluation mode enabled, and inference-mode extraction. EEG was mapped
 to the ordered EGI HydroCel E1--E128 layout without spatial interpolation,
-resampled to 200 Hz, band-pass filtered from 0.5 to 99.5 Hz, standardized and
-clamped, and divided into non-overlapping two-second windows. At most 120
-seconds were retained per subject. Windows were never allowed to cross MIPDB
-condition boundaries. Representations from the last two transformer layers were
-materialized once and content-addressed; all heads consumed these immutable
-caches.
+resampled to 200 Hz, band-pass filtered from 0.5 to 99.5 Hz, standardized with
+a clamp of 15, and divided into non-overlapping two-second windows. For MIPDB,
+the StandardScaler was fitted separately to all retained samples from each
+subject's selected recording before windowing. This is target-free,
+recording-level normalization and is part of the external estimand; it is not
+a train-fitted global scaler. At most 120 seconds were retained per subject.
+Windows were never allowed to cross MIPDB condition boundaries.
+Representations from the last two transformer layers were materialized once and
+content-addressed; all heads consumed these immutable caches.
 
 \subsection{Probe heads}
 
@@ -28,9 +31,10 @@ arise through training rather than an unmatched initial function.
 \subsection{Training and selection}
 
 Each head was trained for seeds 33--42 using global seeded window shuffling,
-AdamW with learning rate 10 to the minus 4 and weight decay 0.05, batch size 64,
-OneCycleLR with cosine annealing, gradient clipping at norm 1, and mean-squared
-error. Training had a maximum of 40 epochs and patience 7. For each seed and
+AdamW \citep{loshchilov2019adamw} with learning rate 1e-4 and weight decay
+0.05, batch size 64, OneCycleLR \citep{smith2018superconvergence} with cosine
+annealing, gradient clipping at norm 1, and mean-squared error. Training had a
+maximum of 40 epochs and patience 7. For each seed and
 head, the earliest checkpoint attaining the best HBN validation Pearson
 correlation was selected. Neither MIPDB targets nor predictions influenced
 training, checkpoint selection, candidate membership, or thresholds.
@@ -50,11 +54,14 @@ predeclared decision rule.
 \subsection{Uncertainty and decision rule}
 
 The interval estimate uses 10,000 deterministic hierarchical paired bootstrap
-iterations. Each iteration resamples seeds with replacement and subjects with
-replacement, preserving candidate--baseline pairing. An exact one-sided
-seed-randomization test enumerates all 1,024 sign assignments for the ten
-paired seed deltas. Raw p-values for the three candidates are adjusted in a
-fixed order with Holm's step-down method.
+iterations and reports percentile 95\% intervals. Each iteration resamples
+seeds with replacement and subjects with replacement, preserving
+candidate--baseline pairing. A paired one-sided seed-level sign-flip
+permutation test enumerates all 1,024 sign assignments for the ten paired seed
+deltas. Its p-value is exact conditional on the null-model assumption that the
+seed-level signs are exchangeable or symmetric under no improvement; it is not
+a design-based randomization of candidate labels. Raw p-values for the three
+candidates are adjusted in a fixed order with Holm's step-down method.
 
 A candidate establishes stable external improvement only if all conditions are
 true: the primary cohort meets the 50-subject minimum; adjusted p is below

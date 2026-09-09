@@ -541,8 +541,8 @@ def test_rendered_text_assets_use_fixed_head_order(tmp_path: Path) -> None:
         "cohort_summary.tex",
     }
     rows = assets["main_metrics.tex"]
-    assert rows.index("Mean-pooled linear") < rows.index("Layer-mixed linear")
-    assert rows.index("Layer-mixed linear") < rows.index("Rich-statistics residual")
+    assert rows.index("Mean-pooled linear") < rows.index("Penultimate-layer linear")
+    assert rows.index("Penultimate-layer linear") < rows.index("Rich-statistics residual")
     assert rows.index("Rich-statistics residual") < rows.index("Multi-query rich-statistics")
     assert r"\newcommand{\BaselinePearson}{0.640}" in assets["results_macros.tex"]
 

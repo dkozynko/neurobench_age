@@ -17,6 +17,12 @@ manifest, writes into a temporary directory, hashes every payload, and publishes
 only a complete bundle. Fixed ordering, plotting configuration, fonts, and PDF
 metadata make two clean asset builds byte-identical.
 
+These artifacts provide content-addressed auditability and exact re-execution
+metadata, but they do not by themselves make participant-level metrics
+independently recomputable from the Git repository: the underlying EEG,
+checkpoints, and prediction vectors remain external. An independent rerun
+therefore requires the declared data-access path and the sealed environment.
+
 The codebase also keeps evidence classes explicit. Prospective MIPDB evidence
 supports the confirmatory conclusion; official NeuralBench-style end-to-end
 experiments support reproduction context; historical HBN test results remain

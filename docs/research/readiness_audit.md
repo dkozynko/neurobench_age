@@ -35,7 +35,7 @@ new protocol and evidence identity rather than modifying the sealed result.
   extraction, allowed exact resume only, and created an immutable inventory of
   3,000 unique head--seed--subject records.
 - Confirmatory analysis started only after completion and applied the
-  predeclared hierarchical bootstrap, exact seed-randomization test, Holm
+  predeclared hierarchical bootstrap, paired seed-level sign-flip test, Holm
   correction, and conjunctive stability decision.
 - A strict compact importer now recomputes the complete hash chain and decision
   before retaining aggregate evidence. It excludes sample-level predictions,
@@ -59,6 +59,10 @@ hierarchical-bootstrap interval crossed zero. The result supports a bounded
 statement about failure to establish stable external improvement. It does not
 show that the probes are equivalent, that the true effects are zero, or that
 other heads cannot help.
+
+The 75-subject primary cohort exceeded the prespecified minimum of 50. This is
+a minimum-size decision gate, not a formal power analysis; the broad bootstrap
+intervals remain the relevant uncertainty statement.
 
 MIPDB is an external frozen-probe evaluation, not an official NeuralBench score.
 Official NeuralBench full fine-tuning remains secondary reproduction evidence,

@@ -10,8 +10,15 @@ The inference covers ten optimization seeds and four prespecified heads. It
 does not cover all initializations, regularization strengths, checkpoint rules,
 architectures, REVE layers, or pooling functions. The bootstrap quantifies
 uncertainty under the implemented seed-and-subject resampling scheme, while the
-randomization test treats seed as the sign-flip unit. With only ten seeds, the
-randomization distribution is necessarily discrete.
+sign-flip permutation test relies on exchangeable or symmetric seed-level signs
+under its null model. With only ten seeds, the permutation distribution is
+necessarily discrete and should not be read as population-level evidence over
+all future training procedures.
+
+The cohort flow is reported in aggregate, but the compact repository bundle
+does not retain participant-level demographics, recording counts, or window
+counts. Those summaries should be added to an access-controlled supplement if
+data-use terms permit.
 
 The MIPDB primary analysis is restricted to ages within HBN training support.
 The extrapolation cohort was not included in the confirmatory comparison, so no
