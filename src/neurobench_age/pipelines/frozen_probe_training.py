@@ -446,11 +446,15 @@ class ValidatedRepresentationStore:
         *,
         records: Sequence[CachedSubjectRecord],
         cache_root: Path,
+        required_layers: Sequence[int] = PREDECLARED_LAYERS,
         available_memory_bytes: int | None = None,
         metadata_inspector: Callable[..., Mapping[int, Any]] = inspect_cached_representation_metadata,
         strict_loader: Callable[..., dict[int, torch.Tensor]] = load_cached_representations,
     ) -> ValidatedRepresentationStore:
         records = validate_training_records(records)
+        required = tuple(int(layer) for layer in required_layers)
+        if not required or len(set(required)) != len(required):
+            raise FrozenEncoderError("representation store required layers are invalid")
         declared: dict[str, Mapping[int, Any]] = {}
         projected_bytes = 0
         expected_shapes: dict[int, tuple[int, ...]] = {}
@@ -459,8 +463,8 @@ class ValidatedRepresentationStore:
             metadata = metadata_inspector(
                 cache_root, record.cache_identity
             )
-            if tuple(metadata) != PREDECLARED_LAYERS:
-                raise FrozenEncoderError("representation metadata layers are not exact")
+            if any(layer not in metadata for layer in required):
+                raise FrozenEncoderError("representation metadata is missing a required layer")
             for layer, tensor_metadata in metadata.items():
                 if len(tensor_metadata.shape) != 3 or tensor_metadata.shape[0] <= 0:
                     raise FrozenEncoderError(
@@ -505,11 +509,11 @@ class ValidatedRepresentationStore:
             tensors = strict_loader(
                 cache_root,
                 record.cache_identity,
-                required_layers=PREDECLARED_LAYERS,
+                required_layers=required,
             )
-            if tuple(tensors) != PREDECLARED_LAYERS:
-                raise FrozenEncoderError("strict cache loader returned non-exact layers")
-            for layer in PREDECLARED_LAYERS:
+            if tuple(tensors) != required:
+                raise FrozenEncoderError("strict cache loader returned unexpected layers")
+            for layer in required:
                 tensor = tensors[layer]
                 expected = declared[record.subject_id][layer]
                 if (

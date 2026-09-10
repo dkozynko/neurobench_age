@@ -37,6 +37,9 @@ def _resolve_device(requested: str) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--protocol", required=True, type=Path)
+    parser.add_argument(
+        "--protocol-profile", choices=("primary", "layerwise"), default="primary"
+    )
     parser.add_argument("--subject-manifest", required=True, type=Path)
     parser.add_argument("--data-root", required=True, type=Path)
     parser.add_argument("--preprocessing-cache-root", required=True, type=Path)
@@ -45,6 +48,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--mapping", required=True, type=Path)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--extraction-batch-size", type=int, default=8)
+    parser.add_argument(
+        "--layer-indices",
+        type=int,
+        nargs="+",
+        default=None,
+        help="optional subset of protocol layers to materialize",
+    )
+    parser.add_argument(
+        "--pool-tokens",
+        action="store_true",
+        help="store arithmetic token means (exact for mean-linear probes)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -71,7 +86,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise FrozenEncoderError(
                 "cache and training-manifest outputs must be outside results/canonical"
             )
-        protocol = load_study_protocol(args.protocol)
+        protocol = load_study_protocol(args.protocol, profile=args.protocol_profile)
         manifest = materialize_hbn_representations(
             protocol=protocol,
             subject_manifest_path=args.subject_manifest,
@@ -83,6 +98,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             repository_root=repository_root,
             device=_resolve_device(args.device),
             extraction_batch_size=args.extraction_batch_size,
+            materialized_layers=(
+                None if args.layer_indices is None else tuple(args.layer_indices)
+            ),
+            pool_tokens=args.pool_tokens,
         )
     except (
         OSError,

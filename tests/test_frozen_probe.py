@@ -315,6 +315,48 @@ def test_extraction_freezes_encoder_uses_eval_and_inference_mode() -> None:
     assert_frozen_encoder(encoder, expected_state_sha256=evidence["state_sha256_before"])
 
 
+def test_extraction_and_cache_support_a_predeclared_layerwise_inventory(
+    tmp_path: Path,
+) -> None:
+    encoder = TinyEncoder()
+    representations, evidence = extract_frozen_representations(
+        encoder, torch.randn(2, 6, 4), layer_indices=(-3, -2, -1)
+    )
+
+    assert tuple(representations) == (-3, -2, -1)
+    assert evidence["layer_indices"] == [-3, -2, -1]
+
+    write_cached_representations(
+        tmp_path,
+        _identity(),
+        representations,
+        evidence=evidence,
+        declared_layers=(-3, -2, -1),
+    )
+    loaded = load_cached_representations(
+        tmp_path, _identity(), required_layers=(-3, -1)
+    )
+
+    assert tuple(loaded) == (-3, -1)
+
+
+def test_primary_cache_loader_still_rejects_layerwise_inventory(tmp_path: Path) -> None:
+    encoder = TinyEncoder()
+    representations, evidence = extract_frozen_representations(
+        encoder, torch.randn(2, 6, 4), layer_indices=(-3, -2, -1)
+    )
+    write_cached_representations(
+        tmp_path,
+        _identity(),
+        representations,
+        evidence=evidence,
+        declared_layers=(-3, -2, -1),
+    )
+
+    with pytest.raises(FrozenEncoderError, match="layer inventory"):
+        load_cached_representations(tmp_path, _identity())
+
+
 def test_extraction_is_repeatable_even_when_encoder_contains_dropout() -> None:
     torch.manual_seed(6)
     encoder = TinyEncoder()

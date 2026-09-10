@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "study_id": "reve_age_layerwise_probe_v1",
+  "status": "sealed",
+  "datasets": {
+    "development": {
+      "name": "HBN",
+      "use": "train_validation_only",
+      "test_access": "forbidden_for_selection"
+    },
+    "external": {
+      "name": "MIPDB",
+      "nemar_id": "nm000153",
+      "release": "NEMAR nm000153 content-addressed acquisition snapshot",
+      "pilot_size": 10,
+      "pilot_salt": "mipdb-engineering-pilot-v1",
+      "primary_cohort": "within_hbn_training_age_support",
+      "extrapolation_cohort": "outside_hbn_training_age_support",
+      "minimum_primary_subjects": 50
+    }
+  },
+  "encoder": {
+    "checkpoint": "brain-bzh/reve-base",
+    "initialization_seed": 0,
+    "frozen": true,
+    "eval_mode": true,
+    "inference_mode": true,
+    "layer_indices": [-4, -3, -2, -1]
+  },
+  "preprocessing": {
+    "sample_rate_hz": 200.0,
+    "bandpass_hz": [0.5, 99.5],
+    "notch_hz": null,
+    "scaler": "StandardScaler",
+    "clamp": 15.0,
+    "window_seconds": 2.0,
+    "stride_seconds": 2.0,
+    "max_seconds_per_subject": 120.0,
+    "cross_block_windows": false,
+    "spatial_interpolation": false,
+    "subject_aggregation": "arithmetic_mean",
+    "external_resting_task": "block01",
+    "external_paradigm_start_marker": "90",
+    "external_condition_markers": {
+      "20": "eyes_open",
+      "30": "eyes_closed"
+    },
+    "external_condition_selection": "acquisition_order",
+    "mapped_channel_layout": "egi_hydrocel_e1_e128",
+    "required_mapped_channels": 128
+  },
+  "heads": [
+    {"name": "mean_linear_layer_m4", "layer_index": -4, "aggregation": "mean"},
+    {"name": "mean_linear_layer_m3", "layer_index": -3, "aggregation": "mean"},
+    {"name": "mean_linear_layer_m2", "layer_index": -2, "aggregation": "mean"},
+    {"name": "mean_linear_layer_m1", "layer_index": -1, "aggregation": "mean"}
+  ],
+  "training": {
+    "seeds": [33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
+    "optimizer": "AdamW",
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "batch_size": 64,
+    "max_epochs": 40,
+    "patience": 7,
+    "loss": "MSELoss",
+    "checkpoint_metric": "validation_pearson",
+    "metric_mode": "max"
+  },
+  "statistics": {
+    "bootstrap_iterations": 10000,
+    "bootstrap_seed": 20260910,
+    "confidence": 0.95,
+    "randomization_tail": "greater",
+    "holm_order": [],
+    "alpha": 0.05,
+    "minimum_seed_wins": 0,
+    "minimum_worst_seed_delta": -1.0,
+    "require_ci_above_zero": false
+  }
+}

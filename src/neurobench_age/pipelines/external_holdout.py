@@ -413,16 +413,20 @@ def _validate_material(
     *,
     subject_id: str,
     expected_identity: RepresentationCacheIdentity,
+    required_layers: Sequence[int] = PREDECLARED_LAYERS,
 ) -> tuple[dict[int, torch.Tensor], str]:
     if not isinstance(material, ExternalSubjectMaterial):
         raise ExternalHoldoutError("representation provider returned an invalid result")
     if material.cache_identity != expected_identity:
         raise ExternalHoldoutError("external representation cache identity does not match")
-    if set(material.representations) != set(PREDECLARED_LAYERS):
-        raise ExternalHoldoutError("external representations must contain exactly layers -2 and -1")
+    required = tuple(int(layer) for layer in required_layers)
+    if not required or set(material.representations) != set(required):
+        raise ExternalHoldoutError(
+            "external representations do not match the declared layer inventory"
+        )
     representations: dict[int, torch.Tensor] = {}
     shape: tuple[int, ...] | None = None
-    for layer_index in PREDECLARED_LAYERS:
+    for layer_index in required:
         tensor = material.representations[layer_index]
         if (
             not isinstance(tensor, torch.Tensor)
@@ -586,6 +590,8 @@ def load_cached_external_material(
     cache_root: Path,
     subject_id: str,
     identity: RepresentationCacheIdentity,
+    *,
+    required_layers: Sequence[int] = PREDECLARED_LAYERS,
 ) -> ExternalSubjectMaterial:
     """Load a complete external cache entry and its subject-level QC evidence."""
 
@@ -598,7 +604,9 @@ def load_cached_external_material(
             f"representation cache has no external_qc evidence: {entry}"
         )
     try:
-        representations = load_cached_representations(cache_root, identity)
+        representations = load_cached_representations(
+            cache_root, identity, required_layers=required_layers
+        )
     except FrozenEncoderError as error:
         raise ExternalHoldoutError(str(error)) from error
     material = ExternalSubjectMaterial(
@@ -607,7 +615,10 @@ def load_cached_external_material(
         qc=dict(qc),
     )
     _validate_material(
-        material, subject_id=subject_id, expected_identity=identity
+        material,
+        subject_id=subject_id,
+        expected_identity=identity,
+        required_layers=required_layers,
     )
     return material
 

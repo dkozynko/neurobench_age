@@ -50,6 +50,24 @@ def _is_sha256(value: str) -> bool:
     return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
 
 
+def _normalize_layer_indices(
+    layer_indices: Sequence[int], *, require_sorted: bool = False
+) -> tuple[int, ...]:
+    """Validate the ordered, non-zero transformer-layer inventory."""
+
+    try:
+        normalized = tuple(int(index) for index in layer_indices)
+    except (TypeError, ValueError) as error:
+        raise FrozenEncoderError("layer_indices must contain integers") from error
+    if not normalized or any(index == 0 for index in normalized):
+        raise FrozenEncoderError("layer_indices must contain non-zero integers")
+    if len(set(normalized)) != len(normalized):
+        raise FrozenEncoderError("layer_indices must be unique")
+    if require_sorted and normalized != tuple(sorted(normalized)):
+        raise FrozenEncoderError("layer inventory must be sorted")
+    return normalized
+
+
 def _validate_extraction_evidence(evidence: object) -> None:
     if not isinstance(evidence, Mapping):
         raise FrozenEncoderError("cache extraction evidence must be a mapping")
@@ -63,10 +81,10 @@ def _validate_extraction_evidence(evidence: object) -> None:
             raise FrozenEncoderError(
                 f"cache extraction evidence requires {name}={expected}"
             )
-    if tuple(evidence.get("layer_indices", ())) != PREDECLARED_LAYERS:
-        raise FrozenEncoderError(
-            f"cache extraction evidence requires layers {PREDECLARED_LAYERS}"
-        )
+    try:
+        _normalize_layer_indices(evidence.get("layer_indices", ()))
+    except FrozenEncoderError as error:
+        raise FrozenEncoderError("cache extraction evidence has invalid layers") from error
     state_before = evidence.get("state_sha256_before")
     state_after = evidence.get("state_sha256_after")
     if (
@@ -156,11 +174,7 @@ def extract_frozen_representations(
 ) -> tuple[dict[int, torch.Tensor], dict[str, Any]]:
     """Extract declared layers once while proving the encoder stayed frozen."""
 
-    requested = tuple(int(index) for index in layer_indices)
-    if requested != PREDECLARED_LAYERS:
-        raise FrozenEncoderError(
-            f"frozen extraction requires exactly layers {PREDECLARED_LAYERS}"
-        )
+    requested = _normalize_layer_indices(layer_indices)
     if not isinstance(windows, torch.Tensor) or windows.ndim < 2:
         raise FrozenEncoderError("windows must be a batched torch tensor")
     freeze_encoder(encoder)
@@ -322,6 +336,8 @@ class CachedTensorMetadata:
 def _inspect_cache_entry(
     cache_root: Path,
     identity: RepresentationCacheIdentity,
+    *,
+    expected_layers: Sequence[int] | None = PREDECLARED_LAYERS,
 ) -> tuple[Path, Path, dict[str, Any], dict[int, CachedTensorMetadata]]:
     entry = Path(cache_root) / identity.key
     metadata_path = entry / "metadata.json"
@@ -342,19 +358,19 @@ def _inspect_cache_entry(
         raise FrozenEncoderError(
             f"cache entry identity or completion marker is invalid: {entry}"
         )
-    available = tuple(metadata.get("layers", ()))
-    if available != PREDECLARED_LAYERS:
+    available = _normalize_layer_indices(metadata.get("layers", ()), require_sorted=True)
+    if expected_layers is not None and available != _normalize_layer_indices(expected_layers):
         raise FrozenEncoderError(
             "cache layer inventory is invalid: "
-            f"expected={PREDECLARED_LAYERS} available={available}"
+            f"expected={tuple(expected_layers)} available={available}"
         )
     _validate_extraction_evidence(metadata.get("evidence"))
     raw_tensor_metadata = metadata.get("tensor_metadata")
-    expected_keys = {str(layer) for layer in PREDECLARED_LAYERS}
+    expected_keys = {str(layer) for layer in available}
     if not isinstance(raw_tensor_metadata, dict) or set(raw_tensor_metadata) != expected_keys:
         raise FrozenEncoderError("cache tensor metadata inventory is invalid")
     tensor_metadata: dict[int, CachedTensorMetadata] = {}
-    for layer in PREDECLARED_LAYERS:
+    for layer in available:
         raw = raw_tensor_metadata[str(layer)]
         if not isinstance(raw, dict) or set(raw) != {"shape", "dtype"}:
             raise FrozenEncoderError(f"cache layer {layer} metadata is invalid")
@@ -387,10 +403,14 @@ def _inspect_cache_entry(
 def inspect_cached_representation_metadata(
     cache_root: Path,
     identity: RepresentationCacheIdentity,
+    *,
+    expected_layers: Sequence[int] | None = PREDECLARED_LAYERS,
 ) -> dict[int, CachedTensorMetadata]:
     """Validate cache identity/schema and inspect tensor sizes without loading payload."""
 
-    _, _, _, tensor_metadata = _inspect_cache_entry(cache_root, identity)
+    _, _, _, tensor_metadata = _inspect_cache_entry(
+        cache_root, identity, expected_layers=expected_layers
+    )
     return tensor_metadata
 
 
@@ -402,13 +422,15 @@ def write_cached_representations(
     representations: Mapping[int, torch.Tensor],
     *,
     evidence: Mapping[str, Any],
+    declared_layers: Sequence[int] = PREDECLARED_LAYERS,
 ) -> Path:
     """Publish one complete cache entry; existing entries are immutable."""
 
+    declared = _normalize_layer_indices(declared_layers, require_sorted=True)
     layers = tuple(sorted(int(index) for index in representations))
-    if layers != PREDECLARED_LAYERS:
+    if layers != declared:
         raise FrozenEncoderError(
-            f"cache must contain exactly required layers {PREDECLARED_LAYERS}"
+            f"cache must contain exactly required layers {declared}"
         )
     tensors: dict[int, torch.Tensor] = {}
     for index in layers:
@@ -462,11 +484,13 @@ def load_cached_representations(
 ) -> dict[int, torch.Tensor]:
     """Load only a complete cache entry with exact provenance and layer inventory."""
 
+    required = _normalize_layer_indices(required_layers)
     entry, payload_path, metadata, tensor_metadata = _inspect_cache_entry(
-        cache_root, identity
+        cache_root,
+        identity,
+        expected_layers=(PREDECLARED_LAYERS if required == PREDECLARED_LAYERS else None),
     )
-    available = PREDECLARED_LAYERS
-    required = tuple(int(index) for index in required_layers)
+    available = tuple(tensor_metadata)
     if any(index not in available for index in required):
         raise FrozenEncoderError(
             f"cache does not contain required layers: required={required} available={available}"

@@ -226,7 +226,7 @@ def _parse_datasets(value: object) -> DatasetContract:
     return result
 
 
-def _parse_encoder(value: object) -> EncoderContract:
+def _parse_encoder(value: object, *, strict_primary: bool) -> EncoderContract:
     encoder = _object(value, "encoder")
     _expect_keys(
         encoder,
@@ -259,8 +259,14 @@ def _parse_encoder(value: object) -> EncoderContract:
         raise ProtocolError("encoder initialization seed must be 0")
     if not (result.frozen and result.eval_mode and result.inference_mode):
         raise ProtocolError("encoder must be frozen and run in eval/inference mode")
-    if result.layer_indices != (-2, -1):
+    if strict_primary and result.layer_indices != (-2, -1):
         raise ProtocolError("encoder cache must contain exactly layers -2 and -1")
+    if not result.layer_indices or any(index == 0 for index in result.layer_indices):
+        raise ProtocolError("encoder layer_indices must contain non-zero layers")
+    if len(set(result.layer_indices)) != len(result.layer_indices):
+        raise ProtocolError("encoder layer_indices must be unique")
+    if tuple(sorted(result.layer_indices)) != result.layer_indices:
+        raise ProtocolError("encoder layer_indices must be sorted")
     return result
 
 
@@ -389,7 +395,12 @@ def _parse_preprocessing(value: object) -> PreprocessingContract:
     return result
 
 
-def _parse_heads(value: object) -> tuple[HeadContract, ...]:
+def _parse_heads(
+    value: object,
+    *,
+    strict_primary: bool,
+    declared_layers: Sequence[int],
+) -> tuple[HeadContract, ...]:
     raw_heads = _sequence(value, "heads")
     heads: list[HeadContract] = []
     for index, raw in enumerate(raw_heads):
@@ -412,8 +423,17 @@ def _parse_heads(value: object) -> tuple[HeadContract, ...]:
         ("mean_rich_stats_residual", -1),
         ("multi_query_rich_stats", -1),
     )
-    if len(heads) != 4 or tuple((head.name, head.layer_index) for head in heads) != expected:
+    if strict_primary and (
+        len(heads) != 4 or tuple((head.name, head.layer_index) for head in heads) != expected
+    ):
         raise ProtocolError("protocol must contain exactly four approved heads and layer selections")
+    if not strict_primary:
+        if not heads or len({head.name for head in heads}) != len(heads):
+            raise ProtocolError("layerwise protocol head names must be unique")
+        if tuple(head.layer_index for head in heads) != tuple(declared_layers):
+            raise ProtocolError("layerwise heads must cover declared layers in order")
+        if any(head.aggregation != "mean" for head in heads):
+            raise ProtocolError("layerwise protocol must use mean aggregation")
     return tuple(heads)
 
 
@@ -462,7 +482,7 @@ def _parse_training(value: object) -> TrainingContract:
     return result
 
 
-def _parse_statistics(value: object) -> StatisticsContract:
+def _parse_statistics(value: object, *, strict_primary: bool) -> StatisticsContract:
     statistics = _object(value, "statistics")
     keys = (
         "bootstrap_iterations",
@@ -504,8 +524,14 @@ def _parse_statistics(value: object) -> StatisticsContract:
     )
     if result.bootstrap_iterations != 10_000:
         raise ProtocolError("statistics must use 10,000 bootstrap iterations")
-    if result.bootstrap_seed != 20260903:
+    if result.bootstrap_seed <= 0:
         raise ProtocolError("statistics bootstrap seed must be 20260903")
+    if not strict_primary:
+        if result.confidence != 0.95 or result.randomization_tail != "greater":
+            raise ProtocolError("layerwise statistics must use 95% greater-tail inference")
+        if result.alpha != 0.05 or result.minimum_seed_wins < 0 or result.require_ci_above_zero:
+            raise ProtocolError("layerwise statistics must remain descriptive")
+        return result
     expected_order = (
         "mean_layer_linear",
         "mean_rich_stats_residual",
@@ -525,7 +551,9 @@ def _parse_statistics(value: object) -> StatisticsContract:
     return result
 
 
-def load_study_protocol(path: Path) -> StudyProtocol:
+def load_study_protocol(
+    path: Path, *, profile: str = "primary"
+) -> StudyProtocol:
     """Load and validate the complete confirmatory protocol without defaults."""
 
     path = Path(path)
@@ -549,6 +577,9 @@ def load_study_protocol(path: Path) -> StudyProtocol:
             "statistics",
         ),
     )
+    if profile not in {"primary", "layerwise"}:
+        raise ProtocolError("unknown protocol profile")
+    strict_primary = profile == "primary"
     schema_version = _integer(payload["schema_version"], "schema_version")
     if schema_version != 1:
         raise ProtocolError("schema_version must be 1")
@@ -561,10 +592,20 @@ def load_study_protocol(path: Path) -> StudyProtocol:
         study_id=_string(payload["study_id"], "study_id"),
         status=status,
         datasets=_parse_datasets(payload["datasets"]),
-        encoder=_parse_encoder(payload["encoder"]),
+        encoder=_parse_encoder(payload["encoder"], strict_primary=strict_primary),
         preprocessing=_parse_preprocessing(payload["preprocessing"]),
-        heads=_parse_heads(payload["heads"]),
+        heads=_parse_heads(
+            payload["heads"],
+            strict_primary=strict_primary,
+            declared_layers=tuple(
+                _integer(item, "encoder.layer_indices[]")
+                for item in _sequence(
+                    _object(payload["encoder"], "encoder")["layer_indices"],
+                    "encoder.layer_indices",
+                )
+            ),
+        ),
         training=_parse_training(payload["training"]),
-        statistics=_parse_statistics(payload["statistics"]),
+        statistics=_parse_statistics(payload["statistics"], strict_primary=strict_primary),
         sha256=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
     )

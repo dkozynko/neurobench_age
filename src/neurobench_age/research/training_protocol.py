@@ -110,9 +110,13 @@ def _number(value: object, path: str) -> float:
 
 def load_frozen_probe_training_protocol(
     path: Path,
+    *,
+    profile: str = "primary",
 ) -> FrozenProbeTrainingProtocol:
     """Load and fail closed against the approved final training contract."""
 
+    if profile not in {"primary", "layerwise"}:
+        raise FrozenProbeTrainingProtocolError("unknown frozen-probe training profile")
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -220,7 +224,7 @@ def load_frozen_probe_training_protocol(
         raise FrozenProbeTrainingProtocolError(
             "training protocol must be schema 1 with final status"
         )
-    if result.representation_protocol_sha256 != REPRESENTATION_PROTOCOL_SHA256:
+    if profile == "primary" and result.representation_protocol_sha256 != REPRESENTATION_PROTOCOL_SHA256:
         raise FrozenProbeTrainingProtocolError(
             "training protocol representation protocol reference is not approved"
         )

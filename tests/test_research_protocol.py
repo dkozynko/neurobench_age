@@ -54,6 +54,32 @@ def test_approved_protocol_loads_with_predeclared_primary_contract() -> None:
     assert len(protocol.statistics_sha256) == 64
 
 
+def test_layerwise_secondary_protocol_accepts_four_declared_transformer_layers(
+    tmp_path: Path,
+) -> None:
+    payload = _payload()
+    payload["study_id"] = "reve_age_layerwise_probe_v1"
+    payload["encoder"]["layer_indices"] = [-4, -3, -2, -1]
+    payload["heads"] = [
+        {"name": f"mean_linear_layer_{layer}", "layer_index": layer, "aggregation": "mean"}
+        for layer in (-4, -3, -2, -1)
+    ]
+    payload["statistics"]["holm_order"] = []
+    payload["statistics"]["minimum_seed_wins"] = 0
+    payload["statistics"]["minimum_worst_seed_delta"] = -1.0
+    payload["statistics"]["require_ci_above_zero"] = False
+
+    protocol = load_study_protocol(_write(tmp_path, payload), profile="layerwise")
+
+    assert protocol.encoder.layer_indices == (-4, -3, -2, -1)
+    assert protocol.head_names == (
+        "mean_linear_layer_-4",
+        "mean_linear_layer_-3",
+        "mean_linear_layer_-2",
+        "mean_linear_layer_-1",
+    )
+
+
 @pytest.mark.parametrize(
     "mutation",
     [

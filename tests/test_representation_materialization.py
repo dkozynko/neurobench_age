@@ -15,6 +15,7 @@ from neurobench_age.pipelines.frozen_probe import (
 )
 from neurobench_age.pipelines.representation_materialization import (
     LazyMipdbRepresentationProvider,
+    extract_frozen_representations_batched,
     preprocessing_contract_sha256,
 )
 from neurobench_age.research.protocol import load_study_protocol
@@ -132,6 +133,21 @@ def test_lazy_external_provider_reads_no_eeg_before_started_marker(
     assert material.representations[-2].shape[0] == 3
     assert material.representations[-1].shape[0] == 3
     assert material.qc["mapped_channel_count"] == 128
+
+
+def test_batched_extraction_can_store_exact_mean_pooled_tokens() -> None:
+    encoder = _TinyEncoder()
+    representations, evidence = extract_frozen_representations_batched(
+        encoder,
+        np.ones((2, 128, 400), dtype=np.float32),
+        batch_size=1,
+        device="cpu",
+        layer_indices=(-3, -2),
+        pool_tokens=True,
+    )
+
+    assert all(tuple(tensor.shape) == (2, 1, 4) for tensor in representations.values())
+    assert evidence["representation_transform"] == "arithmetic_mean_tokens"
 
 
 def test_lazy_external_provider_exactly_resumes_complete_cache(tmp_path: Path) -> None:

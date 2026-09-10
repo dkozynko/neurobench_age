@@ -65,6 +65,8 @@ def extract_frozen_representations_batched(
     *,
     batch_size: int,
     device: str,
+    layer_indices: tuple[int, ...] = PREDECLARED_LAYERS,
+    pool_tokens: bool = False,
 ) -> tuple[dict[int, torch.Tensor], dict[str, Any]]:
     """Extract all declared layers with bounded accelerator memory."""
 
@@ -77,31 +79,46 @@ def extract_frozen_representations_batched(
         )
     encoder.to(device)
     state_before = encoder_state_sha256(encoder)
-    chunks: dict[int, list[torch.Tensor]] = {index: [] for index in PREDECLARED_LAYERS}
+    declared_layers = tuple(int(index) for index in layer_indices)
+    if not declared_layers or len(set(declared_layers)) != len(declared_layers):
+        raise FrozenEncoderError("extraction layer_indices must be unique and non-empty")
+    chunks: dict[int, list[torch.Tensor]] = {index: [] for index in declared_layers}
     for start in range(0, tensor.shape[0], batch_size):
         representations, evidence = extract_frozen_representations(
             encoder,
             tensor[start : start + batch_size].to(device),
+            layer_indices=declared_layers,
         )
         if (
             evidence["state_sha256_before"] != state_before
             or evidence["state_sha256_after"] != state_before
         ):
             raise FrozenEncoderError("encoder state changed between extraction batches")
-        for index in PREDECLARED_LAYERS:
+        for index in declared_layers:
             chunks[index].append(representations[index])
     state_after = encoder_state_sha256(encoder)
     assert_frozen_encoder(encoder, expected_state_sha256=state_before)
+    representations = {
+        index: torch.cat(chunks[index], dim=0) for index in declared_layers
+    }
+    if pool_tokens:
+        representations = {
+            index: tensor.mean(dim=1, keepdim=True).contiguous()
+            for index, tensor in representations.items()
+        }
     return (
-        {index: torch.cat(chunks[index], dim=0) for index in PREDECLARED_LAYERS},
+        representations,
         {
             "encoder_frozen": True,
             "encoder_eval_mode": True,
             "inference_mode": True,
-            "layer_indices": list(PREDECLARED_LAYERS),
+            "layer_indices": list(declared_layers),
             "state_sha256_before": state_before,
             "state_sha256_after": state_after,
             "extraction_batch_size": batch_size,
+            "representation_transform": (
+                "arithmetic_mean_tokens" if pool_tokens else "identity"
+            ),
         },
     )
 
@@ -289,6 +306,7 @@ def run_mipdb_pilot(
             windows_array,
             batch_size=extraction_batch_size,
             device=device,
+            layer_indices=tuple(protocol.encoder.layer_indices),
         )
         if evidence["state_sha256_after"] != encoder_sha256:
             raise FrozenEncoderError("pilot encoder state changed during extraction")
@@ -298,7 +316,7 @@ def run_mipdb_pilot(
                 "qc": qc,
                 "representation_shapes": {
                     str(index): list(representations[index].shape)
-                    for index in PREDECLARED_LAYERS
+                    for index in protocol.encoder.layer_indices
                 },
             }
         )
@@ -442,6 +460,8 @@ def materialize_hbn_representations(
     repository_root: Path,
     device: str,
     extraction_batch_size: int,
+    materialized_layers: tuple[int, ...] | None = None,
+    pool_tokens: bool = False,
     prepared_loader: Callable[[HbnRecording], PreparedRecording] | None = None,
     encoder_loader: Callable[..., nn.Module] = load_reve_encoder,
 ) -> dict[str, Any]:
@@ -456,6 +476,17 @@ def materialize_hbn_representations(
     ):
         raise FrozenEncoderError("HBN extraction batch_size must be positive")
     tree_sha256 = source_tree_sha256(Path(repository_root))
+    declared_layers = (
+        tuple(protocol.encoder.layer_indices)
+        if materialized_layers is None
+        else tuple(int(index) for index in materialized_layers)
+    )
+    if (
+        not declared_layers
+        or len(set(declared_layers)) != len(declared_layers)
+        or any(index not in protocol.encoder.layer_indices for index in declared_layers)
+    ):
+        raise FrozenEncoderError("materialized_layers must be a unique subset of protocol layers")
     rows = read_manifest(Path(subject_manifest_path))
     if not rows:
         raise FrozenEncoderError("HBN subject manifest is empty")
@@ -576,7 +607,11 @@ def materialize_hbn_representations(
         )
         cache_entry = Path(representation_cache_root) / identity.key
         if cache_entry.exists():
-            load_cached_representations(representation_cache_root, identity)
+            load_cached_representations(
+                representation_cache_root,
+                identity,
+                required_layers=declared_layers,
+            )
         else:
             if encoder_state_sha256(encoder) != checkpoint_sha256:
                 raise FrozenEncoderError("HBN encoder state changed between subjects")
@@ -589,6 +624,8 @@ def materialize_hbn_representations(
                 windows,
                 batch_size=extraction_batch_size,
                 device=device,
+                layer_indices=declared_layers,
+                pool_tokens=pool_tokens,
             )
             if evidence["state_sha256_after"] != checkpoint_sha256:
                 raise FrozenEncoderError("HBN encoder state changed during extraction")
@@ -607,6 +644,7 @@ def materialize_hbn_representations(
                 identity,
                 representations,
                 evidence=evidence,
+                declared_layers=declared_layers,
             )
     _write_json_exact_resume(Path(training_manifest_path), report)
     return report
@@ -627,6 +665,9 @@ class LazyMipdbRepresentationProvider:
         expected_lock_sha256: str,
         device: str,
         extraction_batch_size: int,
+        expected_manifest_protocol_sha256: str | None = None,
+        materialized_layers: tuple[int, ...] | None = None,
+        pool_tokens: bool = False,
         subject_loader: Callable[..., tuple[np.ndarray, dict[str, Any]]] = load_mipdb_resting_subject,
         encoder_loader: Callable[..., nn.Module] = load_reve_encoder,
     ) -> None:
@@ -639,7 +680,12 @@ class LazyMipdbRepresentationProvider:
             raise FrozenEncoderError(
                 "external representations require a finalized MIPDB manifest"
             )
-        if manifest.get("protocol_sha256") != protocol.sha256:
+        manifest_protocol_sha256 = (
+            protocol.sha256
+            if expected_manifest_protocol_sha256 is None
+            else expected_manifest_protocol_sha256
+        )
+        if manifest.get("protocol_sha256") != manifest_protocol_sha256:
             raise FrozenEncoderError("MIPDB manifest protocol does not match")
         dataset_sha256 = manifest.get("dataset_manifest_sha256")
         if not isinstance(dataset_sha256, str) or not _is_sha256(dataset_sha256):
@@ -664,6 +710,20 @@ class LazyMipdbRepresentationProvider:
         self.expected_lock_sha256 = expected_lock_sha256
         self.device = device
         self.extraction_batch_size = extraction_batch_size
+        self.materialized_layers = (
+            tuple(protocol.encoder.layer_indices)
+            if materialized_layers is None
+            else tuple(int(index) for index in materialized_layers)
+        )
+        if (
+            not self.materialized_layers
+            or len(set(self.materialized_layers)) != len(self.materialized_layers)
+            or any(index not in protocol.encoder.layer_indices for index in self.materialized_layers)
+        ):
+            raise FrozenEncoderError(
+                "materialized_layers must be a unique subset of protocol layers"
+            )
+        self.pool_tokens = bool(pool_tokens)
         self.subject_loader = subject_loader
         self.encoder_loader = encoder_loader
         self.dataset_sha256 = dataset_sha256
@@ -714,7 +774,12 @@ class LazyMipdbRepresentationProvider:
 
         entry = self.cache_root / identity.key
         if entry.exists():
-            return load_cached_external_material(self.cache_root, subject_id, identity)
+            return load_cached_external_material(
+                self.cache_root,
+                subject_id,
+                identity,
+                required_layers=self.materialized_layers,
+            )
 
         windows, raw_qc = self.subject_loader(
             self.bids_root,
@@ -763,6 +828,8 @@ class LazyMipdbRepresentationProvider:
             windows,
             batch_size=self.extraction_batch_size,
             device=self.device,
+            layer_indices=self.materialized_layers,
+            pool_tokens=self.pool_tokens,
         )
         evidence["external_qc"] = qc
         write_cached_representations(
@@ -770,6 +837,7 @@ class LazyMipdbRepresentationProvider:
             identity,
             representations,
             evidence=evidence,
+            declared_layers=self.materialized_layers,
         )
         return ExternalSubjectMaterial(
             representations=representations,
