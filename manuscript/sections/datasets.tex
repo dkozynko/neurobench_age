@@ -10,8 +10,8 @@ artifacts available for this report preserve hashes of the HBN subject and
 training manifests but intentionally do not reproduce participant-level rows.
 
 \paragraph{MIPDB external data.}
-The Mobile Imaging and Modeling Population-Based Dataset includes high-density
-task-based and task-free EEG across development \citep{langer2017mipdb}. The
+The MIPDB resource includes high-density task-based and task-free EEG for
+studying information processing across development \citep{langer2017mipdb}. The
 study pinned the NEMAR dataset identity \texttt{nm000153} and content-addressed
 the selected acquisition snapshot. A deterministic \PilotSubjects{}-subject
 pilot was used only for engineering and target-free signal checks. After
@@ -44,3 +44,7 @@ permitted only after exact completion. In contrast, NeuralBench full fine-tuning
 results are secondary reproduction evidence because the encoder is trainable,
 and historical HBN R5 comparisons are retrospective because repeated access
 eliminates an untouched-holdout interpretation.
+The capacity--data and layer-wise extensions also reuse the already evaluated
+MIPDB subjects. Their separately locked execution preserves provenance, not
+independence from earlier observations; they remain exploratory extensions
+rather than additional prospective primary replications.

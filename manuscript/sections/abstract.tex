@@ -1,28 +1,25 @@
-Frozen probing is often used to ask what information a foundation-model
-representation makes accessible, but increasing probe expressivity can confound
-representation quality with the probe's capacity to fit a development dataset.
-We study age decoding from frozen \REVE{} EEG representations under a sealed,
-predeclared external-evaluation protocol. Four heads---a final-layer
-mean-pooled linear baseline, an earlier-layer linear probe, a residual head over
-rich token statistics, and a two-query rich-statistics head---were trained with
-the same HBN development split and \ProbeSeeds{} optimization seeds. The frozen
-checkpoints were then evaluated once on \PrimarySubjects{} primary MIPDB
-subjects, yielding an exact inventory of \ExternalPredictions{} subject-level
-predictions. The baseline obtained mean Pearson correlation
-\BaselinePearson{}. Candidate mean paired improvements were
-\LayerLinearPearsonDelta{}, \RichResidualPearsonDelta{}, and
-\MultiQueryPearsonDelta{}, but every hierarchical-bootstrap interval included
-zero. Consequently, no tested alternative or richer head established a stable external gain
-under the conjunctive decision rule. This result does not establish equivalence;
-it shows that favorable average seed comparisons were insufficient evidence of
-robust generalization across both optimization seeds and external subjects.
-As a secondary capacity--data analysis, we also trained three heads at HBN
-training sizes of 200, 400, and 800 subjects across ten seeds. Candidate deltas
-remained positive across the tested cells, but did not improve monotonically
-with training size and remained uncertain at the larger regimes. This extension
-supports a bounded conclusion about the limits of more expressive heads rather
-than a universal scaling claim.
-As a separate exploratory layer-wise analysis, we compared the final-layer
-baseline with probes trained on three earlier REVE layers across the same ten
-seeds; the resulting intervals crossed zero, so this analysis does not provide
-a primary superiority claim.
+Frozen-probe scores reflect both an encoder and the protocol used to read out
+its representations. We study how age decoding from frozen \REVE{} EEG
+representations depends on the head, development-set size, evaluation metric,
+and external uncertainty. In a predeclared comparison, four heads trained on
+the same HBN development split with \ProbeSeeds{} optimization seeds were
+evaluated on a sealed cohort of \PrimarySubjects{} MIPDB subjects. The
+mean-linear baseline obtained Pearson correlation \BaselinePearson{}.
+Candidate mean paired Pearson differences were \LayerLinearPearsonDelta{},
+\RichResidualPearsonDelta{}, and \MultiQueryPearsonDelta{}, but every joint
+seed--subject bootstrap interval included zero. Thus no candidate met the
+predeclared stability criterion; this result does not establish equivalence.
+Metric rankings differed descriptively: the rich-statistics residual head had
+the highest mean Pearson, whereas the multi-query head had the lowest MAE and
+RMSE. Secondary capacity--data experiments compared three heads at 200, 400,
+and 800 HBN training subjects. Candidate advantages were positive at every size,
+but their point estimates did not grow monotonically with training size.
+Exploratory layer-wise comparisons likewise gave positive earlier-layer
+differences with intervals that crossed zero. These extensions reused the same
+external subjects and are not independent replications. The bounded practical
+contribution is an evaluation example in which head ranking depends on the
+metric, head contrasts depend on the training regime, and consistent seed
+directions coexist with substantial external-subject uncertainty. Frozen
+representation comparisons should therefore declare the readout and metric,
+match training regimes, and report subject-aware uncertainty alongside seed
+variation.

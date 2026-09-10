@@ -72,18 +72,20 @@ We next asked whether the external behavior of the richer heads changes with
 the amount of HBN development data. The secondary matrix contains the
 mean-linear baseline and two candidate heads at 200, 400, and 800 training
 subjects, with ten fixed seeds per cell. It therefore contributes 90 training
-runs and 6,750 external prediction identities, while preserving the same
-sealed 75-subject MIPDB evaluation. Full aggregate tables and transfer details
-are provided in the supplementary section.
+runs and 6,750 external prediction identities on the previously evaluated
+75-subject MIPDB cohort. Full aggregate tables and transfer details
+are provided in the supplementary section. These are repeated evaluations of
+the same people, not 6,750 independent external subjects or a new replication.
 
 Both candidate heads had positive mean paired Pearson differences at every
 training size, and every observed seed-level difference was positive. However,
-the paired advantage did not increase monotonically with the training subset:
-the gains were smaller at 800 subjects than at 200 subjects, while the larger
-regimes retained at least one candidate interval compatible with no difference.
-Figure~\ref{fig:capacity-main}
-summarizes this pattern. The result is therefore consistent with diminishing
-or unstable returns from added development data under this protocol, not with a
+the point-estimate advantage did not increase monotonically with the training
+subset. At 200 subjects, both candidates' paired intervals were above zero;
+at 800 subjects, both included zero. This difference between interval decisions
+does not itself establish a training-size interaction. The direct contrasts
+reported in the supplement are needed to assess whether the paired advantage
+changes with size. Figure~\ref{fig:capacity-main} summarizes the cell estimates;
+neither these estimates nor the bounded direct comparisons establish a
 universal scaling law or a general superiority claim for richer heads.
 
 \begin{figure}[t]
@@ -106,8 +108,8 @@ The layer-wise extension asked whether age information was more reliably
 accessible before the final REVE layer without changing probe capacity. We used
 the final-layer mean-linear probe as the baseline and compared matched linear
 probes at layers $-4$, $-3$, and $-2$. The analysis covered four layers, ten
-matched seeds, and the same \LayerwiseSubjectCount{}-subject sealed external
-cohort. It was
+matched seeds, and the same previously evaluated
+\LayerwiseSubjectCount{}-subject external cohort. It was
 exploratory and was not a primary superiority claim.
 
 \begin{table}[t]

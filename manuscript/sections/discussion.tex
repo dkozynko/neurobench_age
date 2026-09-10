@@ -8,31 +8,44 @@ hierarchical intervals remained compatible with zero once both seed and subject
 variation were propagated. Under the predeclared conjunction, no tested complex
 head therefore established a stable gain.
 
-This finding changes how the head comparison should be interpreted. Descriptively,
-the earlier-layer linear result is compatible with age-relevant signal being
-accessible before the final REVE layer, and the rich-statistics head is
-compatible with token dispersion and magnitude being useful to a downstream
-predictor. The multi-query result shows that additional adaptive aggregation
-can improve error metrics without delivering a reliable Pearson advantage.
-None of these observations warrants the stronger claim that the frozen
-representation itself is better under a richer readout.
+\paragraph{The metric changes the descriptive ranking.}
+The rich-statistics residual head obtained mean Pearson
+\RichResidualPearson{} with MAE \RichResidualMAE{} years, whereas the
+multi-query head obtained Pearson \MultiQueryPearson{} with MAE
+\MultiQueryMAE{} years (Table~\ref{tab:absolute-metrics}). Thus the highest
+correlation and lowest absolute error did not identify the same readout.
+Pearson measures linear association, not agreement in years; a favorable
+correlation cannot replace an error or calibration assessment. These secondary
+metrics are descriptive, not additional confirmatory wins, and were not used
+to replace the original Pearson endpoint after evaluation.
 
-The experiment also illustrates why probe capacity should be treated as part of
-the scientific intervention. A nonlinear head can recover target information
-that is present but not linearly accessible, but it can also exploit
-development-set regularities that do not transfer. Matched seeds, identical
-cached representations, common optimization, and paired external subjects
-reduce avoidable comparison noise; they do not eliminate cohort uncertainty.
+Descriptively, the earlier-layer linear result is compatible with age-relevant
+signal being accessible before the final REVE layer, and the rich-statistics
+head is compatible with token dispersion and magnitude being useful to a
+downstream predictor. The multi-query result has lower observed error metrics
+without establishing a reliable Pearson advantage. None of these observations
+warrants a general claim that a richer readout reveals a better representation.
 
-The capacity--data extension sharpens this interpretation. More development
-subjects did not produce a monotone increase in the richer heads' paired
-external advantage; instead, the advantage was smaller in the largest tested
-regime and remained uncertain under the joint bootstrap. This pattern is
-consistent with a setting in which additional data improves the baseline and
-candidate together, or in which the remaining limitation is cross-cohort
-transfer rather than head capacity. Because the extension uses only three
-nested training sizes and is exploratory, it should be read as a boundary on
-the tested intervention, not as evidence against scaling more generally.
+\paragraph{The readout and training regime define the comparison.}
+Probe capacity is part of the scientific intervention. A nonlinear head can
+recover information that is present but not linearly accessible, but it can
+also exploit development-set regularities that do not transfer. Matched seeds,
+identical cached representations, common optimization, and paired external
+subjects reduce avoidable comparison noise; they do not eliminate cohort
+uncertainty.
+
+The capacity--data extension sharpens this interpretation. The point estimates
+of the richer heads' paired external advantage were smaller at 800 training
+subjects than at 200, and both 800-subject intervals included zero. This pattern
+is consistent with additional data improving the baseline and candidate
+together, or with cross-cohort transfer limiting the comparison rather than head
+capacity. Neither explanation is isolated by this experiment. In particular,
+a positive interval at one size and a zero-crossing interval at another are
+not by themselves evidence that the effects differ. The direct training-size
+contrasts, rather than separate significance decisions, address that question.
+The observed MIPDB maximum must not be used to choose a new training size and
+then described as an untouched external test. With only three nested sizes,
+this is a bounded observation, not evidence against scaling more generally.
 
 The secondary layer-wise analysis provides a similarly bounded result. Earlier
 layers showed positive paired point estimates relative to the final-layer
@@ -41,10 +54,27 @@ depths. This is compatible with age-relevant information being available before
 the final layer, yet it does not show that an earlier layer is reliably better
 under this cohort, seed set, and linear probe.
 
-Finally, the negative confirmatory outcome is informative rather than a failed
-experiment. It narrows the supported claim to the tested REVE checkpoint,
-preprocessing, HBN development split, MIPDB cohort, head families, and seeds. It
-motivates future work on larger independent cohorts, cross-cohort replication,
-sample-efficiency curves, frequency-specific perturbations, and explicitly
-regularized probes. Such extensions should be specified as new studies rather
-than retrofitted to the sealed analysis.
+\paragraph{Seed consistency is not independent cohort replication.}
+Changing the seed interrogates training variability on the observed subjects;
+it does not recruit new external subjects. All three analyses here reuse the
+same MIPDB cohort. Their agreement can describe this cohort more fully but
+cannot establish that the same pattern will recur in another population.
+Likewise, a zero-crossing interval does not exclude a useful benefit: the
+intervals permit both unfavorable and favorable effects, and no practical
+equivalence margin was prespecified.
+
+\paragraph{Implications for evaluating frozen representations.}
+The concrete reporting recommendation is to declare the head, layer,
+development-set size, and primary metric as part of the evaluation protocol;
+compare heads within matched training regimes; and show paired subject-aware
+intervals alongside repeated-seed summaries. Absolute error and calibration
+should accompany correlation without silently becoming replacement endpoints.
+These recommendations are illustrated by this controlled case, not established
+as a new general theory of representation quality.
+
+The next discriminating experiment is an independently recruited,
+age-compatible external cohort evaluated with frozen checkpoints and a
+prospectively specified transfer protocol. Such a replication could extend the
+same investigation while remaining separate from the original primary test.
+A second encoder would test encoder specificity, whereas a larger HBN training
+set alone would not resolve the lack of independent external replication.

@@ -36,8 +36,10 @@ AdamW \citep{loshchilov2019adamw} with learning rate 1e-4 and weight decay
 annealing, gradient clipping at norm 1, and mean-squared error. Training had a
 maximum of 40 epochs and patience 7. For each seed and
 head, the earliest checkpoint attaining the best HBN validation Pearson
-correlation was selected. Neither MIPDB targets nor predictions influenced
-training, checkpoint selection, candidate membership, or thresholds.
+correlation was selected. For the primary comparison, neither MIPDB targets nor
+predictions influenced training, checkpoint selection, candidate membership,
+or thresholds. Subsequent extensions retain development-only checkpoint
+selection but do not restore an unexamined external cohort.
 
 \subsection{External estimand and descriptive metrics}
 
@@ -73,7 +75,7 @@ external analysis. Failure of any condition blocks a superiority claim.
 \subsection{Secondary layer-wise analysis}
 
 To examine whether the final-layer choice itself was decisive, we ran a
-separate exploratory comparison using the same sealed external cohort, ten
+separate exploratory comparison using the same previously evaluated external cohort, ten
 optimization seeds, and the completed four-layer representation matrix. The
 final-layer mean-linear probe (layer $-1$) was the baseline; matched linear
 probes at layers $-4$, $-3$, and $-2$ were the three comparisons. The analysis
@@ -86,7 +88,7 @@ primary protocol and was not allowed to alter the primary stability decision.
 The secondary extension repeats the frozen-head protocol at HBN training sizes
 of 200, 400, and 800 subjects for the mean-linear baseline, the rich-statistics
 residual head, and the matched four-unit MLP residual head. Each cell uses the
-same ten seeds and is evaluated on the same sealed 75-subject MIPDB cohort,
+same ten seeds and is evaluated on the same previously evaluated 75-subject MIPDB cohort,
 yielding 90 runs and 6,750 external prediction identities. The estimand is the
 change in the paired candidate--baseline Pearson difference across training
 sizes. We report a joint seed--subject bootstrap and separate exploratory exact

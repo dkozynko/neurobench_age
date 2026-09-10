@@ -19,8 +19,9 @@ entries.
 
 \subsection{Interpretation of the joint criterion}
 
-The five decision conditions answer complementary questions. Cohort adequacy
-prevents a small post-QC sample from supporting superiority. Holm adjustment
+The five decision conditions answer complementary questions. The cohort-size
+floor blocks a claim below the declared minimum but does not guarantee adequate
+power or precision. Holm adjustment
 controls the family-wise error rate across the three candidate comparisons.
 The bootstrap lower bound requires the paired mean effect to remain positive
 when both seeds and subjects vary. The win count guards against an average
@@ -63,7 +64,7 @@ provide motivation and implementation history, not untouched confirmation.
 
 \paragraph{Exploratory layer-wise.} A separate four-layer, ten-seed analysis
 compares matched linear probes at REVE layers $-4$, $-3$, and $-2$ with the
-final-layer mean-linear baseline on the same sealed
+final-layer mean-linear baseline on the same previously evaluated
 \LayerwiseSubjectCount{}-subject MIPDB cohort.
 Its report and figures are aggregate-only and are bound to the completed
 external prediction inventory; its intervals and sign-flip values are
@@ -73,10 +74,8 @@ The compact release preserves protocol and artifact identities while excluding
 raw recordings, model weights, participant identifiers, and subject-level
 predictions. This boundary is deliberate: it permits source and analysis
 audits without turning a restricted neuroimaging dataset into a public data
-copy. A metadata-first, access-controlled aggregate supplement may add primary
-cohort demographics, recording counts, and window counts after dataset-terms
-and disclosure review. Its candidate is bound to the completed study lock,
-finalized cohort-QC artifact, pinned NEMAR source identity, and a suppression
-policy with minimum cell size $k=5$; it is not an official NeuralBench score.
+copy. An additional access-controlled demographic and recording-level
+supplement is not included. The reported cohort flow should not be mistaken
+for a comprehensive account of recruitment or acquisition differences.
 
 \input{sections/capacity_data_regime}
