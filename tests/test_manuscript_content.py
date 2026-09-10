@@ -92,6 +92,20 @@ def test_primary_results_are_loaded_from_generated_assets() -> None:
     assert r"\LayerLinearPearsonDelta" in results
 
 
+def test_capacity_extension_is_integrated_into_main_narrative() -> None:
+    abstract = (MANUSCRIPT / "sections" / "abstract.tex").read_text(encoding="utf-8")
+    introduction = (MANUSCRIPT / "sections" / "introduction.tex").read_text(encoding="utf-8")
+    methods = (MANUSCRIPT / "sections" / "methods.tex").read_text(encoding="utf-8")
+    results = (MANUSCRIPT / "sections" / "results.tex").read_text(encoding="utf-8")
+    discussion = (MANUSCRIPT / "sections" / "discussion.tex").read_text(encoding="utf-8")
+    conclusion = (MANUSCRIPT / "sections" / "conclusion.tex").read_text(encoding="utf-8")
+    for section in (abstract, introduction, methods, results, discussion, conclusion):
+        assert "capacity--data" in section
+        assert any(marker in section for marker in ("secondary", "exploratory", "bounded"))
+    assert "../results/extensions/capacity_data_regime_v3/capacity_data_regime_delta.pdf" in results
+    assert "universal scaling law" in results
+
+
 def test_every_citation_key_exists_and_every_bibliography_entry_is_used() -> None:
     source = _source_text()
     bibliography = (MANUSCRIPT / "references.bib").read_text(encoding="utf-8")

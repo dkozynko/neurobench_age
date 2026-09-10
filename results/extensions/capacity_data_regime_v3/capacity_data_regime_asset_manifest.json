@@ -1,0 +1,52 @@
+{
+  "analysis_sha256": "1bd8143b8d917d36082f23e5e936bf2b5f873f3e8803e144b96d3e2297f8d974",
+  "asset_manifest_sha256": "24dad75a98daaa0cf97aa96d684cc30dc1d9aad8cef77c321613792a12722374",
+  "checkpoint_inventory_body_sha256": "c1802b6cec2dc465bef5e5543c596695964229d88038d6746858a5c66aeab32a",
+  "exploratory_inference_sha256": "9ebf7a48cdc83a6b2c62ce6da12c025ca33d67c06973e273ca00acaa8edaaaac",
+  "files": {
+    "capacity_data_regime_absolute.pdf": {
+      "bytes": 26675,
+      "sha256": "6d8d71f6fbe756ae363f714f8cc9b90f4426ae90044fd7d9f6353738415ab3ff"
+    },
+    "capacity_data_regime_absolute.tex": {
+      "bytes": 632,
+      "sha256": "b545a68833fabfd5ce1d5a70ceec50fab01ffd407b5bfbd77b4e67893a5338d2"
+    },
+    "capacity_data_regime_cells.csv": {
+      "bytes": 1658,
+      "sha256": "b38c61c21edb8a146a1ab1d4e6d1c210a84d92204ddf44eee7c4b97e6fa23176"
+    },
+    "capacity_data_regime_cells.tex": {
+      "bytes": 657,
+      "sha256": "639af8bf7ca56bcbce994f56f7f397b85e783a3d984cbc36d47d9962df7fc7b8"
+    },
+    "capacity_data_regime_contrasts.csv": {
+      "bytes": 1019,
+      "sha256": "bd49df9319c3922b748fe6703b1ba7ed4ec53539d69f8854719eff7d7ca437a4"
+    },
+    "capacity_data_regime_contrasts.tex": {
+      "bytes": 738,
+      "sha256": "4c91bc68d25727fe6c888332c1b70b09be2e9e6aaa932423d7479d8c682344c1"
+    },
+    "capacity_data_regime_delta.pdf": {
+      "bytes": 31516,
+      "sha256": "4452f87d2781562cb9742b064778edb3867f0973430862dee155673c2fb200f9"
+    },
+    "capacity_data_regime_seed_deltas.csv": {
+      "bytes": 3692,
+      "sha256": "f25291a052858ed132171de2b38a86dd611edfd6539d5512d93f2099556e98bf"
+    },
+    "capacity_data_regime_seed_deltas.pdf": {
+      "bytes": 36902,
+      "sha256": "d925a97aa57d77ffdfab3a66f51d9ba9e3daba54a5564b9089b61982dd76064a"
+    },
+    "capacity_data_regime_validation_external_transfer.tex": {
+      "bytes": 449,
+      "sha256": "536d89d078c46db98426d0b2e53100aeb3e6dd5a600fcabff9e57675b7881aef"
+    }
+  },
+  "final_lock_sha256": "1919e92a79fc6d0d0bb7a43c653fb13ba7cee3ce3ca881e760ab461fee31d2c6",
+  "prediction_inventory_body_sha256": "728d4d002b936213391e0bd4898f5220ee0aeedb2351c21e45f9a4f6f8ec2d94",
+  "schema_version": 1,
+  "status": "complete"
+}

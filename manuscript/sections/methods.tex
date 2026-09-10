@@ -69,3 +69,16 @@ true: the primary cohort meets the 50-subject minimum; adjusted p is below
 95\% bootstrap lower bound is above zero; at least eight of ten seeds improve;
 and the worst seed delta is at least minus 0.01. This conjunction was fixed before
 external analysis. Failure of any condition blocks a superiority claim.
+
+\subsection{Secondary capacity--data analysis}
+
+The secondary extension repeats the frozen-head protocol at HBN training sizes
+of 200, 400, and 800 subjects for the mean-linear baseline, the rich-statistics
+residual head, and the matched four-unit MLP residual head. Each cell uses the
+same ten seeds and is evaluated on the same sealed 75-subject MIPDB cohort,
+yielding 90 runs and 6,750 external prediction identities. The estimand is the
+change in the paired candidate--baseline Pearson difference across training
+sizes. We report a joint seed--subject bootstrap and separate exploratory exact
+seed sign-flip families for the six cells and six training-size contrasts. These
+secondary p-values are descriptive and cannot change the primary stable-
+improvement decision.

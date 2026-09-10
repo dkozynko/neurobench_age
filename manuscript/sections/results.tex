@@ -66,6 +66,40 @@ as visualized by the joint seed-and-subject bootstrap intervals.
   \label{fig:bootstrap}
 \end{figure}
 
+\subsection{Secondary capacity--data regime}
+
+We next asked whether the external behavior of the richer heads changes with
+the amount of HBN development data. The secondary matrix contains the
+mean-linear baseline and two candidate heads at 200, 400, and 800 training
+subjects, with ten fixed seeds per cell. It therefore contributes 90 training
+runs and 6,750 external prediction identities, while preserving the same
+sealed 75-subject MIPDB evaluation. Full aggregate tables and transfer details
+are provided in the supplementary section.
+
+Both candidate heads had positive mean paired Pearson differences at every
+training size, and every observed seed-level difference was positive. However,
+the paired advantage did not increase monotonically with the training subset:
+the gains were smaller at 800 subjects than at 200 subjects, while the larger
+regimes retained at least one candidate interval compatible with no difference.
+Figure~\ref{fig:capacity-main}
+summarizes this pattern. The result is therefore consistent with diminishing
+or unstable returns from added development data under this protocol, not with a
+universal scaling law or a general superiority claim for richer heads.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.92\linewidth]{../results/extensions/capacity_data_regime_v3/capacity_data_regime_delta.pdf}
+  \caption{Secondary capacity--data analysis. Paired external Pearson deltas
+  relative to the training-size-matched mean-linear baseline. Intervals are
+  joint seed--subject bootstrap intervals; the extension is exploratory.}
+  \label{fig:capacity-main}
+\end{figure}
+
+The exact seed sign-flip tests and Holm corrections reported for this extension
+are descriptive exploratory inference. They do not modify the primary
+predeclared stability rule, whose conclusion remains that no tested complex
+head established a stable external gain.
+
 \subsection{Calibration}
 
 All heads had mean calibration slopes above one, with the multi-query model

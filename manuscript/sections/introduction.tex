@@ -23,9 +23,19 @@ evaluated once on a sealed MIPDB cohort. Official NeuralBench-style end-to-end
 experiments provide reproduction context, while previously inspected HBN test
 results are retrospective only. MIPDB is not an official NeuralBench score.
 
+We additionally examine whether the paired head comparison changes with the
+amount of development data. A secondary capacity--data extension trains the
+mean-linear baseline and two richer heads on nested HBN subsets of 200, 400,
+and 800 subjects, using ten fixed optimization seeds and the same sealed MIPDB
+evaluation. This extension is explicitly exploratory: it probes whether more
+development data makes a richer head more reliable, but it does not expand the
+primary confirmatory claim or represent a full-dataset scaling law.
+
 Our contribution is methodological as much as numerical. We combine a matched
 four-head design, exact repeated-seed inventories, subject- and seed-aware
 uncertainty, a paired seed-level sign-flip test with multiplicity correction,
-and a conjunctive stability criterion. The outcome illustrates why average
-gains and small adjusted p-values should not be interpreted as stable
-representation improvements when external uncertainty remains broad.
+and a conjunctive stability criterion. We then use the secondary extension to
+separate absolute performance from changes in the paired candidate--baseline
+difference across training regimes. The outcome illustrates why average gains
+and small adjusted p-values should not be interpreted as stable representation
+improvements when external uncertainty remains broad.
