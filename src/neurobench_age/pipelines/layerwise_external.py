@@ -321,12 +321,14 @@ def run_layerwise_external(
     )
     training_manifest = _load_json(training_manifest_path, "HBN training manifest")
     encoder_checkpoint_sha256 = training_manifest.get("checkpoint_sha256")
+    representation_source_tree_sha256 = training_manifest.get("source_tree_sha256")
     if (
         training_manifest.get("protocol_sha256") != protocol.sha256
-        or training_manifest.get("source_tree_sha256") != training_source_sha256
         or training_manifest.get("checkpoint") != protocol.encoder.checkpoint
         or not isinstance(encoder_checkpoint_sha256, str)
         or not _is_sha256(encoder_checkpoint_sha256)
+        or not isinstance(representation_source_tree_sha256, str)
+        or not _is_sha256(representation_source_tree_sha256)
         or training_manifest.get("preprocessing_sha256")
         != preprocessing_contract_sha256(protocol.preprocessing)
     ):
@@ -369,6 +371,7 @@ def run_layerwise_external(
         "encoder_checkpoint_sha256": encoder_checkpoint_sha256,
         "preprocessing_sha256": preprocessing_contract_sha256(protocol.preprocessing),
         "hbn_training_manifest_sha256": _sha256_file(training_manifest_path),
+        "hbn_representation_source_tree_sha256": representation_source_tree_sha256,
         "primary_hbn_training_manifest_sha256": _sha256_file(primary_training_manifest_path),
         "primary_hbn_training_source_tree_sha256": primary_source_tree_sha256,
         "primary_cache_source_tree_sha256": primary_cache_source_tree_sha256,

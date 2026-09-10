@@ -461,7 +461,9 @@ class ValidatedRepresentationStore:
         expected_dtypes: dict[int, torch.dtype] = {}
         for record in records:
             metadata = metadata_inspector(
-                cache_root, record.cache_identity
+                cache_root,
+                record.cache_identity,
+                expected_layers=required,
             )
             if any(layer not in metadata for layer in required):
                 raise FrozenEncoderError("representation metadata is missing a required layer")

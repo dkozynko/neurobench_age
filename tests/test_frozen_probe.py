@@ -538,6 +538,51 @@ def test_representation_store_loads_both_layers_once_and_preserves_tensor_object
         store.tensor(records[0].subject_id, -3)
 
 
+def test_representation_store_passes_required_layers_to_metadata_inspector(
+    tmp_path: Path,
+) -> None:
+    records = []
+    evidence = {
+        "encoder_frozen": True,
+        "encoder_eval_mode": True,
+        "inference_mode": True,
+        "layer_indices": [-4, -3, -2, -1],
+        "state_sha256_before": "f" * 64,
+        "state_sha256_after": "f" * 64,
+    }
+    for index, split in enumerate(("train", "validation"), start=1):
+        subject_id = f"sub-layerwise-{index}"
+        identity = _identity(subject_id)
+        signal = torch.full((3, 1, 2), float(index))
+        write_cached_representations(
+            tmp_path,
+            identity,
+            {-4: signal, -3: signal, -2: signal, -1: signal},
+            evidence=evidence,
+            declared_layers=(-4, -3, -2, -1),
+        )
+        records.append(CachedSubjectRecord(subject_id, split, float(index), identity))
+
+    calls: list[tuple[int, ...]] = []
+
+    def metadata_inspector(cache_root, identity, *, expected_layers):
+        calls.append(tuple(expected_layers))
+        return inspect_cached_representation_metadata(
+            cache_root, identity, expected_layers=expected_layers
+        )
+
+    store = ValidatedRepresentationStore.build(
+        records=tuple(records),
+        cache_root=tmp_path,
+        required_layers=(-4, -3, -2, -1),
+        available_memory_bytes=16 * 1024**3,
+        metadata_inspector=metadata_inspector,
+    )
+
+    assert calls == [(-4, -3, -2, -1)] * len(records)
+    assert store.tensor(records[0].subject_id, -4).shape == (3, 1, 2)
+
+
 def test_representation_store_rejects_insufficient_memory_before_loading(
     tmp_path: Path,
 ) -> None:
