@@ -58,3 +58,23 @@ def test_layerwise_extension_is_registered_with_bounded_interpretation() -> None
         assert "14b5afe5623f" in text
         assert "exploratory" in text.casefold()
     assert "does not modify the primary confirmatory claim" in registry
+
+
+def test_clean_server_reproduction_guide_is_public_and_complete() -> None:
+    guide = (ROOT / "docs/research/reproduction.md").read_text(encoding="utf-8")
+    normalized = " ".join(guide.split())
+
+    for required in (
+        "article_ready_protocol.md",
+        "clean checkout",
+        "uv",
+        "access-controlled inputs",
+        "aggregate artifacts",
+        "participant-level predictions",
+        "make --directory=manuscript verify",
+    ):
+        assert required.casefold() in normalized.casefold()
+
+    forbidden_paths = ("/" + "Users/", "/" + "home/")
+    for forbidden in ("ssh -p", "hf_", "root@", *forbidden_paths):
+        assert forbidden.casefold() not in guide.casefold()

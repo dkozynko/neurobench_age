@@ -17,6 +17,9 @@ See [`ARTICLE_SCOPE.md`](ARTICLE_SCOPE.md) for the claim boundary and
 [`docs/research/article_ready_protocol.md`](docs/research/article_ready_protocol.md)
 for the execution contract.
 
+For a clean-server setup, public verification, private-input boundary, and
+shutdown checklist, see [`docs/research/reproduction.md`](docs/research/reproduction.md).
+
 ## Repository layout
 
 ```text
