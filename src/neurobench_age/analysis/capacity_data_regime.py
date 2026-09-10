@@ -9,7 +9,12 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from neurobench_age.analysis.confirmatory import exact_seed_randomization, holm_step_down
 from neurobench_age.research.capacity_data_regime import CapacityDataRegimeProtocol
+from neurobench_age.research.capacity_data_regime_inference import (
+    CapacityExploratoryInference,
+    default_capacity_exploratory_inference,
+)
 from neurobench_age.research.capacity_data_regime_lock import (
     CapacityDataRegimeLockError,
     load_final_lock,
@@ -192,6 +197,7 @@ def analyze_capacity_data_regime(
     prediction_inventory: Mapping[str, Any],
     checkpoint_inventory: Mapping[str, Any] | None = None,
     protocol: CapacityDataRegimeProtocol | None = None,
+    exploratory_inference: CapacityExploratoryInference | None = None,
 ) -> dict[str, Any]:
     """Validate final evidence and calculate the six predeclared contrasts."""
 
@@ -231,6 +237,11 @@ def analyze_capacity_data_regime(
             "runs": validated_checkpoint_inventory["runs"],
         }
     arrays, targets, subject_ids = _validated_arrays(validated_inventory)
+    inference = (
+        exploratory_inference
+        if exploratory_inference is not None
+        else default_capacity_exploratory_inference()
+    )
     iterations = 10_000 if protocol is None else protocol.bootstrap_iterations
     bootstrap_seed = 20260909 if protocol is None else protocol.bootstrap_seed
     confidence = 0.95 if protocol is None else protocol.bootstrap_confidence
@@ -240,6 +251,7 @@ def analyze_capacity_data_regime(
     sampled_subject_indices = rng.integers(0, len(subject_ids), size=(iterations, len(subject_ids)))
     cell_results: list[dict[str, Any]] = []
     delta_by_head_size: dict[tuple[str, int], float] = {}
+    seed_delta_by_head_size: dict[tuple[str, int], np.ndarray] = {}
     bootstrap_by_head_size: dict[tuple[str, int], np.ndarray] = {}
     undefined_by_head_size: dict[tuple[str, int], int] = {}
     for head in CANDIDATE_HEADS:
@@ -268,6 +280,7 @@ def analyze_capacity_data_regime(
                     }
                 )
             observed = float(np.mean(deltas))
+            seed_delta_array = np.asarray(deltas, dtype=np.float64)
             bootstrap_values, undefined = _bootstrap_distribution(
                 np.stack([arrays[(size, head, seed)] for seed in SEEDS]),
                 np.stack([arrays[(size, BASELINE_HEAD, seed)] for seed in SEEDS]),
@@ -281,6 +294,7 @@ def analyze_capacity_data_regime(
                     f"bootstrap valid replicate count is below threshold for {head}, n={size}"
                 )
             delta_by_head_size[(head, size)] = observed
+            seed_delta_by_head_size[(head, size)] = seed_delta_array
             bootstrap_by_head_size[(head, size)] = bootstrap_values
             undefined_by_head_size[(head, size)] = undefined
             cell_results.append(
@@ -291,7 +305,10 @@ def analyze_capacity_data_regime(
                     "per_seed": per_seed,
                     "mean_candidate_pearson": float(np.mean(candidate_values)),
                     "mean_baseline_pearson": float(np.mean(baseline_values)),
+                    "candidate_pearson_seed_sd": float(np.std(candidate_values, ddof=1)),
+                    "baseline_pearson_seed_sd": float(np.std(baseline_values, ddof=1)),
                     "mean_delta": observed,
+                    "seed_delta_sample_sd": float(np.std(seed_delta_array, ddof=1)),
                     "wins": int(np.count_nonzero(np.asarray(deltas) > 0.0)),
                     "ties": int(np.count_nonzero(np.asarray(deltas) == 0.0)),
                     "losses": int(np.count_nonzero(np.asarray(deltas) < 0.0)),
@@ -309,6 +326,30 @@ def analyze_capacity_data_regime(
                     },
                 }
             )
+
+    cell_names = [
+        f"{cell['head']}@{cell['training_size']}" for cell in cell_results
+    ]
+    cell_randomization = {
+        name: exact_seed_randomization(
+            seed_delta_by_head_size[(str(cell["head"]), int(cell["training_size"]))]
+        )
+        for name, cell in zip(cell_names, cell_results)
+    }
+    cell_adjusted = holm_step_down(
+        {name: result["p_value"] for name, result in cell_randomization.items()},
+        order=inference.cell_family_order,
+    )
+    cell_order_index = {name: index for index, name in enumerate(inference.cell_family_order)}
+    for cell, name in zip(cell_results, cell_names):
+        randomization = cell_randomization[name]
+        cell["seed_randomization"] = {
+            **randomization,
+            "holm_adjusted_p_value": cell_adjusted[name],
+            "family": "cell",
+            "family_order_index": cell_order_index[name],
+            "scope": inference.status,
+        }
 
     contrasts: list[dict[str, Any]] = []
     for head in CANDIDATE_HEADS:
@@ -328,6 +369,10 @@ def analyze_capacity_data_regime(
                     f"bootstrap valid replicate count is below threshold for contrast {head}, {name}"
                 )
             low_ci, high_ci = _interval(bootstrap_values, confidence=confidence)
+            seed_contrast_deltas = (
+                seed_delta_by_head_size[(head, high)]
+                - seed_delta_by_head_size[(head, low)]
+            )
             contrasts.append(
                 {
                     "head": head,
@@ -336,6 +381,15 @@ def analyze_capacity_data_regime(
                     "training_size_high": high,
                     "training_size_low": low,
                     "observed": float(observed),
+                    "seed_delta_sample_sd": float(np.std(seed_contrast_deltas, ddof=1)),
+                    "per_seed": [
+                        {
+                            "seed": seed,
+                            "delta_change": float(delta),
+                        }
+                        for seed, delta in zip(SEEDS, seed_contrast_deltas)
+                    ],
+                    "seed_randomization": exact_seed_randomization(seed_contrast_deltas),
                     "bootstrap": {
                         "iterations": iterations,
                         "valid_iterations": int(valid.sum()),
@@ -349,6 +403,28 @@ def analyze_capacity_data_regime(
                     },
                 }
             )
+    contrast_names = [
+        f"{contrast['head']}@{contrast['name']}" for contrast in contrasts
+    ]
+    contrast_randomization = {
+        name: contrast["seed_randomization"]
+        for name, contrast in zip(contrast_names, contrasts)
+    }
+    contrast_adjusted = holm_step_down(
+        {name: result["p_value"] for name, result in contrast_randomization.items()},
+        order=inference.contrast_family_order,
+    )
+    contrast_order_index = {
+        name: index for index, name in enumerate(inference.contrast_family_order)
+    }
+    for contrast, name in zip(contrasts, contrast_names):
+        contrast["seed_randomization"] = {
+            **contrast["seed_randomization"],
+            "holm_adjusted_p_value": contrast_adjusted[name],
+            "family": "training_size_contrast",
+            "family_order_index": contrast_order_index[name],
+            "scope": inference.status,
+        }
     output_body = {
         "schema_version": 1,
         "status": "complete",
@@ -389,6 +465,18 @@ def analyze_capacity_data_regime(
             "minimum_valid_replicates": minimum_valid,
             "resampling": "same paired seed vector and subject vector reused across all cells",
             "percentile_method": "linear_interpolation",
+        },
+        "exploratory_inference": {
+            "schema_version": inference.schema_version,
+            "scope": inference.status,
+            "config_scope": inference.scope,
+            "alpha": inference.alpha,
+            "tail": inference.tail,
+            "zero_deltas": inference.zero_deltas,
+            "cell_family_order": list(inference.cell_family_order),
+            "contrast_family_order": list(inference.contrast_family_order),
+            "decision_rule": inference.decision_rule,
+            "sha256": inference.sha256,
         },
     }
     return {**output_body, "analysis_sha256": _canonical_sha256(output_body)}

@@ -11,6 +11,9 @@ from typing import Sequence
 
 from neurobench_age.analysis.capacity_data_regime import analyze_capacity_data_regime
 from neurobench_age.research.capacity_data_regime import load_capacity_data_regime_protocol
+from neurobench_age.research.capacity_data_regime_inference import (
+    load_capacity_exploratory_inference,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--final-lock", required=True, type=Path)
     parser.add_argument("--checkpoint-inventory", required=True, type=Path)
     parser.add_argument("--prediction-inventory", required=True, type=Path)
+    parser.add_argument("--exploratory-inference-config", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     return parser
 
@@ -40,6 +44,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         protocol = load_capacity_data_regime_protocol(
             args.protocol, repository_root=repository_root
         )
+        exploratory_inference = load_capacity_exploratory_inference(
+            args.exploratory_inference_config
+        )
         result = analyze_capacity_data_regime(
             final_lock=_load_json(args.final_lock, "final extension lock"),
             prediction_inventory=_load_json(
@@ -49,6 +56,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.checkpoint_inventory, "checkpoint inventory"
             ),
             protocol=protocol,
+            exploratory_inference=exploratory_inference,
         )
         output = Path(args.output).resolve()
         forbidden_roots = (

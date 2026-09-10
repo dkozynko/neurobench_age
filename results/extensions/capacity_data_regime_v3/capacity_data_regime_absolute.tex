@@ -1,0 +1,15 @@
+\begin{tabular}{llrrr}
+\toprule
+Training size & Head & Params & Mean Pearson & Seed SD \\
+\midrule
+200 & Mean-linear baseline & 513 & 0.527 & 0.011 \\
+200 & Rich-statistics residual & 2561 & 0.604 & 0.009 \\
+200 & Matched MLP (hidden\_dim=4) & 2569 & 0.582 & 0.025 \\
+400 & Mean-linear baseline & 513 & 0.655 & 0.008 \\
+400 & Rich-statistics residual & 2561 & 0.711 & 0.008 \\
+400 & Matched MLP (hidden\_dim=4) & 2569 & 0.704 & 0.014 \\
+800 & Mean-linear baseline & 513 & 0.645 & 0.008 \\
+800 & Rich-statistics residual & 2561 & 0.676 & 0.007 \\
+800 & Matched MLP (hidden\_dim=4) & 2569 & 0.662 & 0.012 \\
+\bottomrule
+\end{tabular}

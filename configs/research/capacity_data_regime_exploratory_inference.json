@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "status": "exploratory",
+  "scope": "capacity_data_regime_secondary",
+  "alpha": 0.05,
+  "tail": "greater",
+  "zero_deltas": "include_as_nonnegative_exceedance",
+  "cell_family_order": [
+    "mean_rich_stats_residual@200",
+    "mean_rich_stats_residual@400",
+    "mean_rich_stats_residual@800",
+    "mean_mlp_residual_matched(hidden_dim=4)@200",
+    "mean_mlp_residual_matched(hidden_dim=4)@400",
+    "mean_mlp_residual_matched(hidden_dim=4)@800"
+  ],
+  "contrast_family_order": [
+    "mean_rich_stats_residual@endpoint_800_minus_200",
+    "mean_rich_stats_residual@adjacent_400_minus_200",
+    "mean_rich_stats_residual@adjacent_800_minus_400",
+    "mean_mlp_residual_matched(hidden_dim=4)@endpoint_800_minus_200",
+    "mean_mlp_residual_matched(hidden_dim=4)@adjacent_400_minus_200",
+    "mean_mlp_residual_matched(hidden_dim=4)@adjacent_800_minus_400"
+  ],
+  "decision_rule": "exploratory_p_values_do_not_change_sealed_stable_improvement_decision"
+}

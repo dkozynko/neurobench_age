@@ -36,6 +36,7 @@ def _source_text() -> str:
     paths = [MANUSCRIPT / "main.tex", MANUSCRIPT / "macros.tex"] + [
         MANUSCRIPT / "sections" / name for name in SECTIONS
     ]
+    paths.append(MANUSCRIPT / "sections" / "capacity_data_regime.tex")
     return "\n".join(path.read_text(encoding="utf-8") for path in paths)
 
 
@@ -111,3 +112,23 @@ def test_manuscript_build_inputs_are_portable() -> None:
     assert "shell-escape" not in source.casefold()
     private_path_pattern = rf"(?:/{'Users'}/|/{'workspace'}/|(?:^|\s)[A-Za-z]:\\)"
     assert not re.search(private_path_pattern, source)
+
+
+def test_capacity_data_extension_uses_exact_aggregate_assets() -> None:
+    source = (MANUSCRIPT / "sections" / "capacity_data_regime.tex").read_text(
+        encoding="utf-8"
+    )
+    asset_root = ROOT / "results" / "extensions" / "capacity_data_regime_v3"
+    required = (
+        "capacity_data_regime_absolute.tex",
+        "capacity_data_regime_cells.tex",
+        "capacity_data_regime_contrasts.tex",
+        "capacity_data_regime_validation_external_transfer.tex",
+        "capacity_data_regime_absolute.pdf",
+        "capacity_data_regime_delta.pdf",
+        "capacity_data_regime_seed_deltas.pdf",
+    )
+    for name in required:
+        assert (asset_root / name).is_file()
+        assert name in source
+    assert "*" not in source

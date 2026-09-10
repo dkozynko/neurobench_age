@@ -67,6 +67,24 @@ These results are exploratory evidence about representation-head capacity and
 data regime. They do not establish causality, universal scaling laws, or
 superiority outside the declared protocol.
 
+## Exploratory inference
+
+The extension reports an exact seed-level sign-flip p-value for each of the six
+head-by-training-size cells and for each of the six predeclared training-size
+contrasts. The sign assignments enumerate all $2^{10}$ possibilities for the
+ten paired seed deltas. Zero deltas are retained as nonnegative exceedances.
+Holm step-down adjustment is applied separately within the cell family and the
+contrast family, using the fixed order recorded in
+`configs/research/capacity_data_regime_exploratory_inference.json`.
+
+These p-values are descriptive exploratory inference. They do not expand the
+sealed primary hypothesis family, change the primary stable-improvement rule,
+or justify a superiority/equivalence claim. The joint seed--subject bootstrap
+intervals and the primary predeclared decision boundary remain authoritative
+for interpretation. The aggregate asset manifest records the analysis hash,
+inference-specification hash, lock hashes, and file hashes so that regenerated
+tables cannot silently use a different family or ordering.
+
 ## Data boundary
 
 Only aggregate derived evidence is intended for publication. No participant-

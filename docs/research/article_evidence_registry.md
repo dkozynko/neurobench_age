@@ -9,6 +9,7 @@ logs remain external artifacts whose identities are retained by hash.
 | Primary prospective study | sealed lock, checkpoint and prediction inventories, confirmatory analysis | compact protocol identities, 75-subject cohort summary, 40-run matrix, 3,000-record inventory identity, paired statistics | Stable external improvement only when every predeclared criterion passes |
 | Secondary reproduction evidence | official NeuralBench full fine-tuning path and `src/neurobench_age/pipelines/independent.py` | protocol checks, compact metrics, implementation comparison | Reproduction and sensitivity context for end-to-end age prediction |
 | Retrospective secondary evidence | historical HBN R5 records under `results/canonical/` | per-seed metrics, gates, and compact negative results | Motivation and retrospective description only; not model or head selection |
+| Capacity--data extension | finalized 90-run extension lock, prediction inventory, exploratory analysis, and aggregate asset manifest | 3 training sizes, 3 heads, 10 seeds, 6,750 external prediction identities, aggregate tables and figures | Exploratory evidence about paired head behavior across the tested data regimes; does not modify the primary confirmatory claim |
 | Contract evidence | `tests/`, `src/neurobench_age/research/`, and `src/neurobench_age/analysis/` | synthetic workflows, strict schemas, tamper checks | Demonstrates code behavior, not empirical model performance |
 
 ## Primary prospective artifact map
@@ -27,6 +28,19 @@ The importer independently checks the exact four-head by ten-seed checkpoint
 matrix, the common ordered 75-subject cohort, all 3,000 unique inventory
 identities, the canonical hash chain, Holm adjustment, every condition in the
 joint decision, and the bounded conclusion.
+
+## Capacity--data extension artifact map
+
+The extension is retained as aggregate evidence under
+`results/extensions/capacity_data_regime_v3/`. Its manifest binds the 90-run
+analysis to the finalized lock, checkpoint inventory, prediction inventory,
+and exploratory inference specification. The analysis digest is
+`1bd8143b8d917d36082f23e5e936bf2b5f873f3e8803e144b96d3e2297f8d974` and the
+asset-manifest digest is
+`24dad75a98daaa0cf97aa96d684cc30dc1d9aad8cef77c321613792a12722374`.
+The stored outputs contain only aggregate metrics, seed-level contrasts,
+intervals, tables, and figures; no participant-level rows, identifiers, or
+raw signals are released.
 
 ## Confirmatory result
 

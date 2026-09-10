@@ -92,6 +92,17 @@ maintained in
 - Confirmatory conclusion: no tested complex head established a stable external
   gain under the predeclared joint rule; this does not establish equivalence.
 
+## Secondary capacity--data extension
+
+A separate aggregate-only extension tests whether the paired behavior of two
+more expressive heads changes with nested HBN training sizes of 200, 400, and
+800 subjects. It contains 90 frozen-head runs across three heads and ten
+seeds, followed by a sealed external evaluation on the same 75-subject primary
+cohort. The resulting 6,750 subject-level predictions remain outside Git.
+Aggregate tables, figures, and their hash-chain manifest are retained under
+`results/extensions/capacity_data_regime_v3/`. This extension is exploratory
+and does not replace or modify the primary confirmatory evidence above.
+
 Only compact canonical evidence is retained here. Participant-level predictions,
 checkpoints, caches, raw recordings, and logs remain outside Git.
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from neurobench_age.analysis.capacity_data_regime import analyze_capacity_data_regime
 from neurobench_age.research.capacity_data_regime_lock import (
     build_checkpoint_inventory,
@@ -8,6 +10,13 @@ from neurobench_age.research.capacity_data_regime_lock import (
     build_lock_core,
     build_prediction_inventory,
 )
+from neurobench_age.research.capacity_data_regime_inference import (
+    load_capacity_exploratory_inference,
+)
+
+
+ROOT = Path(__file__).resolve().parents[1]
+INFERENCE_PATH = ROOT / "configs/research/capacity_data_regime_exploratory_inference.json"
 
 
 def _sha(letter: str) -> str:
@@ -141,3 +150,35 @@ def test_analysis_reports_exact_cells_contrasts_and_joint_bootstrap() -> None:
         result["bootstrap"]["shared_seed_and_subject_draws"] is True
         for result in first["contrasts"]
     )
+
+
+def test_analysis_reports_seed_variability_and_exploratory_holm_families() -> None:
+    final_lock, prediction_inventory, checkpoint_inventory = _evidence()
+    inference = load_capacity_exploratory_inference(INFERENCE_PATH)
+    result = analyze_capacity_data_regime(
+        final_lock=final_lock,
+        prediction_inventory=prediction_inventory,
+        checkpoint_inventory=checkpoint_inventory,
+        exploratory_inference=inference,
+    )
+
+    assert result["exploratory_inference"]["sha256"] == inference.sha256
+    assert result["exploratory_inference"]["scope"] == "exploratory"
+    assert len(result["cells"]) == 6
+    assert len(result["contrasts"]) == 6
+    for cell in result["cells"]:
+        assert cell["seed_delta_sample_sd"] >= 0.0
+        assert 0.0 <= cell["seed_randomization"]["p_value"] <= 1.0
+        assert 0.0 <= cell["seed_randomization"]["holm_adjusted_p_value"] <= 1.0
+        assert cell["seed_randomization"]["family"] == "cell"
+    for contrast in result["contrasts"]:
+        assert len(contrast["per_seed"]) == 10
+        assert "seed_delta_sample_sd" in contrast
+        assert "p_value" in contrast["seed_randomization"]
+        assert "holm_adjusted_p_value" in contrast["seed_randomization"]
+        assert contrast["seed_randomization"]["family"] == "training_size_contrast"
+
+    cell_names = [f"{row['head']}@{row['training_size']}" for row in result["cells"]]
+    assert [
+        row["seed_randomization"]["family_order_index"] for row in result["cells"]
+    ] == [inference.cell_family_order.index(name) for name in cell_names]
