@@ -2,8 +2,9 @@
 
 Date: 2026-09-10.
 
-**Status:** metadata/literature screening completed for the candidates below;
-no second cohort is approved for execution, downloaded, or evaluated.
+**Status:** metadata/literature screening and a target-free technical pilot of
+ds006780 are complete; no second cohort is approved for confirmatory inference,
+and no external data or model outputs are stored in this repository.
 
 **Goal:** test whether the observed REVE head comparison transfers to an
 independently recruited, age-compatible EEG cohort without tuning on its targets.
@@ -41,7 +42,7 @@ access must still be checked before declaring a usable cohort.
 | Candidate | Verified source facts | Decision for the current transfer contract |
 | --- | --- | --- |
 | Kang et al., *Development of EEG connectivity from preschool to school-age children* | 253 children aged 3-10; eyes-open EEG acquired with a 128-channel HydroCel net at 1,000 Hz. The authors offer raw data on request. Their analyzed derivative uses filtering and a reduced channel set. | Best acquisition match among these screened candidates, but not execution-ready: request original raw channels, continuous age at recording, recording boundaries, and reuse conditions. Ages below the HBN support are ineligible for the primary replication. |
-| OpenNeuro ds006780, *SFARI_EEG multi-paradigm dataset* | Public raw BIDS EEG from 136 listed children aged 7.9-14.5, with 127 participants having both an exact age and a resting-state run-01 file in the checked public tree. Acquisition is BioSemi ActiveTwo, 64 EEG channels at 512 Hz, plus eight EMG channels and a trigger channel. Resting state is eyes-open, approximately 62-second blocks, with 1-8 runs observed and up to six blocks described across two sessions. The cohort contains typically developing, ASD, and ASD-sibling groups. | Best public candidate found so far, but not execution-ready: the checked BIDS tree has no subject-specific `electrodes.tsv` or `coordsystem.json`, the sidecar leaves EEG reference as `n/a`, duration is variable, and clinical/sibling grouping creates domain shift. It can be considered for a predeclared secondary external transfer only after canonical BioSemi64 coordinate provenance, reference handling, run/session aggregation, and precision are validated. |
+| OpenNeuro ds006780, *SFARI_EEG multi-paradigm dataset* | Public raw BIDS EEG from 136 listed children aged 7.9-14.5, with 127 participants having both an exact age and a resting-state run-01 file in the checked public tree. Acquisition is BioSemi ActiveTwo, 64 EEG channels at 512 Hz, plus eight EMG channels and a trigger channel. Resting state is eyes-open, approximately 62-second blocks, with 1-8 runs observed and up to six blocks described across two sessions. The cohort contains typically developing, ASD, and ASD-sibling groups. A pinned audit found all 686 resting channel sidecars exactly match the canonical BioSemi-64 channel set and order; a one-file target-free pilot also passed the signal-to-REVE interface. | Best public candidate found so far, but not execution-ready: the checked BIDS tree has no subject-specific `electrodes.tsv` or `coordsystem.json`, the sidecar leaves EEG reference as `n/a`, duration is variable, and clinical/sibling grouping creates domain shift. It can be considered for a predeclared secondary external transfer only after reference handling, run/session aggregation, and precision are validated. |
 | Iranian 6-11 years population-based EEG, ERP, and cognition dataset | 100 non-clinical children aged 6-11 years, with age recorded in months. Raw EDF recordings include four minutes eyes-open and four minutes eyes-closed resting EEG. Acquisition uses 19 scalp electrodes in the 10-20 system, 250 Hz sampling, and linked-ear reference. The authors describe controlled Synapse access; the institute download portal additionally requires name, email, and acceptance of research-use/no-redistribution terms. | Strong developmental candidate for a separate low-density cross-montage transfer: exact age and raw resting data are attractive, but 19-channel 10-20 data are not a matched HydroCel replication. Do not access or execute until the reuse terms and participant-level age/QC manifest are independently confirmed. |
 | OpenNeuro ds006923, *Dataset of Electroencephalograms of Juvenile Offenders* | 140 participants; BioSemi ActiveTwo 128 channels; exact age in years is available for every participant, with support 14-19 years. The public derivative contains 128-channel resting-state recordings at 128 Hz, including a 1-40 Hz preprocessed derivative, per-subject channel/electrode/coordinate metadata, and no listed original BDF/FDT acquisition files. The cohort is all male and contains 74 juvenile offenders plus 66 non-offender controls. NEMAR lists CC0 and an approximately 8 GB download. | No-go as a drop-in replication. The age support is narrow relative to HBN, the cohort is all male, and the available signal is a derivative with a distinct BioSemi/coordinate/preprocessing contract. It can be considered only as a separately specified cross-montage transfer or domain-shift stress test, not as a silent replacement for the primary external replication. |
 | MPI-LEMON | The project describes 228 participants, ages 20-35 or 59-77, with 62-channel resting EEG and public download links. | Not the preferred developmental replication: almost all advertised age support lies outside 5.06-21.67 years, and the montage differs. Do not reinterpret older-adult extrapolation as the same in-support task. |
@@ -61,15 +62,13 @@ Sources for the corresponding rows:
 - [MPI-LEMON project description](https://fcon_1000.projects.nitrc.org/indi/retro/MPI_LEMON.html).
 
 The metadata-only audit of ds006923 is complete, and ds006780 plus the Iranian
-cohort have now been added as further candidates after repository/access
-metadata screens. These audits were intentionally performed without downloading
-EEG or running a model. The public metadata are sufficient to reject ds006923
-as a drop-in replication, while ds006780 and the Iranian cohort are possible
-secondary transfer candidates but still require adapter, access, and precision
-validation. Neither dataset is approved for inference yet. The preferred next
-action remains an access/metadata enquiry for the closest-match candidate; if
-raw data are unavailable, record a no-go and continue the cohort search rather
-than silently relaxing the protocol.
+cohort were added as further candidates after repository/access metadata
+screens. Those metadata screens were intentionally performed without downloading
+EEG or running a model. A later target-free ds006780 pilot is documented below;
+it does not approve confirmatory inference. The public metadata are sufficient
+to reject ds006923 as a drop-in replication, while ds006780 and the Iranian
+cohort remain secondary transfer candidates that require a frozen adapter,
+reference policy, run/session aggregation, and precision validation.
 
 ### Metadata-only screen of ds006780
 
@@ -97,17 +96,52 @@ The current suitability decision is **conditional**:
 - target availability and age support: pass;
 - raw EEG and subject-level resting files: pass;
 - independent cohort and mixed-sex coverage: pass provisionally;
-- canonical sensor coordinates and reference provenance: blocker;
+- canonical BioSemi-64 channel mapping: pass as a standardized montage
+  approximation; subject-specific coordinates remain unavailable;
+- EEG reference provenance and fixed reference policy: blocker;
 - fixed run/session aggregation: blocker;
 - precision for the eligible subset: pending simulation.
 
-This is a screening result, not an execution approval. The next gate is to
-validate the file/age/run manifest, resolve the source-preserving 64-channel
-coordinate/reference contract, estimate precision for the eligible subset, and
-implement the adapter before sealing any external study. If the coordinate or
+This is a screening result, not an execution approval. The coordinate mapping
+gate is now resolved only as a canonical standardized approximation. The next
+gate is to validate the file/age/run manifest, freeze the reference policy,
+resolve the 64-channel adapter contract, estimate precision for the eligible
+subset, and implement the adapter before sealing any external study. If the
 reference provenance cannot be justified from the dataset documentation, do
-not silently substitute a convenient montage and do not use this cohort for the
-confirmatory external claim.
+not silently substitute a convenient rereference and do not use this cohort for
+the confirmatory external claim.
+
+### Target-free technical pilot of ds006780
+
+The pilot used OpenNeuro version `1.0.0` and one resting BDF file outside the
+repository. It did not read participant age, create targets, compute
+predictions, or calculate any metric. The following checks passed:
+
+- MNE read 73 raw channels and 31,744 samples at 512 Hz for a 62-second run.
+- The `channels.tsv` order matched the raw BDF order; 64 EEG channels were
+  selected and the eight EMG plus trigger channels were excluded.
+- The EEG order matched the canonical `biosemi64` montage, and MNE accepted
+  all 64 finite standard positions without interpolation.
+- The sole `Recording_start` event at 2.802734375 seconds was used as the
+  block boundary. No resting condition marker was present in this run.
+- The common target-free preprocessing produced 29 finite windows of shape
+  `64 x 400` at 200 Hz, using the existing 0.5--99.5 Hz band-pass,
+  non-overlapping two-second windows, and no cross-block windows.
+- A frozen REVE forward pass accepted a batch of shape `2 x 64 x 400` and
+  returned both declared layers with shape `2 x 128 x 512`. The encoder stayed
+  in evaluation/inference mode and its state hash was unchanged.
+
+The sidecar reports `EEGReference: n/a`. Two engineering-only preprocessing
+variants were compared to expose the risk of guessing: no additional
+rereference and average reference. Both produced finite windows, but average
+referencing changed the standardized windows materially (mean absolute
+difference `0.361`, maximum absolute difference `30.0` after the declared
+clamp). Therefore average reference is not silently enabled. The primary
+candidate policy is to preserve the stored acquisition with no additional
+rereference, matching the existing HBN reader behavior when no explicit
+reference channel is declared; this remains a design decision to validate and
+freeze before external inference. Average reference may be retained only as a
+predeclared robustness analysis applied consistently to every cohort.
 
 ### Metadata-only screen of the Iranian 6-11 cohort
 
