@@ -76,7 +76,7 @@ encoder is trainable in that track, it is described as end-to-end age
 prediction rather than representation probing.
 
 The exact operational sequence, executable commands, validation gates,
-statistical decision rule, and result placeholders are
+statistical decision rule, and evidence boundaries are
 maintained in
 [`docs/research/article_ready_protocol.md`](docs/research/article_ready_protocol.md).
 

@@ -1,0 +1,27 @@
+{
+  "analysis_sha256": "a357dc6a46492e6e23184dafe6b5ea28ad30419b1df83abd9f820364d34a3a25",
+  "asset_manifest_sha256": "48389e2d8aa7d84403f84b4e512d4a0493bcfdb010ea97508412d41c94af692a",
+  "file_hashes": {
+    "ds006780_external.pdf": {
+      "bytes": 35067,
+      "sha256": "e291fff57752254080aa2e1dc1dc93999b337876880ce6dc7c077bae5a3df87e"
+    },
+    "ds006780_results_macros.tex": {
+      "bytes": 731,
+      "sha256": "2f424115b2f76c253e16de714dae566da98343602a3d95419f87330e2391ec8b"
+    },
+    "ds006780_summary.tex": {
+      "bytes": 512,
+      "sha256": "2b975caa6f841c53622e123e3f99a1dd51803e2242f418a7719adb27b2c6e0be"
+    }
+  },
+  "files": [
+    "assets_manifest.json",
+    "ds006780_external.pdf",
+    "ds006780_results_macros.tex",
+    "ds006780_summary.tex"
+  ],
+  "precision_gate_sha256": "620588617a9c0700ddb996a24fedcb957b92e74d4d32b26a9d22ce72b8bd5db9",
+  "schema_version": 1,
+  "status": "complete"
+}

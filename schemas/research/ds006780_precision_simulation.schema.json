@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neurobench-age.local/schemas/ds006780_precision_simulation.schema.json",
+  "title": "ds006780 planning-only precision simulation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "study_id",
+    "manifest_sha256",
+    "protocol_sha256",
+    "scenario_source_sha256",
+    "subject_count",
+    "seed_ids",
+    "simulation_replicates",
+    "bootstrap_iterations",
+    "scenarios",
+    "simulation_sha256"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "status": {"type": "string", "const": "planning_only"},
+    "study_id": {"type": "string", "minLength": 1},
+    "manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "protocol_sha256": {"$ref": "#/$defs/sha256"},
+    "scenario_source_sha256": {"$ref": "#/$defs/sha256"},
+    "subject_count": {"type": "integer", "minimum": 3},
+    "seed_ids": {
+      "type": "array",
+      "const": [33, 34, 35, 36, 37, 38, 39, 40, 41, 42]
+    },
+    "simulation_replicates": {"type": "integer", "minimum": 1},
+    "bootstrap_iterations": {"type": "integer", "minimum": 10},
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/result"}
+    },
+    "simulation_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "scenario",
+        "subject_count",
+        "seed_ids",
+        "seed_count",
+        "simulation_replicates",
+        "bootstrap_iterations",
+        "assumptions",
+        "point_estimate",
+        "ci_width_quantiles",
+        "expected_contrast_coverage",
+        "valid_replicates",
+        "failed_bootstrap_iterations"
+      ],
+      "properties": {
+        "status": {"type": "string", "const": "planning_only"},
+        "scenario": {"type": "string", "minLength": 1},
+        "subject_count": {"type": "integer", "minimum": 3},
+        "seed_ids": {"type": "array", "const": [33, 34, 35, 36, 37, 38, 39, 40, 41, 42]},
+        "seed_count": {"type": "integer", "const": 10},
+        "simulation_replicates": {"type": "integer", "minimum": 1},
+        "bootstrap_iterations": {"type": "integer", "minimum": 10},
+        "assumptions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "baseline_correlation",
+            "candidate_correlation",
+            "expected_contrast",
+            "paired_error_correlation",
+            "seed_delta_sd",
+            "target_distribution"
+          ],
+          "properties": {
+            "baseline_correlation": {"type": "number"},
+            "candidate_correlation": {"type": "number"},
+            "expected_contrast": {"type": "number"},
+            "paired_error_correlation": {"type": "number"},
+            "seed_delta_sd": {"type": "number", "minimum": 0},
+            "target_distribution": {"type": "string", "enum": ["normal", "uniform"]}
+          }
+        },
+        "point_estimate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mean", "q05", "q95"],
+          "properties": {
+            "mean": {"type": "number"},
+            "q05": {"type": "number"},
+            "q95": {"type": "number"}
+          }
+        },
+        "ci_width_quantiles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["q05", "median", "q95"],
+          "properties": {
+            "q05": {"type": "number", "minimum": 0},
+            "median": {"type": "number", "minimum": 0},
+            "q95": {"type": "number", "minimum": 0}
+          }
+        },
+        "expected_contrast_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+        "valid_replicates": {"type": "integer", "minimum": 1},
+        "failed_bootstrap_iterations": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

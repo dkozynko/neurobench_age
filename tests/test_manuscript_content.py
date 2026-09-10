@@ -37,6 +37,7 @@ def _source_text() -> str:
         MANUSCRIPT / "sections" / name for name in SECTIONS
     ]
     paths.append(MANUSCRIPT / "sections" / "capacity_data_regime.tex")
+    paths.append(MANUSCRIPT / "sections" / "ds006780_external.tex")
     return "\n".join(path.read_text(encoding="utf-8") for path in paths)
 
 
@@ -139,6 +140,32 @@ def test_layerwise_extension_does_not_promote_randomization_p_values() -> None:
     assert "descriptive" in results or "exploratory" in results
     assert "stable improvement" not in results
     assert "stable improvement" not in discussion
+
+
+def test_ds006780_extension_is_integrated_as_uncertainty_limited_transfer() -> None:
+    section = (MANUSCRIPT / "sections" / "ds006780_external.tex").read_text(
+        encoding="utf-8"
+    )
+    results = (MANUSCRIPT / "sections" / "results.tex").read_text(encoding="utf-8")
+    main = (MANUSCRIPT / "main.tex").read_text(encoding="utf-8")
+    asset_root = ROOT / "results" / "extensions" / "ds006780_external_v5"
+
+    assert "secondary transfer" in section.casefold()
+    assert "precision gate" in section.casefold()
+    assert "stable superiority" in section.casefold()
+    assert "0.06" not in section  # values are loaded through generated macros
+    assert r"\input{sections/ds006780_external}" in results
+    assert r"\input{../results/extensions/ds006780_external_v5/ds006780_results_macros}" in main
+    for name in (
+        "external_analysis.json",
+        "precision_gate.json",
+        "README.md",
+        "assets_manifest.json",
+        "ds006780_results_macros.tex",
+        "ds006780_summary.tex",
+        "ds006780_external.pdf",
+    ):
+        assert (asset_root / name).is_file()
 
 
 def test_every_citation_key_exists_and_every_bibliography_entry_is_used() -> None:

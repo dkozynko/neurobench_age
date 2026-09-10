@@ -1,6 +1,6 @@
 # Scientific experiment readiness audit
 
-Date: 2026-09-10
+Date: 2026-09-11
 
 ## Verdict
 
@@ -13,6 +13,13 @@ equivalence.
 
 The operational workflow is closed. Any additional experiment must receive a
 new protocol and evidence identity rather than modifying the sealed result.
+
+The separate ds006780 v5 transfer is also execution-complete. It contains 40
+selected runs over 126 eligible subjects and 5,040 subject-level prediction
+identities. Its n=800 rich-versus-linear point estimate was positive on all ten
+seeds, but the subject-aware 95% interval had width 0.1272 against the
+predeclared 0.06 precision threshold. It is therefore retained as secondary,
+uncertainty-limited transfer evidence rather than a new confirmatory claim.
 
 ## Completed controls
 
@@ -44,6 +51,10 @@ new protocol and evidence identity rather than modifying the sealed result.
 - A strict compact importer now recomputes the complete hash chain and decision
   before retaining aggregate evidence. It excludes sample-level predictions,
   participant IDs, external paths, model binaries, caches, logs, and secrets.
+- The ds006780 adapter, sealed v5 execution, aggregate analysis, precision gate,
+  and deterministic manuscript assets are complete. The public bundle retains
+  only aggregate JSON, tables, figures, macros, and provenance hashes; the
+  target-bearing manifest and subject-level predictions remain external.
 - The metadata-first MIPDB aggregate workflow is implemented separately from
   the primary estimand. It validates a concrete NEMAR release, the completed
   study lock, finalized cohort-QC hashes, target-free window counts, optional
@@ -63,6 +74,9 @@ new protocol and evidence identity rather than modifying the sealed result.
 | Compact artifact manifest | `472784323d244712bc1abe590c3081df05a1609231371f59d939ceefc4d2460a` |
 | Layer-wise analysis | `f1f757ef53a8aad10615afd7fa0d6f8e2bc4e7f04ec33ce2d870f92e44706565` |
 | Layer-wise asset manifest | `14b5afe5623f34fbaed4fcbe98ee8b59528769bf468bd1bcd83b941353a2be9d` |
+| ds006780 v5 execution lock | `a68338a1569d73fbbc46cc6a56c8e4ed3b39770edbf71ba85cbe284ec2b499df` |
+| ds006780 v5 analysis | `a357dc6a46492e6e23184dafe6b5ea28ad30419b1df83abd9f820364d34a3a25` |
+| ds006780 v5 precision gate | `620588617a9c0700ddb996a24fedcb957b92e74d4d32b26a9d22ce72b8bd5db9` |
 
 ## Result boundary
 
@@ -86,6 +100,12 @@ layers relative to the final-layer baseline, but all hierarchical-bootstrap
 intervals crossed zero. It is therefore useful as exploratory depth evidence,
 not as a claim that an earlier representation layer is reliably superior.
 
+The ds006780 transfer found a positive n=800 rich-head point estimate with all
+ten seed differences positive, but its hierarchical interval crossed zero and
+failed the precision gate. The result is useful for testing whether the
+capacity--data pattern transfers to a different acquisition context; it does
+not establish a general head advantage.
+
 ## Remaining scientific limitations
 
 - Cross-dataset shift mixes representation accessibility with differences in
@@ -103,3 +123,6 @@ not as a claim that an earlier representation layer is reliably superior.
 - The retained HBN snapshot identities were revalidated during production, but
   raw acquisitions and full training manifests remain external and must be
   preserved with their content hashes.
+- The ds006780 cohort differs in montage, hardware, reference provenance, and
+  clinical composition; its standardized canonical BioSemi-64 mapping is a
+  fixed transfer contract, not evidence of hardware harmonization.
