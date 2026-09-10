@@ -9,8 +9,11 @@ import torch
 from neurobench_age.pipelines.frozen_probe import FrozenEncoderError
 from neurobench_age.pipelines.layerwise_external import (
     LayerwiseExternalError,
+    _canonical_sha256,
     _discover_primary_cache_source_tree_sha256,
+    _validate_hbn_training_manifest_alignment,
 )
+from scripts.run_layerwise_probe_external import _resolve_training_source_sha256
 from neurobench_age.research.layerwise_probe import (
     build_layerwise_probe_head,
     layerwise_head_specs,
@@ -106,3 +109,89 @@ def test_primary_cache_source_identity_is_read_from_all_entries(tmp_path: Path) 
             dataset_manifest_sha256="d" * 64,
             preprocessing_sha256="e" * 64,
         )
+
+
+def test_hbn_manifest_alignment_accepts_reordered_equivalent_inventory() -> None:
+    early = {
+        "subject_manifest_sha256": "a" * 64,
+        "acquisition_files": [
+            {
+                "subject_id": "sub-b",
+                "path": "b.set",
+                "size_bytes": 2,
+                "sha256": "b" * 64,
+            },
+            {
+                "subject_id": "sub-a",
+                "path": "a.set",
+                "size_bytes": 1,
+                "sha256": "c" * 64,
+            },
+        ],
+        "subjects": [
+            {"subject_id": "sub-b", "split": "train", "age": 12.0},
+            {"subject_id": "sub-a", "split": "validation", "age": 10.0},
+        ],
+    }
+    primary = {
+        "subject_manifest_sha256": early["subject_manifest_sha256"],
+        "acquisition_files": list(reversed(early["acquisition_files"])),
+        "subjects": list(reversed(early["subjects"])),
+    }
+    for manifest in (early, primary):
+        manifest["dataset_manifest_sha256"] = _canonical_sha256(
+            {
+                "subject_manifest_sha256": manifest["subject_manifest_sha256"],
+                "acquisition_files": manifest["acquisition_files"],
+            }
+        )
+
+    assert (
+        _validate_hbn_training_manifest_alignment(early, primary)
+        == "normalized_acquisition_inventory"
+    )
+
+
+def test_hbn_manifest_alignment_rejects_changed_acquisition_identity() -> None:
+    early = {
+        "subject_manifest_sha256": "a" * 64,
+        "acquisition_files": [
+            {
+                "subject_id": "sub-a",
+                "path": "a.set",
+                "size_bytes": 1,
+                "sha256": "b" * 64,
+            }
+        ],
+        "subjects": [{"subject_id": "sub-a", "split": "train", "age": 10.0}],
+    }
+    primary = {
+        "subject_manifest_sha256": early["subject_manifest_sha256"],
+        "acquisition_files": [
+            {
+                **early["acquisition_files"][0],
+                "sha256": "c" * 64,
+            }
+        ],
+        "subjects": early["subjects"],
+    }
+    for manifest in (early, primary):
+        manifest["dataset_manifest_sha256"] = _canonical_sha256(
+            {
+                "subject_manifest_sha256": manifest["subject_manifest_sha256"],
+                "acquisition_files": manifest["acquisition_files"],
+            }
+        )
+
+    with pytest.raises(LayerwiseExternalError, match="acquisition inventory"):
+        _validate_hbn_training_manifest_alignment(early, primary)
+
+
+def test_external_evaluation_uses_training_source_from_inventory(tmp_path: Path) -> None:
+    inventory = tmp_path / "checkpoint_inventory.json"
+    source_sha = "f" * 64
+    inventory.write_text(
+        json.dumps({"training_source_sha256": source_sha}), encoding="utf-8"
+    )
+
+    assert _resolve_training_source_sha256(inventory) == source_sha

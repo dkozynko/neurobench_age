@@ -106,6 +106,41 @@ def test_capacity_extension_is_integrated_into_main_narrative() -> None:
     assert "universal scaling law" in results
 
 
+def test_layerwise_extension_is_integrated_as_secondary_analysis() -> None:
+    abstract = (MANUSCRIPT / "sections" / "abstract.tex").read_text(encoding="utf-8")
+    methods = (MANUSCRIPT / "sections" / "methods.tex").read_text(encoding="utf-8")
+    results = (MANUSCRIPT / "sections" / "results.tex").read_text(encoding="utf-8")
+    discussion = (MANUSCRIPT / "sections" / "discussion.tex").read_text(encoding="utf-8")
+    limitations = (MANUSCRIPT / "sections" / "limitations.tex").read_text(encoding="utf-8")
+    reproducibility = (MANUSCRIPT / "sections" / "reproducibility.tex").read_text(
+        encoding="utf-8"
+    )
+    main = (MANUSCRIPT / "main.tex").read_text(encoding="utf-8")
+
+    for section in (abstract, methods, results, discussion, limitations, reproducibility):
+        assert "layer-wise" in section or "layerwise" in section
+    assert "exploratory" in results
+    assert "final-layer mean-linear" in results
+    assert "four" in results and "ten" in results
+    assert r"\LayerwiseSubjectCount{}" in results
+    assert "stable" in results
+    assert "../results/extensions/layerwise_probe_20260910/assets/layerwise_depth.pdf" in results
+    assert "../results/extensions/layerwise_probe_20260910/assets/layerwise_seed_deltas.pdf" in results
+    assert "../results/extensions/layerwise_probe_20260910/assets/layerwise_summary" in results
+    assert r"\input{../results/extensions/layerwise_probe_20260910/assets/layerwise_results_macros}" in main
+    assert "crossed zero" in results
+    assert "not a primary" in results or "not establish" in results
+
+
+def test_layerwise_extension_does_not_promote_randomization_p_values() -> None:
+    results = (MANUSCRIPT / "sections" / "results.tex").read_text(encoding="utf-8").casefold()
+    discussion = (MANUSCRIPT / "sections" / "discussion.tex").read_text(encoding="utf-8").casefold()
+    assert "holm" in results
+    assert "descriptive" in results or "exploratory" in results
+    assert "stable improvement" not in results
+    assert "stable improvement" not in discussion
+
+
 def test_every_citation_key_exists_and_every_bibliography_entry_is_used() -> None:
     source = _source_text()
     bibliography = (MANUSCRIPT / "references.bib").read_text(encoding="utf-8")

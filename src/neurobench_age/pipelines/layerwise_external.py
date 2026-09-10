@@ -64,6 +64,108 @@ def _load_json(path: Path, description: str) -> dict[str, Any]:
     return value
 
 
+def _validated_subject_inventory(manifest: Mapping[str, Any]) -> tuple[tuple[Any, ...], ...]:
+    raw_subjects = manifest.get("subjects")
+    if not isinstance(raw_subjects, list):
+        raise LayerwiseExternalError("HBN subject inventory is invalid")
+    inventory: list[tuple[Any, ...]] = []
+    for item in raw_subjects:
+        if not isinstance(item, Mapping) or set(item) != {"subject_id", "split", "age"}:
+            raise LayerwiseExternalError("HBN subject inventory contains an invalid record")
+        subject_id = item.get("subject_id")
+        split = item.get("split")
+        if not isinstance(subject_id, str) or not subject_id:
+            raise LayerwiseExternalError("HBN subject inventory contains an invalid subject")
+        if not isinstance(split, str) or not split:
+            raise LayerwiseExternalError("HBN subject inventory contains an invalid split")
+        inventory.append((subject_id, split, _finite_float(item.get("age"), "HBN age")))
+    if len({item[0] for item in inventory}) != len(inventory):
+        raise LayerwiseExternalError("HBN subject inventory contains duplicate subjects")
+    return tuple(sorted(inventory))
+
+
+def _validated_acquisition_inventory(
+    manifest: Mapping[str, Any], *, subject_manifest_sha256: str
+) -> tuple[tuple[Any, ...], ...]:
+    raw_files = manifest.get("acquisition_files")
+    if not isinstance(raw_files, list) or not raw_files:
+        raise LayerwiseExternalError("HBN acquisition inventory is invalid")
+    inventory: list[tuple[Any, ...]] = []
+    for item in raw_files:
+        if (
+            not isinstance(item, Mapping)
+            or set(item) != {"subject_id", "path", "size_bytes", "sha256"}
+            or not isinstance(item.get("subject_id"), str)
+            or not isinstance(item.get("path"), str)
+            or isinstance(item.get("size_bytes"), bool)
+            or not isinstance(item.get("size_bytes"), int)
+            or item.get("size_bytes") < 0
+            or not isinstance(item.get("sha256"), str)
+            or not _is_sha256(item.get("sha256"))
+        ):
+            raise LayerwiseExternalError("HBN acquisition inventory contains an invalid record")
+        inventory.append(
+            (
+                item["subject_id"],
+                item["path"],
+                item["size_bytes"],
+                item["sha256"],
+            )
+        )
+    if len(set(inventory)) != len(inventory):
+        raise LayerwiseExternalError("HBN acquisition inventory contains duplicates")
+    expected_dataset_sha256 = _canonical_sha256(
+        {
+            "subject_manifest_sha256": subject_manifest_sha256,
+            "acquisition_files": [
+                {
+                    "subject_id": subject_id,
+                    "path": path,
+                    "size_bytes": size_bytes,
+                    "sha256": sha256,
+                }
+                for subject_id, path, size_bytes, sha256 in inventory
+            ],
+        }
+    )
+    if manifest.get("dataset_manifest_sha256") != expected_dataset_sha256:
+        raise LayerwiseExternalError("HBN acquisition inventory digest is invalid")
+    return tuple(sorted(inventory))
+
+
+def _validate_hbn_training_manifest_alignment(
+    layerwise_manifest: Mapping[str, Any],
+    primary_manifest: Mapping[str, Any],
+) -> str:
+    """Require equal HBN subjects and files, independent of manifest ordering."""
+
+    layerwise_subject_sha256 = layerwise_manifest.get("subject_manifest_sha256")
+    primary_subject_sha256 = primary_manifest.get("subject_manifest_sha256")
+    if (
+        not isinstance(layerwise_subject_sha256, str)
+        or not _is_sha256(layerwise_subject_sha256)
+        or primary_subject_sha256 != layerwise_subject_sha256
+    ):
+        raise LayerwiseExternalError("HBN subject manifests do not match")
+    if _validated_subject_inventory(layerwise_manifest) != _validated_subject_inventory(
+        primary_manifest
+    ):
+        raise LayerwiseExternalError("HBN subject inventories do not match")
+    layerwise_files = _validated_acquisition_inventory(
+        layerwise_manifest, subject_manifest_sha256=layerwise_subject_sha256
+    )
+    primary_files = _validated_acquisition_inventory(
+        primary_manifest, subject_manifest_sha256=primary_subject_sha256
+    )
+    if layerwise_files != primary_files:
+        raise LayerwiseExternalError("HBN acquisition inventory does not match")
+    if layerwise_manifest.get("dataset_manifest_sha256") == primary_manifest.get(
+        "dataset_manifest_sha256"
+    ):
+        return "exact_dataset_identity"
+    return "normalized_acquisition_inventory"
+
+
 def _write_create_only(path: Path, payload: Mapping[str, Any]) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -283,6 +385,7 @@ def run_layerwise_external(
     cache_root: Path,
     output_root: Path,
     training_source_sha256: str,
+    evaluation_source_sha256: str,
     device: str = "cpu",
 ) -> Mapping[str, Any]:
     """Evaluate all layer-by-seed checkpoints on the sealed 75-subject primary cohort."""
@@ -291,6 +394,10 @@ def run_layerwise_external(
         raise LayerwiseExternalError("device must be cpu, cuda, or mps")
     if device == "cuda" and not torch.cuda.is_available():
         raise LayerwiseExternalError("CUDA was requested but is unavailable")
+    if not _is_sha256(training_source_sha256):
+        raise LayerwiseExternalError("training source identity is invalid")
+    if not _is_sha256(evaluation_source_sha256):
+        raise LayerwiseExternalError("evaluation source identity is invalid")
     inventory = _load_json(checkpoint_inventory_path, "layer-wise checkpoint inventory")
     required_fields = {
         "schema_version", "status", "study_id", "protocol_sha256",
@@ -341,14 +448,15 @@ def run_layerwise_external(
     if (
         primary_training_manifest.get("protocol_sha256") != primary_protocol.sha256
         or primary_training_manifest.get("checkpoint") != primary_protocol.encoder.checkpoint
-        or primary_training_manifest.get("dataset_manifest_sha256")
-        != training_manifest.get("dataset_manifest_sha256")
         or not isinstance(primary_checkpoint_sha256, str)
         or not _is_sha256(primary_checkpoint_sha256)
         or not isinstance(primary_source_tree_sha256, str)
         or not _is_sha256(primary_source_tree_sha256)
     ):
         raise LayerwiseExternalError("primary HBN training manifest does not match external inputs")
+    hbn_dataset_alignment = _validate_hbn_training_manifest_alignment(
+        training_manifest, primary_training_manifest
+    )
     primary_cache_source_tree_sha256 = _discover_primary_cache_source_tree_sha256(
         primary_cache_root,
         protocol_sha256=primary_protocol.sha256,
@@ -368,11 +476,19 @@ def run_layerwise_external(
         "protocol_sha256": protocol.sha256,
         "training_protocol_sha256": training.sha256,
         "training_source_sha256": training_source_sha256,
+        "evaluation_source_tree_sha256": evaluation_source_sha256,
         "encoder_checkpoint_sha256": encoder_checkpoint_sha256,
         "preprocessing_sha256": preprocessing_contract_sha256(protocol.preprocessing),
         "hbn_training_manifest_sha256": _sha256_file(training_manifest_path),
+        "hbn_training_dataset_manifest_sha256": training_manifest[
+            "dataset_manifest_sha256"
+        ],
         "hbn_representation_source_tree_sha256": representation_source_tree_sha256,
         "primary_hbn_training_manifest_sha256": _sha256_file(primary_training_manifest_path),
+        "primary_hbn_training_dataset_manifest_sha256": primary_training_manifest[
+            "dataset_manifest_sha256"
+        ],
+        "hbn_dataset_alignment": hbn_dataset_alignment,
         "primary_hbn_training_source_tree_sha256": primary_source_tree_sha256,
         "primary_cache_source_tree_sha256": primary_cache_source_tree_sha256,
         "primary_protocol_sha256": primary_protocol.sha256,

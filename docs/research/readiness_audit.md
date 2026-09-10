@@ -1,6 +1,6 @@
 # Scientific experiment readiness audit
 
-Date: 2026-09-09
+Date: 2026-09-10
 
 ## Verdict
 
@@ -37,6 +37,10 @@ new protocol and evidence identity rather than modifying the sealed result.
 - Confirmatory analysis started only after completion and applied the
   predeclared hierarchical bootstrap, paired seed-level sign-flip test, Holm
   correction, and conjunctive stability decision.
+- A separate layer-wise extension evaluated matched linear probes at layers
+  -4, -3, and -2 against the final-layer baseline across the same ten seeds
+  and 75-subject external cohort. It is explicitly exploratory and cannot
+  modify the primary stability decision.
 - A strict compact importer now recomputes the complete hash chain and decision
   before retaining aggregate evidence. It excludes sample-level predictions,
   participant IDs, external paths, model binaries, caches, logs, and secrets.
@@ -57,6 +61,8 @@ new protocol and evidence identity rather than modifying the sealed result.
 | Prediction inventory | `3ec0042d613fc2d36937d7349081beb0739c4fb3da349e1229e17f226e187830` |
 | Confirmatory analysis | `7747a16e11629164b524b2113ab2230d260012022fc46f68540c7f7578c2a3b6` |
 | Compact artifact manifest | `472784323d244712bc1abe590c3081df05a1609231371f59d939ceefc4d2460a` |
+| Layer-wise analysis | `f1f757ef53a8aad10615afd7fa0d6f8e2bc4e7f04ec33ce2d870f92e44706565` |
+| Layer-wise asset manifest | `14b5afe5623f34fbaed4fcbe98ee8b59528769bf468bd1bcd83b941353a2be9d` |
 
 ## Result boundary
 
@@ -74,6 +80,11 @@ intervals remain the relevant uncertainty statement.
 MIPDB is an external frozen-probe evaluation, not an official NeuralBench score.
 Official NeuralBench full fine-tuning remains secondary reproduction evidence,
 and previously inspected HBN R5 results remain retrospective.
+
+The layer-wise extension found positive point estimates for all three earlier
+layers relative to the final-layer baseline, but all hierarchical-bootstrap
+intervals crossed zero. It is therefore useful as exploratory depth evidence,
+not as a claim that an earlier representation layer is reliably superior.
 
 ## Remaining scientific limitations
 

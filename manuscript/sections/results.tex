@@ -100,6 +100,55 @@ are descriptive exploratory inference. They do not modify the primary
 predeclared stability rule, whose conclusion remains that no tested complex
 head established a stable external gain.
 
+\subsection{Secondary layer-wise analysis}
+
+The layer-wise extension asked whether age information was more reliably
+accessible before the final REVE layer without changing probe capacity. We used
+the final-layer mean-linear probe as the baseline and compared matched linear
+probes at layers $-4$, $-3$, and $-2$. The analysis covered four layers, ten
+matched seeds, and the same \LayerwiseSubjectCount{}-subject sealed external
+cohort. It was
+exploratory and was not a primary superiority claim.
+
+\begin{table}[t]
+  \centering
+  \small
+  \caption{Exploratory layer-wise comparison against the final-layer mean-linear
+  baseline. Intervals are hierarchical seed--subject bootstrap intervals;
+  Holm-adjusted sign-flip values are descriptive.}
+  \label{tab:layerwise}
+  \input{../results/extensions/layerwise_probe_20260910/assets/layerwise_summary}
+\end{table}
+
+The earlier-layer point estimates were positive for all three comparisons:
+mean deltas were \LayerwiseMFourDelta{}, \LayerwiseMThreeDelta{}, and
+\LayerwiseMTwoDelta{} for layers $-4$, $-3$, and $-2$, respectively. However,
+all 95\% intervals crossed zero, ranging from
+[\LayerwiseMFourCILow{},\,\LayerwiseMFourCIHigh{}] at layer $-4$ to
+[\LayerwiseMTwoCILow{},\,\LayerwiseMTwoCIHigh{}] at layer $-2$.
+The exact sign-flip results are consequently best read as directional evidence
+under ten matched seeds, not as proof of a stable layer advantage. This
+secondary analysis does not establish a primary superiority claim and does not
+change the main conclusion.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.92\linewidth]{../results/extensions/layerwise_probe_20260910/assets/layerwise_depth.pdf}
+  \caption{Exploratory layer-wise mean paired Pearson deltas with
+  hierarchical bootstrap intervals. The final layer is the matched baseline;
+  every earlier-layer interval intersects zero.}
+  \label{fig:layerwise-depth}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.92\linewidth]{../results/extensions/layerwise_probe_20260910/assets/layerwise_seed_deltas.pdf}
+  \caption{Per-seed paired Pearson deltas for the three earlier-layer probes.
+  Positive values favor the earlier layer, but seed direction alone does not
+  account for external-subject uncertainty.}
+  \label{fig:layerwise-seed-deltas}
+\end{figure}
+
 \subsection{Calibration}
 
 All heads had mean calibration slopes above one, with the multi-query model

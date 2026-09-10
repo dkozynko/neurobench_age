@@ -49,6 +49,11 @@ tested complex head established a stable external gain under the predeclared
 protocol; it does not establish equivalence or rule out gains from untested
 representations, heads, datasets, or training regimes.
 
+The layer-wise extension is a secondary exploratory comparison of matched
+linear probes at layers -4, -3, and -2 against the final-layer baseline. It
+uses the same sealed external cohort and seeds, and its aggregate results do
+not modify the primary confirmatory estimand or decision rule.
+
 See [`docs/research/article_ready_protocol.md`](docs/research/article_ready_protocol.md)
 for the execution contract and
 [`docs/research/article_evidence_registry.md`](docs/research/article_evidence_registry.md)

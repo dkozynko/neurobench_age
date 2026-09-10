@@ -30,6 +30,30 @@ def _resolve_device(requested: str) -> str:
     return requested
 
 
+def _resolve_training_source_sha256(checkpoint_inventory: Path) -> str:
+    """Use the immutable source identity recorded at training time.
+
+    External evaluation code may be repaired after training.  Its current
+    source identity is recorded separately, while checkpoints remain bound to
+    the source identity that created them.
+    """
+
+    try:
+        payload = json.loads(Path(checkpoint_inventory).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise FrozenEncoderError(
+            f"could not read checkpoint inventory: {checkpoint_inventory}"
+        ) from error
+    value = payload.get("training_source_sha256") if isinstance(payload, dict) else None
+    if not isinstance(value, str) or len(value) != 64:
+        raise FrozenEncoderError("checkpoint inventory has no valid training source identity")
+    try:
+        int(value, 16)
+    except ValueError as error:
+        raise FrozenEncoderError("checkpoint inventory has no valid training source identity") from error
+    return value
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--protocol", required=True, type=Path)
@@ -91,7 +115,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             mapping_path=args.mapping,
             cache_root=args.cache_root,
             output_root=args.output_root,
-            training_source_sha256=source_tree_sha256(repository_root),
+            training_source_sha256=_resolve_training_source_sha256(
+                args.checkpoint_inventory
+            ),
+            evaluation_source_sha256=source_tree_sha256(repository_root),
             device=_resolve_device(args.device),
         )
     except Exception as error:

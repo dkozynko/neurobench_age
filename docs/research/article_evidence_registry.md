@@ -10,6 +10,7 @@ logs remain external artifacts whose identities are retained by hash.
 | Secondary reproduction evidence | official NeuralBench full fine-tuning path and `src/neurobench_age/pipelines/independent.py` | protocol checks, compact metrics, implementation comparison | Reproduction and sensitivity context for end-to-end age prediction |
 | Retrospective secondary evidence | historical HBN R5 records under `results/canonical/` | per-seed metrics, gates, and compact negative results | Motivation and retrospective description only; not model or head selection |
 | Capacity--data extension | finalized 90-run extension lock, prediction inventory, exploratory analysis, and aggregate asset manifest | 3 training sizes, 3 heads, 10 seeds, 6,750 external prediction identities, aggregate tables and figures | Exploratory evidence about paired head behavior across the tested data regimes; does not modify the primary confirmatory claim |
+| Layer-wise extension | finalized four-layer external prediction inventory, exploratory analysis, and aggregate asset manifest | layers -4/-3/-2 versus -1, 10 seeds, 75 external subjects, aggregate table and figures | Exploratory evidence about representation depth; does not modify the primary confirmatory claim |
 | Contract evidence | `tests/`, `src/neurobench_age/research/`, and `src/neurobench_age/analysis/` | synthetic workflows, strict schemas, tamper checks | Demonstrates code behavior, not empirical model performance |
 
 ## Primary prospective artifact map
@@ -41,6 +42,22 @@ asset-manifest digest is
 The stored outputs contain only aggregate metrics, seed-level contrasts,
 intervals, tables, and figures; no participant-level rows, identifiers, or
 raw signals are released.
+
+## Layer-wise extension artifact map
+
+The layer-wise extension is retained as aggregate evidence under
+`results/extensions/layerwise_probe_20260910/`. Its report binds the completed
+75-subject, four-layer by ten-seed external prediction inventory to the
+layer-wise analysis configuration, representation protocol, and training
+protocol. The analysis digest is
+`f1f757ef53a8aad10615afd7fa0d6f8e2bc4e7f04ec33ce2d870f92e44706565` and the
+asset-manifest digest is
+`14b5afe5623f34fbaed4fcbe98ee8b59528769bf468bd1bcd83b941353a2be9d`.
+The retained table and figures contain aggregate metrics only. Mean paired
+deltas were +0.042, +0.030, and +0.008 for layers -4, -3, and -2; every
+hierarchical-bootstrap interval crossed zero. Exact sign-flip p-values and
+Holm-adjusted values are descriptive exploratory inference and do not modify
+the primary confirmatory claim.
 
 ## Confirmatory result
 

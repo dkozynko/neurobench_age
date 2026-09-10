@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "analysis_id": "reve_age_layerwise_probe_analysis_v1",
+  "scope": "exploratory_secondary",
+  "baseline_head": "mean_linear_layer_m1",
+  "comparison_heads": [
+    "mean_linear_layer_m4",
+    "mean_linear_layer_m3",
+    "mean_linear_layer_m2"
+  ],
+  "seeds": [33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
+  "expected_subject_count": 75,
+  "bootstrap_iterations": 10000,
+  "bootstrap_seed": 20260910,
+  "confidence": 0.95,
+  "randomization_tail": "greater",
+  "holm_order": [
+    "mean_linear_layer_m4",
+    "mean_linear_layer_m3",
+    "mean_linear_layer_m2"
+  ],
+  "alpha": 0.05
+}

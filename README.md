@@ -103,6 +103,54 @@ Aggregate tables, figures, and their hash-chain manifest are retained under
 `results/extensions/capacity_data_regime_v3/`. This extension is exploratory
 and does not replace or modify the primary confirmatory evidence above.
 
+## Secondary layer-wise extension
+
+The layer-wise extension compares matched mean-linear probes at REVE layers
+`-4`, `-3`, and `-2` with the final-layer (`-1`) baseline. It uses the same
+sealed 75-subject MIPDB cohort and ten optimization seeds. The analysis is
+exploratory: all three point estimates are positive, but their hierarchical
+bootstrap intervals cross zero, so the extension does not establish a primary
+layer superiority claim.
+
+Aggregate-only outputs are retained under
+`results/extensions/layerwise_probe_20260910/`. The analysis identity is
+`f1f757ef53a8aad10615afd7fa0d6f8e2bc4e7f04ec33ce2d870f92e44706565`; the
+asset-manifest identity is
+`14b5afe5623f34fbaed4fcbe98ee8b59528769bf468bd1bcd83b941353a2be9d`.
+Participant-level predictions and representation caches remain external.
+
+## Audit and reproduction commands
+
+The repository's contract and analysis checks can be run with:
+
+```bash
+uv run --frozen --with pytest --with matplotlib pytest -q
+uv run --frozen --extra test python scripts/audit_layerwise_article.py
+```
+
+The layer-wise report can be recomputed only when the immutable external
+artifact directory is available. All artifact, protocol, and output paths must
+be absolute:
+
+```bash
+export PYTHONPATH="$PWD/src"
+uv run --frozen --extra test --extra manuscript python scripts/analyze_layerwise_probe.py \
+  --artifact-root /ABSOLUTE/PATH/layerwise_external_predictions_20260910 \
+  --analysis-config "$PWD/configs/research/layerwise_probe_analysis.json" \
+  --protocol "$PWD/configs/research/layerwise_probe.json" \
+  --training-protocol "$PWD/configs/research/layerwise_probe_training.json" \
+  --output /ABSOLUTE/OUTPUT/layerwise_analysis.json
+
+uv run --frozen --extra test --extra manuscript python scripts/build_layerwise_assets.py \
+  --analysis /ABSOLUTE/OUTPUT/layerwise_analysis.json \
+  --output-root /ABSOLUTE/OUTPUT/layerwise_assets
+```
+
+The analysis CLI is exact-resume: an existing output is accepted only when its
+content is byte-identical to the recomputed report. The asset builder consumes
+only the aggregate report and rejects canonical or manuscript-generated output
+roots.
+
 Only compact canonical evidence is retained here. Participant-level predictions,
 checkpoints, caches, raw recordings, and logs remain outside Git.
 

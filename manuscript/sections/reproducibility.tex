@@ -30,6 +30,15 @@ inventory, external prediction inventory, and exploratory inference
 specification. The package contains no subject-level rows, recordings,
 representations, or checkpoints.
 
+The exploratory layer-wise report is retained under the aggregate extension
+directory \texttt{layerwise\_probe\_20260910/}. It binds the four
+tested layers, ten seeds, and the \LayerwiseSubjectCount{}-subject inventory,
+analysis configuration, and
+aggregate-only figures and tables by SHA-256. The repository includes no
+participant-level layer-wise predictions or representation caches; the report
+is therefore suitable for manuscript audit and controlled rerendering without
+redistributing the underlying data.
+
 The codebase also keeps evidence classes explicit. Prospective MIPDB evidence
 supports the confirmatory conclusion; official NeuralBench-style end-to-end
 experiments support reproduction context; historical HBN test results remain

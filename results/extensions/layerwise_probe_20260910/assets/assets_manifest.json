@@ -1,0 +1,31 @@
+{
+  "analysis_sha256": "f1f757ef53a8aad10615afd7fa0d6f8e2bc4e7f04ec33ce2d870f92e44706565",
+  "asset_manifest_sha256": "14b5afe5623f34fbaed4fcbe98ee8b59528769bf468bd1bcd83b941353a2be9d",
+  "file_hashes": {
+    "layerwise_depth.pdf": {
+      "bytes": 26087,
+      "sha256": "5b7f111ff09a845b8b85669aefcbd243550505d28ad480129dfb4c4d3f73d323"
+    },
+    "layerwise_results_macros.tex": {
+      "bytes": 594,
+      "sha256": "e86d837178fd0fbe342ef0c97351fc9e71a60c9dd78db642bab9a12c9901c9f1"
+    },
+    "layerwise_seed_deltas.pdf": {
+      "bytes": 30628,
+      "sha256": "9d2241cb06f93a7f9668bd401d67ac82e2aedc1d0f560f097c314a7f1cfb59d5"
+    },
+    "layerwise_summary.tex": {
+      "bytes": 338,
+      "sha256": "d5d8e5b0c760f7d1abcda88517511907604a4ec66155d0de790958eb9891d329"
+    }
+  },
+  "files": [
+    "assets_manifest.json",
+    "layerwise_depth.pdf",
+    "layerwise_results_macros.tex",
+    "layerwise_seed_deltas.pdf",
+    "layerwise_summary.tex"
+  ],
+  "schema_version": 1,
+  "status": "complete"
+}

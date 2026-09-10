@@ -45,3 +45,16 @@ def test_canonical_index_points_to_existing_article_evidence() -> None:
     assert index["protocol"] == "strict"
     for relative in index["evidence"]:
         assert (canonical / relative).exists(), relative
+
+
+def test_layerwise_extension_is_registered_with_bounded_interpretation() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    registry = (ROOT / "docs/research/article_evidence_registry.md").read_text(
+        encoding="utf-8"
+    )
+    for text in (readme, registry):
+        assert "layer-wise" in text.casefold()
+        assert "f1f757ef53a8" in text
+        assert "14b5afe5623f" in text
+        assert "exploratory" in text.casefold()
+    assert "does not modify the primary confirmatory claim" in registry

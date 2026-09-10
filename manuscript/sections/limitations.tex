@@ -21,6 +21,13 @@ seeds; it does not evaluate the full available HBN cohort or establish a
 scaling law. Its training-size contrasts also inherit the finite MIPDB cohort
 and the same cross-cohort shift as the primary analysis.
 
+The layer-wise analysis is also secondary and exploratory. It compares only
+three earlier layers with the final layer, uses the same ten seeds and
+\LayerwiseSubjectCount{} external subjects, and trains a separate linear head at
+each depth. Layer depth
+is therefore not a causal intervention on the encoder, and the analysis cannot
+establish a general ordering of representation quality across layers.
+
 The cohort flow is reported in aggregate, but the compact repository bundle
 does not retain participant-level demographics, recording counts, or window
 counts. Those summaries should be added to an access-controlled supplement if
