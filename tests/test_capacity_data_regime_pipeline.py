@@ -7,6 +7,10 @@ import torch
 
 from neurobench_age.pipelines.capacity_data_regime import (
     CapacityDataRegimePipelineError,
+    build_capacity_data_regime_head,
+    build_capacity_data_regime_summary_head,
+    capacity_summary_from_tokens,
+    capacity_summary_mode,
     compute_capacity_preflight,
     build_cache_manifest_from_records,
     run_capacity_data_regime,
@@ -42,6 +46,35 @@ def test_extension_run_matrix_is_exactly_90_identities() -> None:
     assert {item.training_size for item in matrix} == {200, 400, 800}
     assert {item.head for item in matrix} == set(PROTOCOL.head_names)
     assert {item.seed for item in matrix} == set(range(33, 43))
+
+
+def test_capacity_summary_modes_match_declared_head_families() -> None:
+    assert capacity_summary_mode("mean_linear") == "mean"
+    assert capacity_summary_mode("mean_mlp_residual_matched(hidden_dim=4)") == "mean"
+    assert capacity_summary_mode("mean_rich_stats_residual") == "rich_stats"
+
+
+@pytest.mark.parametrize(
+    "head_name",
+    [
+        "mean_linear",
+        "mean_rich_stats_residual",
+        "mean_mlp_residual_matched(hidden_dim=4)",
+    ],
+)
+def test_capacity_summary_heads_match_raw_head_outputs(head_name: str) -> None:
+    tokens = torch.randn(4, 3, 2)
+    torch.manual_seed(33)
+    raw_head = build_capacity_data_regime_head(head_name, embed_dim=2)
+    torch.manual_seed(33)
+    summary_head = build_capacity_data_regime_summary_head(head_name, embed_dim=2)
+    summary = capacity_summary_from_tokens(
+        tokens,
+        head_name=head_name,
+        embed_dim=2,
+    )
+    with torch.inference_mode():
+        assert torch.allclose(raw_head(tokens), summary_head(summary), atol=1e-6, rtol=1e-6)
 
 
 def test_free_space_rule_records_measured_preflight_values() -> None:

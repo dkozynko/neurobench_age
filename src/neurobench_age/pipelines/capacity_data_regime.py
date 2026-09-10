@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import tempfile
+from types import MappingProxyType
 from typing import Any, Callable, Mapping, Sequence
 
 import torch
@@ -53,6 +54,143 @@ CAPACITY_HEADS = (
     "mean_rich_stats_residual",
     "mean_mlp_residual_matched(hidden_dim=4)",
 )
+
+
+def capacity_summary_mode(head_name: str) -> str:
+    """Return the fixed per-window summary required by one capacity head."""
+
+    _validate_capacity_head_name(head_name)
+    return "rich_stats" if head_name == "mean_rich_stats_residual" else "mean"
+
+
+def capacity_summary_from_tokens(
+    tokens: torch.Tensor,
+    *,
+    head_name: str,
+    embed_dim: int,
+) -> torch.Tensor:
+    """Convert token sequences to a head-equivalent one-token summary.
+
+    The summary is computed before optimization and contains the same fixed
+    statistics used by the capacity heads.  The leading singleton token axis
+    keeps the cached tensor contract ``[windows, tokens, features]`` intact.
+    """
+
+    mode = capacity_summary_mode(head_name)
+    if (
+        not isinstance(tokens, torch.Tensor)
+        or tokens.ndim != 3
+        or tokens.shape[1] <= 0
+        or tokens.shape[-1] != embed_dim
+    ):
+        raise CapacityDataRegimePipelineError(
+            "capacity summary requires [windows, tokens, embed_dim] tensors"
+        )
+    mean = tokens.mean(dim=1)
+    if mode == "mean":
+        return mean.unsqueeze(1)
+
+    stats_mean = tokens.mean(dim=1, keepdim=True)
+    standard_deviation = tokens.std(dim=1, unbiased=False)
+    value_range = tokens.amax(dim=1) - tokens.amin(dim=1)
+    mean_absolute_deviation = (tokens - stats_mean).abs().mean(dim=1)
+    mean_absolute_value = tokens.abs().mean(dim=1)
+    return torch.cat(
+        (mean, standard_deviation, value_range, mean_absolute_deviation, mean_absolute_value),
+        dim=-1,
+    ).unsqueeze(1)
+
+
+@dataclass(frozen=True)
+class CapacitySummaryRepresentationStore:
+    """Immutable CPU store of fixed per-window capacity summaries."""
+
+    tensors: Mapping[str, torch.Tensor]
+    embed_dim: int
+    summary_mode: str
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.embed_dim, bool)
+            or not isinstance(self.embed_dim, int)
+            or self.embed_dim <= 0
+            or self.summary_mode not in {"mean", "rich_stats"}
+            or not self.tensors
+        ):
+            raise CapacityDataRegimePipelineError("capacity summary store metadata is invalid")
+        expected_width = self.embed_dim * (5 if self.summary_mode == "rich_stats" else 1)
+        normalized = dict(self.tensors)
+        for subject_id, tensor in normalized.items():
+            if (
+                not isinstance(subject_id, str)
+                or not isinstance(tensor, torch.Tensor)
+                or tensor.device.type != "cpu"
+                or tensor.ndim != 3
+                or tensor.shape[0] <= 0
+                or tensor.shape[1] != 1
+                or tensor.shape[2] != expected_width
+                or not torch.isfinite(tensor).all()
+            ):
+                raise CapacityDataRegimePipelineError(
+                    "capacity summary store tensors are invalid"
+                )
+        object.__setattr__(self, "tensors", MappingProxyType(normalized))
+
+    @property
+    def subject_count(self) -> int:
+        return len(self.tensors)
+
+    def tensor(self, subject_id: str, layer: int) -> torch.Tensor:
+        if layer != -1:
+            raise CapacityDataRegimePipelineError(
+                "capacity summary store exposes only the final-layer summary"
+            )
+        try:
+            return self.tensors[subject_id]
+        except KeyError as error:
+            raise CapacityDataRegimePipelineError(
+                f"capacity summary store is missing subject: {subject_id}"
+            ) from error
+
+
+def build_capacity_summary_store(
+    *,
+    records: Sequence[CachedSubjectRecord],
+    representation_store: Any,
+    head_name: str,
+    compute_device: str,
+) -> CapacitySummaryRepresentationStore:
+    """Build one reusable summary store from the validated raw cache."""
+
+    if not records or representation_store is None:
+        raise CapacityDataRegimePipelineError("capacity summary inputs are incomplete")
+    mode = capacity_summary_mode(head_name)
+    first_tensor = representation_store.tensor(records[0].subject_id, -1)
+    if not isinstance(first_tensor, torch.Tensor) or first_tensor.ndim != 3:
+        raise CapacityDataRegimePipelineError("raw capacity representation is invalid")
+    embed_dim = int(first_tensor.shape[-1])
+    target_device = torch.device(compute_device)
+    summaries: dict[str, torch.Tensor] = {}
+    with torch.inference_mode():
+        for record in records:
+            if record.subject_id in summaries:
+                raise CapacityDataRegimePipelineError(
+                    "capacity summary records contain duplicate subject IDs"
+                )
+            tokens = representation_store.tensor(record.subject_id, -1)
+            if tokens.device.type != target_device.type:
+                tokens = tokens.to(target_device)
+            summary = capacity_summary_from_tokens(
+                tokens,
+                head_name=head_name,
+                embed_dim=embed_dim,
+            )
+            summaries[record.subject_id] = summary.detach().cpu()
+    return CapacitySummaryRepresentationStore(
+        tensors=summaries,
+        embed_dim=embed_dim,
+        summary_mode=mode,
+    )
 
 
 @dataclass(frozen=True)
@@ -644,6 +782,21 @@ def run_capacity_data_regime(
             "cached window count differs from the sealed preflight report"
         )
 
+    summary_stores = {
+        "mean": build_capacity_summary_store(
+            records=records,
+            representation_store=store,
+            head_name="mean_linear",
+            compute_device=device,
+        ),
+        "rich_stats": build_capacity_summary_store(
+            records=records,
+            representation_store=store,
+            head_name="mean_rich_stats_residual",
+            compute_device=device,
+        ),
+    }
+
     run_callable = train_frozen_probe_run if run_callable is None else run_callable
     run_records: list[dict[str, Any]] = []
     completed = 0
@@ -652,17 +805,27 @@ def run_capacity_data_regime(
             records, tuple(cohorts[training_size])
         )
         train_records = tuple(record for record in selected_records if record.split == "train")
-        tensors = {record.subject_id: store.tensor(record.subject_id, -1) for record in train_records}
-        batch_plan = GlobalWindowBatchPlan.build(
-            train_records, tensors=tensors, batch_size=training.batch_size
-        )
-        cpu_features, cpu_targets = batch_plan.flatten(tensors)
-        flat_store = (
-            *_prepare_training_store_device(cpu_features, cpu_targets, device=device),
-        )
+        flat_stores: dict[str, tuple[torch.Tensor, torch.Tensor, str]] = {}
+        for summary_mode, summary_store in summary_stores.items():
+            tensors = {
+                record.subject_id: summary_store.tensor(record.subject_id, -1)
+                for record in train_records
+            }
+            batch_plan = GlobalWindowBatchPlan.build(
+                train_records, tensors=tensors, batch_size=training.batch_size
+            )
+            cpu_features, cpu_targets = batch_plan.flatten(tensors)
+            flat_stores[summary_mode] = _prepare_training_store_device(
+                cpu_features,
+                cpu_targets,
+                device=device,
+            )
         for identity in (
             item for item in matrix if item.training_size == training_size
         ):
+            summary_mode = capacity_summary_mode(identity.head)
+            summary_store = summary_stores[summary_mode]
+            flat_store = flat_stores[summary_mode]
             run_dir = (
                 output_root
                 / f"n-{training_size}"
@@ -676,9 +839,14 @@ def run_capacity_data_regime(
                 "hidden_dim": 4 if "hidden_dim=4" in identity.head else None,
                 "head_complexity": capacity_head_complexity_metadata(
                     identity.head,
-                    embed_dim=int(cpu_features.shape[-1]),
+                    embed_dim=summary_store.embed_dim,
                     n_outputs=1,
                 ),
+                "feature_transform": {
+                    "name": "per_window_token_summary",
+                    "summary_mode": summary_mode,
+                    "embed_dim": summary_store.embed_dim,
+                },
                 "resource": {
                     "requested_device": device,
                     "training_store_device": flat_store[2],
@@ -701,9 +869,9 @@ def run_capacity_data_regime(
                 training=training,
                 device=device,
                 training_source_sha256=training_source_sha256,
-                representation_store=store,
+                representation_store=summary_store,
                 flat_training_store=flat_store,
-                head_builder=build_capacity_data_regime_head,
+                head_builder=build_capacity_data_regime_summary_head,
                 required_layer_resolver=required_capacity_layer_for_head,
                 run_metadata=run_context,
                 progress_sink=progress_sink,
@@ -791,22 +959,35 @@ def run_capacity_pilot(
             cache_root=cache_root,
             available_memory_bytes=available_memory_bytes,
         )
+    summary_store = build_capacity_summary_store(
+        records=records,
+        representation_store=store,
+        head_name="mean_linear",
+        compute_device=device,
+    )
     train_records = tuple(record for record in selected_records if record.split == "train")
-    tensors = {record.subject_id: store.tensor(record.subject_id, -1) for record in train_records}
+    tensors = {
+        record.subject_id: summary_store.tensor(record.subject_id, -1)
+        for record in train_records
+    }
     batch_plan = GlobalWindowBatchPlan.build(
         train_records, tensors=tensors, batch_size=training.batch_size
     )
     cpu_features, cpu_targets = batch_plan.flatten(tensors)
     flat_store = _prepare_training_store_device(cpu_features, cpu_targets, device=device)
-    first = next(iter(tensors.values()))
     run_context = {
         "extension_id": protocol.extension_id,
         "training_size": 200,
         "head": "mean_linear",
         "hidden_dim": None,
         "head_complexity": capacity_head_complexity_metadata(
-            "mean_linear", embed_dim=int(first.shape[-1]), n_outputs=1
+            "mean_linear", embed_dim=summary_store.embed_dim, n_outputs=1
         ),
+        "feature_transform": {
+            "name": "per_window_token_summary",
+            "summary_mode": "mean",
+            "embed_dim": summary_store.embed_dim,
+        },
         "resource": {
             "requested_device": device,
             "training_store_device": flat_store[2],
@@ -831,9 +1012,9 @@ def run_capacity_pilot(
         training=training,
         device=device,
         training_source_sha256=training_source_sha256,
-        representation_store=store,
+        representation_store=summary_store,
         flat_training_store=flat_store,
-        head_builder=build_capacity_data_regime_head,
+        head_builder=build_capacity_data_regime_summary_head,
         required_layer_resolver=required_capacity_layer_for_head,
         run_metadata=run_context,
     )
@@ -862,6 +1043,62 @@ def _validate_capacity_head_name(head_name: str) -> None:
         )
 
 
+def _capacity_summary_vector(summary: Any, *, width: int) -> torch.Tensor:
+    if (
+        not isinstance(summary, torch.Tensor)
+        or summary.ndim != 3
+        or summary.shape[1] != 1
+        or summary.shape[2] != width
+    ):
+        raise CapacityDataRegimePipelineError(
+            "capacity summary head requires [batch, 1, summary_width] input"
+        )
+    return summary[:, 0, :]
+
+
+class _CapacityMeanSummaryLinearHead(nn.Module):
+    def __init__(self, *, embed_dim: int, n_outputs: int):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.linear = nn.Linear(embed_dim, n_outputs)
+
+    def forward(self, summary: Any) -> torch.Tensor:
+        mean = _capacity_summary_vector(summary, width=self.embed_dim)
+        return self.linear(mean)
+
+
+class _CapacityMeanSummaryMLPResidualHead(nn.Module):
+    def __init__(self, *, embed_dim: int, n_outputs: int, hidden_dim: int = 4):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.hidden_dim = hidden_dim
+        self.linear = nn.Linear(embed_dim, n_outputs)
+        self.hidden = nn.Linear(embed_dim, hidden_dim)
+        self.correction = nn.Linear(hidden_dim, n_outputs, bias=False)
+        nn.init.zeros_(self.correction.weight)
+
+    def forward(self, summary: Any) -> torch.Tensor:
+        mean = _capacity_summary_vector(summary, width=self.embed_dim)
+        nonlinear_features = torch.nn.functional.gelu(self.hidden(mean))
+        return self.linear(mean) + self.correction(nonlinear_features)
+
+
+class _CapacityRichStatsSummaryHead(nn.Module):
+    def __init__(self, *, embed_dim: int, n_outputs: int):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.correction_scale = 0.5
+        self.linear = nn.Linear(embed_dim, n_outputs)
+        self.correction = nn.Linear(4 * embed_dim, n_outputs, bias=False)
+        nn.init.zeros_(self.correction.weight)
+
+    def forward(self, summary: Any) -> torch.Tensor:
+        values = _capacity_summary_vector(summary, width=5 * self.embed_dim)
+        mean = values[:, : self.embed_dim]
+        stats = values[:, self.embed_dim :]
+        return self.linear(mean) + self.correction_scale * self.correction(stats)
+
+
 def build_capacity_data_regime_head(
     head_name: str, *, embed_dim: int, n_outputs: int = 1
 ) -> nn.Module:
@@ -873,6 +1110,29 @@ def build_capacity_data_regime_head(
     if head_name == "mean_rich_stats_residual":
         return MeanRichStatsResidualHead(embed_dim=embed_dim, n_outputs=n_outputs)
     return MeanMLPResidualHead(
+        embed_dim=embed_dim,
+        n_outputs=n_outputs,
+        hidden_dim=4,
+    )
+
+
+def build_capacity_data_regime_summary_head(
+    head_name: str, *, embed_dim: int, n_outputs: int = 1
+) -> nn.Module:
+    """Build a capacity head that consumes a fixed per-window summary."""
+
+    _validate_capacity_head_name(head_name)
+    if head_name == "mean_linear":
+        return _CapacityMeanSummaryLinearHead(
+            embed_dim=embed_dim,
+            n_outputs=n_outputs,
+        )
+    if head_name == "mean_rich_stats_residual":
+        return _CapacityRichStatsSummaryHead(
+            embed_dim=embed_dim,
+            n_outputs=n_outputs,
+        )
+    return _CapacityMeanSummaryMLPResidualHead(
         embed_dim=embed_dim,
         n_outputs=n_outputs,
         hidden_dim=4,

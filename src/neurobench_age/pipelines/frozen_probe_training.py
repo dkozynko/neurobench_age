@@ -1077,6 +1077,11 @@ def train_frozen_probe_run(
         raise FrozenEncoderError(
             "cached representation must have shape [windows, tokens, features]"
         )
+    head_embed_dim = int(
+        getattr(representation_store, "embed_dim", sample.shape[-1])
+    )
+    if head_embed_dim <= 0:
+        raise FrozenEncoderError("head embedding dimension must be positive")
     if flat_training_store is None:
         train_features, train_targets = batch_plan.flatten(train_tensors)
         train_features, train_targets, train_store_device = (
@@ -1107,7 +1112,7 @@ def train_frozen_probe_run(
             raise FrozenEncoderError("shared flat training store is invalid")
 
     _configure_strict_determinism(seed)
-    head = head_builder(head_name, embed_dim=int(sample.shape[-1])).to(device)
+    head = head_builder(head_name, embed_dim=head_embed_dim).to(device)
     head_parameters = [parameter for parameter in head.parameters() if parameter.requires_grad]
     optimizer = torch.optim.AdamW(
         head_parameters,
