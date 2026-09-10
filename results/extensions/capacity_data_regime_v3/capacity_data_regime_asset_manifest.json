@@ -1,6 +1,6 @@
 {
   "analysis_sha256": "1bd8143b8d917d36082f23e5e936bf2b5f873f3e8803e144b96d3e2297f8d974",
-  "asset_manifest_sha256": "24dad75a98daaa0cf97aa96d684cc30dc1d9aad8cef77c321613792a12722374",
+  "asset_manifest_sha256": "95d68b95bd621f547f168a51a86323b97268c8ae73f3182828f957bc196e955b",
   "checkpoint_inventory_body_sha256": "c1802b6cec2dc465bef5e5543c596695964229d88038d6746858a5c66aeab32a",
   "exploratory_inference_sha256": "9ebf7a48cdc83a6b2c62ce6da12c025ca33d67c06973e273ca00acaa8edaaaac",
   "files": {
@@ -37,8 +37,8 @@
       "sha256": "f25291a052858ed132171de2b38a86dd611edfd6539d5512d93f2099556e98bf"
     },
     "capacity_data_regime_seed_deltas.pdf": {
-      "bytes": 36902,
-      "sha256": "d925a97aa57d77ffdfab3a66f51d9ba9e3daba54a5564b9089b61982dd76064a"
+      "bytes": 37264,
+      "sha256": "769344fb8cb412edb8534142e817eba945f0fb7144237e51296503ddff702bf7"
     },
     "capacity_data_regime_validation_external_transfer.tex": {
       "bytes": 449,

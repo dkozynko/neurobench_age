@@ -270,25 +270,37 @@ def _render_figures(cells: Sequence[Mapping[str, Any]]) -> dict[str, bytes]:
         delta_pdf = _figure_bytes(delta, title="Capacity--data paired Pearson deltas")
         plt.close(delta)
 
-        seed, seed_axis = plt.subplots(figsize=(6.2, 3.4), constrained_layout=True)
-        for head, color in colors.items():
+        seed, seed_axes = plt.subplots(
+            2,
+            1,
+            figsize=(6.2, 5.0),
+            sharex=True,
+            constrained_layout=True,
+        )
+        size_colors = {200: "#0072B2", 400: "#009E73", 800: "#D55E00"}
+        for seed_axis, head in zip(seed_axes, _CANDIDATE_HEADS):
             for size in _SIZES:
-                cell = next(row for row in cells if row["head"] == head and row["training_size"] == size)
+                cell = next(
+                    row
+                    for row in cells
+                    if row["head"] == head and row["training_size"] == size
+                )
                 seed_axis.plot(
                     [row["seed"] for row in cell["per_seed"]],
                     [row["pearson_delta"] for row in cell["per_seed"]],
                     marker="o",
                     markersize=3,
-                    color=color,
-                    alpha=0.55,
-                    label=f"{_HEAD_LABELS[head]}, n={size}",
+                    color=size_colors[size],
+                    alpha=0.8,
+                    label=f"n={size}",
                 )
-        seed_axis.axhline(0.0, color="#333333", linestyle="--")
-        seed_axis.set_xlabel("Training seed")
-        seed_axis.set_ylabel("Paired external Pearson delta")
-        seed_axis.set_xticks(tuple(range(33, 43)))
-        seed_axis.grid(axis="y", alpha=0.2)
-        seed_axis.legend(frameon=False, fontsize=6, ncol=2)
+            seed_axis.axhline(0.0, color="#333333", linestyle="--")
+            seed_axis.set_ylabel("Pearson delta")
+            seed_axis.set_title(_HEAD_LABELS[head], loc="left", fontsize=9)
+            seed_axis.set_xticks(tuple(range(33, 43)))
+            seed_axis.grid(axis="y", alpha=0.2)
+            seed_axis.legend(frameon=False, fontsize=7, ncol=3, loc="upper right")
+        seed_axes[-1].set_xlabel("Training seed")
         seed_pdf = _figure_bytes(seed, title="Capacity--data seed variability")
         plt.close(seed)
 

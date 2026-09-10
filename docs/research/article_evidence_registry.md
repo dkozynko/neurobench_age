@@ -37,7 +37,7 @@ analysis to the finalized lock, checkpoint inventory, prediction inventory,
 and exploratory inference specification. The analysis digest is
 `1bd8143b8d917d36082f23e5e936bf2b5f873f3e8803e144b96d3e2297f8d974` and the
 asset-manifest digest is
-`24dad75a98daaa0cf97aa96d684cc30dc1d9aad8cef77c321613792a12722374`.
+`95d68b95bd621f547f168a51a86323b97268c8ae73f3182828f957bc196e955b`.
 The stored outputs contain only aggregate metrics, seed-level contrasts,
 intervals, tables, and figures; no participant-level rows, identifiers, or
 raw signals are released.
