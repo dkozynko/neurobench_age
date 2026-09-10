@@ -41,20 +41,117 @@ access must still be checked before declaring a usable cohort.
 | Candidate | Verified source facts | Decision for the current transfer contract |
 | --- | --- | --- |
 | Kang et al., *Development of EEG connectivity from preschool to school-age children* | 253 children aged 3-10; eyes-open EEG acquired with a 128-channel HydroCel net at 1,000 Hz. The authors offer raw data on request. Their analyzed derivative uses filtering and a reduced channel set. | Best acquisition match among these screened candidates, but not execution-ready: request original raw channels, continuous age at recording, recording boundaries, and reuse conditions. Ages below the HBN support are ineligible for the primary replication. |
-| OpenNeuro ds006923, *Dataset of Electroencephalograms of Juvenile Offenders* | 140 participants; BioSemi ActiveTwo 128 channels. The README describes derivatives downsampled to 128 Hz and filtered to 1-40 Hz. NEMAR lists CC0 and an approximately 8 GB download. | No-go as a drop-in replication. Different coordinates and irreversibly different preprocessing require a separately specified cross-montage/preprocessing experiment. Exact age availability remains unverified. |
+| OpenNeuro ds006780, *SFARI_EEG multi-paradigm dataset* | Public raw BIDS EEG from 136 listed children aged 7.9-14.5, with 127 participants having both an exact age and a resting-state run-01 file in the checked public tree. Acquisition is BioSemi ActiveTwo, 64 EEG channels at 512 Hz, plus eight EMG channels and a trigger channel. Resting state is eyes-open, approximately 62-second blocks, with 1-8 runs observed and up to six blocks described across two sessions. The cohort contains typically developing, ASD, and ASD-sibling groups. | Best public candidate found so far, but not execution-ready: the checked BIDS tree has no subject-specific `electrodes.tsv` or `coordsystem.json`, the sidecar leaves EEG reference as `n/a`, duration is variable, and clinical/sibling grouping creates domain shift. It can be considered for a predeclared secondary external transfer only after canonical BioSemi64 coordinate provenance, reference handling, run/session aggregation, and precision are validated. |
+| Iranian 6-11 years population-based EEG, ERP, and cognition dataset | 100 non-clinical children aged 6-11 years, with age recorded in months. Raw EDF recordings include four minutes eyes-open and four minutes eyes-closed resting EEG. Acquisition uses 19 scalp electrodes in the 10-20 system, 250 Hz sampling, and linked-ear reference. The authors describe controlled Synapse access; the institute download portal additionally requires name, email, and acceptance of research-use/no-redistribution terms. | Strong developmental candidate for a separate low-density cross-montage transfer: exact age and raw resting data are attractive, but 19-channel 10-20 data are not a matched HydroCel replication. Do not access or execute until the reuse terms and participant-level age/QC manifest are independently confirmed. |
+| OpenNeuro ds006923, *Dataset of Electroencephalograms of Juvenile Offenders* | 140 participants; BioSemi ActiveTwo 128 channels; exact age in years is available for every participant, with support 14-19 years. The public derivative contains 128-channel resting-state recordings at 128 Hz, including a 1-40 Hz preprocessed derivative, per-subject channel/electrode/coordinate metadata, and no listed original BDF/FDT acquisition files. The cohort is all male and contains 74 juvenile offenders plus 66 non-offender controls. NEMAR lists CC0 and an approximately 8 GB download. | No-go as a drop-in replication. The age support is narrow relative to HBN, the cohort is all male, and the available signal is a derivative with a distinct BioSemi/coordinate/preprocessing contract. It can be considered only as a separately specified cross-montage transfer or domain-shift stress test, not as a silent replacement for the primary external replication. |
 | MPI-LEMON | The project describes 228 participants, ages 20-35 or 59-77, with 62-channel resting EEG and public download links. | Not the preferred developmental replication: almost all advertised age support lies outside 5.06-21.67 years, and the montage differs. Do not reinterpret older-adult extrapolation as the same in-support task. |
 
 Sources for the corresponding rows:
 
 - [Kang et al.: acquisition and data availability](https://www.frontiersin.org/journals/neuroscience/articles/10.3389/fnins.2023.1277786/full).
+- [ds006780 source README](https://github.com/OpenNeuroDatasets/ds006780),
+  [ds006780 participants metadata](https://github.com/OpenNeuroDatasets/ds006780/blob/main/participants.tsv).
+- [Iranian dataset paper](https://pmc.ncbi.nlm.nih.gov/articles/PMC11846862/),
+  [author access portal](https://ibmhi.ir/iranian-child-brain-dataset/),
+  [controlled Synapse record](https://www.synapse.org/Synapse:syn64112114).
 - [ds006923 source README](https://github.com/OpenNeuroDatasets/ds006923),
+  [participants metadata](https://github.com/OpenNeuroDatasets/ds006923/blob/main/participants.tsv),
+  [dataset description](https://github.com/OpenNeuroDatasets/ds006923/blob/main/dataset_description.json),
   [NEMAR distribution record](https://nemar.org/dataset/on006923).
 - [MPI-LEMON project description](https://fcon_1000.projects.nitrc.org/indi/retro/MPI_LEMON.html).
 
-The preferred next action is an access/metadata enquiry for the first candidate,
-not bulk downloading the second candidate. No enquiry has been sent. If raw
-data are unavailable, record a no-go and continue the cohort search; do not
-silently relax the protocol to make an available dataset fit.
+The metadata-only audit of ds006923 is complete, and ds006780 plus the Iranian
+cohort have now been added as further candidates after repository/access
+metadata screens. These audits were intentionally performed without downloading
+EEG or running a model. The public metadata are sufficient to reject ds006923
+as a drop-in replication, while ds006780 and the Iranian cohort are possible
+secondary transfer candidates but still require adapter, access, and precision
+validation. Neither dataset is approved for inference yet. The preferred next
+action remains an access/metadata enquiry for the closest-match candidate; if
+raw data are unavailable, record a no-go and continue the cohort search rather
+than silently relaxing the protocol.
+
+### Metadata-only screen of ds006780
+
+The public repository exposes raw BIDS files and exact participant ages. The
+repository-level screen used the public `main` commit
+`799d1502296ba5f74033734e149160c3d333e470` and found 136 participant rows,
+135 non-missing ages from 7.9 to 14.5 years, and 129 subjects with a public
+resting-state run-01 BDF file; 127 of those subjects have a usable exact age in
+the checked manifest. The checked resting-state sidecar specifies continuous
+approximately 62-second eyes-open recordings at 512 Hz with 64 EEG channels,
+eight EMG channels, and one trigger channel. The repository contains 686 BDF
+sidecars/files across 131 subjects, with variable run counts; it contains no
+subject-specific `electrodes.tsv` or `coordsystem.json` files. The sidecar also
+leaves the EEG reference as `n/a` and does not declare software filters.
+
+Up to six resting blocks can occur across two sessions according to the README,
+but the BIDS tree has no explicit `ses-*` directories. Subject-level
+run/session aggregation and the treatment of incomplete runs must therefore be
+fixed from the manifest before any external evaluation. The cohort is
+clinically heterogeneous (ASD, typical development, and ASD-sibling groups),
+which is a domain-shift factor rather than a nuisance to hide.
+
+The current suitability decision is **conditional**:
+
+- target availability and age support: pass;
+- raw EEG and subject-level resting files: pass;
+- independent cohort and mixed-sex coverage: pass provisionally;
+- canonical sensor coordinates and reference provenance: blocker;
+- fixed run/session aggregation: blocker;
+- precision for the eligible subset: pending simulation.
+
+This is a screening result, not an execution approval. The next gate is to
+validate the file/age/run manifest, resolve the source-preserving 64-channel
+coordinate/reference contract, estimate precision for the eligible subset, and
+implement the adapter before sealing any external study. If the coordinate or
+reference provenance cannot be justified from the dataset documentation, do
+not silently substitute a convenient montage and do not use this cohort for the
+confirmatory external claim.
+
+### Metadata-only screen of the Iranian 6-11 cohort
+
+The paper and author access portal report 100 non-clinical children aged 6-11,
+with age recorded in months, two four-minute resting conditions, and raw EDF
+files. The acquisition uses 19 electrodes in the international 10-20 layout at
+250 Hz with linked-ear reference. This makes the cohort attractive for testing
+whether the head comparison survives a much lower-density sensor layout, but it
+does not provide a matched HBN/HydroCel replication. The access portal requires
+identifying contact information and acceptance of research-use and
+no-redistribution terms, so no data were requested or downloaded during this
+screen.
+
+The candidate remains blocked until the exact permitted use, participant-level
+age/QC metadata, and a source-preserving 19-channel adapter are confirmed.
+
+### Metadata-only audit of ds006923
+
+The audit queried only public text metadata and repository file listings. No EEG
+signal, participant-level file, or model output was written to this repository.
+The following facts are now verified:
+
+- `participants.tsv` has 140 rows, an `Age` field in years with no missing
+  values, and values from 14 through 19 years. The age counts are 2, 22, 35,
+  42, 33, and 6 for ages 14, 15, 16, 17, 18, and 19, respectively.
+- The cohort is all male and comprises 74 offenders and 66 non-offender
+  controls. The group/age composition is asymmetric, so a transfer result
+  must not be described as a clean age-only replication without reporting this
+  domain shift.
+- Each of the 140 subject folders exposes `channels.tsv`, `electrodes.tsv`,
+  and `coordsystem.json`, with 128 EEG channels. The checked sidecars specify
+  128 Hz sampling, average reference, and a 1-40 Hz FIR-filtered continuous
+  derivative; a separate four-minute epoched derivative is also listed.
+- `dataset_description.json` marks the dataset as a `derivative`, and the
+  public file inventory lists `.set` derivatives rather than the original
+  acquisition format. The adapter therefore must preserve the source
+  coordinate/signal provenance and cannot pretend that this is the MIPDB raw
+  recording contract.
+
+The audit exit condition is therefore **screened, not approved**. The next
+decision is between (a) keeping ds006923 as a predeclared secondary
+cross-montage stress test, or (b) continuing the search/request process for an
+independent developmental cohort with broader age support and a closer
+acquisition contract.
 
 ## Compatibility and independence are separate checks
 
