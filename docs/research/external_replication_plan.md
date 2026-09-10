@@ -2,9 +2,12 @@
 
 Date: 2026-09-10.
 
-**Status:** metadata/literature screening and a target-free technical pilot of
-ds006780 are complete; no second cohort is approved for confirmatory inference,
-and no external data or model outputs are stored in this repository.
+**Status:** metadata/literature screening, target-free adapter validation, full
+target-free signal QC, precision-gate approval, target-bearing cohort
+finalization, lock-gated execution, aggregate analysis, and manuscript asset
+generation for ds006780 are complete. The v5 precision gate failed; all
+participant-level artifacts remain outside Git and the result is reported as
+secondary uncertainty-limited transfer evidence.
 
 **Goal:** test whether the observed REVE head comparison transfers to an
 independently recruited, age-compatible EEG cohort without tuning on its targets.
@@ -42,7 +45,7 @@ access must still be checked before declaring a usable cohort.
 | Candidate | Verified source facts | Decision for the current transfer contract |
 | --- | --- | --- |
 | Kang et al., *Development of EEG connectivity from preschool to school-age children* | 253 children aged 3-10; eyes-open EEG acquired with a 128-channel HydroCel net at 1,000 Hz. The authors offer raw data on request. Their analyzed derivative uses filtering and a reduced channel set. | Best acquisition match among these screened candidates, but not execution-ready: request original raw channels, continuous age at recording, recording boundaries, and reuse conditions. Ages below the HBN support are ineligible for the primary replication. |
-| OpenNeuro ds006780, *SFARI_EEG multi-paradigm dataset* | Public raw BIDS EEG from 136 listed children aged 7.9-14.5, with 127 participants having both an exact age and a resting-state run-01 file in the checked public tree. Acquisition is BioSemi ActiveTwo, 64 EEG channels at 512 Hz, plus eight EMG channels and a trigger channel. Resting state is eyes-open, approximately 62-second blocks, with 1-8 runs observed and up to six blocks described across two sessions. The cohort contains typically developing, ASD, and ASD-sibling groups. A pinned audit found all 686 resting channel sidecars exactly match the canonical BioSemi-64 channel set and order; a one-file target-free pilot also passed the signal-to-REVE interface. | Best public candidate found so far, but not execution-ready: the checked BIDS tree has no subject-specific `electrodes.tsv` or `coordsystem.json`, the sidecar leaves EEG reference as `n/a`, duration is variable, and clinical/sibling grouping creates domain shift. It can be considered for a predeclared secondary external transfer only after reference handling, run/session aggregation, and precision are validated. |
+| OpenNeuro ds006780, *SFARI_EEG multi-paradigm dataset* | Public raw BIDS EEG from 136 listed participants. In the pinned `1.0.0` signal/metadata snapshot, 128 candidates satisfy the target-free `run-01` recording contract; 126 have exact usable ages after two explicit metadata exclusions. Acquisition is BioSemi ActiveTwo, 64 EEG channels at 512 Hz, plus eight EMG channels and a trigger channel. Resting state is eyes-open, approximately 62-second blocks, with 1-8 runs observed and up to six blocks described across two sessions. The cohort contains typically developing, ASD, and ASD-sibling groups. A pinned audit found all 686 resting channel sidecars exactly match the canonical BioSemi-64 channel set and order; the target-free adapter and full signal QC passed. | Completed v5 secondary transfer candidate. The checked BIDS tree has no subject-specific `electrodes.tsv` or `coordsystem.json`, the sidecar leaves EEG reference as `n/a`, duration is variable, and clinical/sibling grouping creates domain shift. The fixed canonical BioSemi-64 approximation and preserve-acquisition reference policy are reported as limitations; the precision gate failed. |
 | Iranian 6-11 years population-based EEG, ERP, and cognition dataset | 100 non-clinical children aged 6-11 years, with age recorded in months. Raw EDF recordings include four minutes eyes-open and four minutes eyes-closed resting EEG. Acquisition uses 19 scalp electrodes in the 10-20 system, 250 Hz sampling, and linked-ear reference. The authors describe controlled Synapse access; the institute download portal additionally requires name, email, and acceptance of research-use/no-redistribution terms. | Strong developmental candidate for a separate low-density cross-montage transfer: exact age and raw resting data are attractive, but 19-channel 10-20 data are not a matched HydroCel replication. Do not access or execute until the reuse terms and participant-level age/QC manifest are independently confirmed. |
 | OpenNeuro ds006923, *Dataset of Electroencephalograms of Juvenile Offenders* | 140 participants; BioSemi ActiveTwo 128 channels; exact age in years is available for every participant, with support 14-19 years. The public derivative contains 128-channel resting-state recordings at 128 Hz, including a 1-40 Hz preprocessed derivative, per-subject channel/electrode/coordinate metadata, and no listed original BDF/FDT acquisition files. The cohort is all male and contains 74 juvenile offenders plus 66 non-offender controls. NEMAR lists CC0 and an approximately 8 GB download. | No-go as a drop-in replication. The age support is narrow relative to HBN, the cohort is all male, and the available signal is a derivative with a distinct BioSemi/coordinate/preprocessing contract. It can be considered only as a separately specified cross-montage transfer or domain-shift stress test, not as a silent replacement for the primary external replication. |
 | MPI-LEMON | The project describes 228 participants, ages 20-35 or 59-77, with 62-channel resting EEG and public download links. | Not the preferred developmental replication: almost all advertised age support lies outside 5.06-21.67 years, and the montage differs. Do not reinterpret older-adult extrapolation as the same in-support task. |
@@ -72,12 +75,13 @@ reference policy, run/session aggregation, and precision validation.
 
 ### Metadata-only screen of ds006780
 
-The public repository exposes raw BIDS files and exact participant ages. The
-repository-level screen used the public `main` commit
+The public repository exposes raw BIDS files and participant ages. The
+execution snapshot used OpenNeuro version `1.0.0` at source commit
 `799d1502296ba5f74033734e149160c3d333e470` and found 136 participant rows,
-135 non-missing ages from 7.9 to 14.5 years, and 129 subjects with a public
-resting-state run-01 BDF file; 127 of those subjects have a usable exact age in
-the checked manifest. The checked resting-state sidecar specifies continuous
+135 non-missing ages from 7.9 to 14.5 years, and 128 target-free `run-01`
+recording candidates. Of those candidates, 126 have a usable exact age; one
+participant row is absent and one age is `n/a`, both recorded as exclusions.
+The checked resting-state sidecar specifies continuous
 approximately 62-second eyes-open recordings at 512 Hz with 64 EEG channels,
 eight EMG channels, and one trigger channel. The repository contains 686 BDF
 sidecars/files across 131 subjects, with variable run counts; it contains no
@@ -93,23 +97,23 @@ which is a domain-shift factor rather than a nuisance to hide.
 
 The current suitability decision is **conditional**:
 
-- target availability and age support: pass;
+- target availability and age support: pass for 126 subjects, with two explicit metadata exclusions;
 - raw EEG and subject-level resting files: pass;
 - independent cohort and mixed-sex coverage: pass provisionally;
 - canonical BioSemi-64 channel mapping: pass as a standardized montage
   approximation; subject-specific coordinates remain unavailable;
-- EEG reference provenance and fixed reference policy: blocker;
-- fixed run/session aggregation: blocker;
-- precision for the eligible subset: pending simulation.
+- EEG reference provenance: unknown in the source sidecar, with the fixed
+  `preserve_acquisition` policy recorded explicitly;
+- fixed run/session aggregation: resolved for the predeclared one-subject
+  `run-01` contract;
+- precision for the eligible subset: approved maximum 95% CI width `0.06`.
 
-This is a screening result, not an execution approval. The coordinate mapping
-gate is now resolved only as a canonical standardized approximation. The next
-gate is to validate the file/age/run manifest, freeze the reference policy,
-resolve the 64-channel adapter contract, estimate precision for the eligible
-subset, and implement the adapter before sealing any external study. If the
-reference provenance cannot be justified from the dataset documentation, do
-not silently substitute a convenient rereference and do not use this cohort for
-the confirmatory external claim.
+The coordinate mapping gate is resolved only as a canonical standardized
+approximation, and the source reference remains unknown. The completed v5
+execution preserves that policy and is not a claim of harmonized acquisition.
+Because the extension was motivated by earlier results and its precision gate
+failed, it is reported as secondary transfer evidence rather than a new
+confirmatory claim.
 
 ### Target-free technical pilot of ds006780
 
@@ -142,6 +146,112 @@ rereference, matching the existing HBN reader behavior when no explicit
 reference channel is declared; this remains a design decision to validate and
 freeze before external inference. Average reference may be retained only as a
 predeclared robustness analysis applied consistently to every cohort.
+
+### Target-free adapter implementation gate
+
+The repository now contains a dedicated `ds006780` adapter package for the
+pre-inference gate. It is intentionally separate from the MIPDB adapter and
+does not read `participants.tsv`, age values, predictions, or metrics during
+manifest construction or signal QC. The target-free manifest records the
+OpenNeuro version, source commit, per-file size and SHA-256 identities,
+environment/lockfile identity, canonical BioSemi-64 montage identity, ordered
+channel/event inventories, explicit reference policy, and out-of-scope runs.
+
+The first execution contract is one `task-Restingstate`, `run-01` recording
+per subject. Other runs and session variants are recorded as out of scope.
+The adapter requires 512 Hz source data, exactly 64 canonical BioSemi-64 EEG
+channels, no spatial interpolation, and the BIDS recording boundaries. The
+montage coordinates are a standardized BioSemi-64 approximation supplied by
+the pinned MNE montage; they are not subject-specific measured electrode
+locations.
+
+The primary reference policy is `preserve_acquisition`: when the sidecar says
+`n/a`, the adapter performs no additional rereferencing and records unknown
+reference provenance. `average_reference` exists only as an explicitly
+declared sensitivity policy. The QC artifact is target-free and create-only;
+age-bearing finalization is a separate command that joins exact subject IDs
+against a separately hashed participant metadata source.
+
+The adapter gate was not itself an inference approval. The precision gate was
+approved with a maximum primary confidence-interval width of `0.06`, which
+authorized target-bearing cohort finalization and the separately locked v5
+execution. The observed v5 width exceeded that threshold, so the resulting
+evidence is uncertainty-limited and cannot support stable superiority.
+
+The implemented adapter was then exercised on one locally retrieved BDF
+outside the repository. Manifest verification passed, target-free QC produced
+29 finite windows of shape `64 x 400`, and the frozen REVE forward pass
+returned `29 x 128 x 512` for both declared layers (`-2` and `-1`). The encoder
+remained frozen, in evaluation/inference mode, and its state digest was
+identical before and after the pass. The resulting manifest and QC artifacts
+remain in staging outside Git; no age, prediction, or metric artifact was
+created.
+
+The same target-free contract was then applied to the complete selectively
+downloaded `run-01` signal tree for the current public snapshot. The staging
+download contained 648 files and approximately 1.1 GB of signal/sidecar data;
+`participants.tsv` was not downloaded or read. The sealed manifest contained
+128 eligible recording candidates and one structured exclusion: `sub-1536`
+was out of scope because its required `events.tsv` was missing. All 128
+eligible recordings passed signal QC, yielding 4,121 finite non-overlapping
+two-second windows in total. The observed per-recording window counts were
+29 (111 recordings), 60 (13), 30 (3), and 32 (1); this variability is retained
+as a QC fact and was not used to select subjects. Every QC artifact used the
+declared `preserve_acquisition` policy, shape `64 x 400`, source frequency
+512 Hz, and had no forbidden target-bearing fields. At that stage these results
+authorized only the next precision and inference-lock review; the later v5
+execution used the resulting frozen contract.
+
+### Planning-only precision simulation
+
+Before any participant metadata or external predictions were accessed, a
+deterministic simulator was added for the exact hierarchical paired bootstrap
+used by the primary contrast. It was run against the verified target-free
+manifest count (`n=128`) with 100 synthetic cohort replications and 1,000
+bootstrap iterations per replication. The scenario file is explicitly marked
+planning-only; its correlations, paired-error correlation, and seed variation
+are assumptions rather than external observations.
+
+The illustrative grid produced valid results for all replications. Across the
+four scenarios, median 95% interval widths ranged from `0.0554` to `0.0582`,
+and the 95th-percentile widths ranged from `0.0659` to `0.0677`. The normal and
+uniform synthetic target-shape scenarios were similar. These numbers are
+useful for choosing a scientifically meaningful precision threshold, but they
+are not a power claim or an external result. The threshold was subsequently
+approved at `0.06`; the planning artifact remains outside Git.
+
+### Target-bearing cohort finalization
+
+After the precision threshold was approved, the public `participants.tsv` was
+retrieved separately from the signal tree and hashed outside Git. The finalizer
+joined it to the target-free manifest and all 128 signal-QC reports without
+reading or changing the EEG artifacts. It produced a target-bearing manifest
+with 126 subjects having exact ages inside the HBN support `[5.06, 21.67]`
+years. Two candidates were retained in the release ledger as exclusions:
+one `missing_participant_metadata` and one `missing_age`. No age was imputed,
+rounded into eligibility, or silently dropped. The target-bearing manifest is
+staging-only and is not a public aggregate release.
+
+### Execution lock and external runner
+
+The repository now contains a separate `ds006780` lock and runner. The seal
+binds the approved external configuration, target-free manifest, target-bearing
+manifest, the complete 90-run capacity inventory, and the predeclared 40-run
+subset (`n=200` and `n=800` for `mean_linear` and
+`mean_rich_stats_residual`, seeds 33--42). It also records the checkpoint core
+provenance, REVE encoder state hash, execution source hash, subject inventory,
+and expected 5,040 subject-by-run predictions for the current 126-subject
+cohort.
+
+The runner refused altered identities, recomputed and compared stored
+target-free signal QC, extracts final-layer representations once per subject,
+and evaluates all selected heads from the same frozen tensors. It writes only
+immutable subject-level prediction files and a complete prediction inventory;
+aggregate metrics are intentionally deferred to the separate analysis step.
+The command names are `scripts/seal_ds006780_external.py` and
+`scripts/run_ds006780_external.py`. The completed v5 output is summarized in
+`results/extensions/ds006780_external_v5/`; raw predictions and target-bearing
+manifests remain in the external workspace.
 
 ### Metadata-only screen of the Iranian 6-11 cohort
 

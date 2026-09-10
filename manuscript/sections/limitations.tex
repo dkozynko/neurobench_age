@@ -39,6 +39,17 @@ each depth. Layer depth
 is therefore not a causal intervention on the encoder, and the analysis cannot
 establish a general ordering of representation quality across layers.
 
+The ds006780 transfer has a separate cohort but remains a secondary extension
+motivated by the earlier results. Its public recordings use a different
+BioSemi-64 acquisition context, leave the EEG reference undocumented, and lack
+subject-specific electrode coordinates; the analysis therefore uses a fixed
+canonical montage approximation and preserves acquisition reference rather
+than claiming harmonized hardware. It evaluates only two heads and two nested
+training sizes. Although all ten $n=800$ seed contrasts were positive, the
+subject-aware interval width exceeded the prespecified precision threshold, so
+the extension cannot establish stable superiority or a general cross-cohort
+effect.
+
 The cohort flow is reported in aggregate, but the compact repository bundle
 does not retain participant-level demographics, recording counts, or window
 counts. No additional demographic or recording-level supplement is included;

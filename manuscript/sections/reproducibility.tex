@@ -39,6 +39,14 @@ participant-level layer-wise predictions or representation caches; the report
 is therefore suitable for manuscript audit and controlled rerendering without
 redistributing the underlying data.
 
+The secondary ds006780 transfer is retained under
+\texttt{ds006780\_external\_v5/}. Its aggregate analysis and failed precision
+gate are bound by the v5 execution, encoder, prediction-inventory, and
+analysis identities. The deterministic renderer produces the manuscript table,
+macros, and figure from those two aggregate JSON artifacts. The public bundle
+contains no target-bearing manifest, participant ID, raw recording, checkpoint,
+or subject-level prediction.
+
 The codebase also keeps evidence classes explicit. Prospective MIPDB evidence
 supports the confirmatory conclusion; official NeuralBench-style end-to-end
 experiments support reproduction context; historical HBN test results remain

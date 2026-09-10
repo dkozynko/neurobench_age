@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "study_id": "reve_age_ds006780_precision_planning_v1",
+  "status": "planning_only",
+  "notes": "Illustrative sensitivity scenarios only. These values are not external observations and cannot approve the precision gate.",
+  "scenarios": [
+    {
+      "name": "zero_effect",
+      "baseline_correlation": 0.70,
+      "candidate_correlation": 0.70,
+      "paired_error_correlation": 0.80,
+      "seed_delta_sd": 0.004,
+      "target_distribution": "normal"
+    },
+    {
+      "name": "small_effect",
+      "baseline_correlation": 0.70,
+      "candidate_correlation": 0.71,
+      "paired_error_correlation": 0.80,
+      "seed_delta_sd": 0.004,
+      "target_distribution": "normal"
+    },
+    {
+      "name": "mipdb_scale_effect",
+      "baseline_correlation": 0.70,
+      "candidate_correlation": 0.73,
+      "paired_error_correlation": 0.80,
+      "seed_delta_sd": 0.004,
+      "target_distribution": "normal"
+    },
+    {
+      "name": "uniform_target_sensitivity",
+      "baseline_correlation": 0.70,
+      "candidate_correlation": 0.73,
+      "paired_error_correlation": 0.80,
+      "seed_delta_sd": 0.004,
+      "target_distribution": "uniform"
+    }
+  ]
+}

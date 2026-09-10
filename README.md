@@ -119,6 +119,19 @@ asset-manifest identity is
 `14b5afe5623f34fbaed4fcbe98ee8b59528769bf468bd1bcd83b941353a2be9d`.
 Participant-level predictions and representation caches remain external.
 
+## Secondary ds006780 transfer
+
+The completed v5 extension evaluates the final-layer mean-linear and
+rich-statistics residual heads at HBN training sizes 200 and 800 on a separate
+126-subject ds006780 cohort. It contains 40 selected runs and 5,040 external
+prediction identities; only aggregate evidence is retained under
+`results/extensions/ds006780_external_v5/`. At `n=800`, the rich head improved
+the Pearson point estimate by `0.0287` across all ten seeds, but the
+subject-aware 95% interval was `[-0.0349, 0.0922]` (width `0.1272`) and failed
+the predeclared precision threshold `0.06`. This is uncertainty-limited
+secondary transfer evidence, not a stable-superiority claim or a replacement
+for the primary MIPDB analysis.
+
 ## Audit and reproduction commands
 
 The repository's contract and analysis checks can be run with:

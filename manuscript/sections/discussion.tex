@@ -54,6 +54,19 @@ depths. This is compatible with age-relevant information being available before
 the final layer, yet it does not show that an earlier layer is reliably better
 under this cohort, seed set, and linear probe.
 
+\paragraph{Transfer to a separate EEG cohort.}
+The ds006780 extension provides a useful stress test because its 126 eligible
+subjects are separate from MIPDB and its BioSemi acquisition differs from the
+primary cohort. The rich head was below the matched linear baseline at $n=200$
+and above it at $n=800$; at $n=800$, all ten seed-level differences were
+positive. This pattern is consistent with a data-regime-dependent transfer
+benefit, but the 95\% interval [\DsPrimaryCILow{},\,
+\DsPrimaryCIHigh{}] is wide and crosses zero. The failed precision gate
+therefore limits the result to external evidence that motivates a larger,
+prospectively powered replication. It does not turn repeated seed direction
+into a cross-cohort superiority claim, and it does not provide an encoder-unseen
+guarantee.
+
 \paragraph{Seed consistency is not independent cohort replication.}
 Changing the seed interrogates training variability on the observed subjects;
 it does not recruit new external subjects. All three analyses here reuse the

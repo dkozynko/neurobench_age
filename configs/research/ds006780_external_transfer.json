@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "study_id": "reve_age_ds006780_external_transfer_v1",
+  "status": "draft",
+  "dataset": {
+    "dataset_id": "ds006780",
+    "dataset_version": "1.0.0",
+    "source_commit": "799d1502296ba5f74033734e149160c3d333e470",
+    "openneuro_version": "1.0.0",
+    "task": "Restingstate",
+    "run": "run-01",
+    "source_sampling_frequency_hz": 512.0
+  },
+  "preprocessing": {
+    "sample_rate_hz": 200.0,
+    "bandpass_hz": [0.5, 99.5],
+    "notch_hz": null,
+    "scaler": "StandardScaler",
+    "clamp": 15.0,
+    "window_seconds": 2.0,
+    "stride_seconds": 2.0,
+    "max_seconds_per_subject": 120.0,
+    "cross_block_windows": false,
+    "spatial_interpolation": false,
+    "subject_aggregation": "arithmetic_mean"
+  },
+  "channels": {
+    "layout": "biosemi64",
+    "coordinate_frame": "head",
+    "required_eeg_channels": 64,
+    "excluded_channel_prefixes": ["EXG"],
+    "excluded_channel_names": ["Status"]
+  },
+  "reference": {
+    "primary_policy": "preserve_acquisition",
+    "sensitivity_policy": "average_reference",
+    "unknown_source_reference_action": "preserve_acquisition"
+  },
+  "events": {
+    "allowed_trial_types": ["Recording_start", "Recording_end"],
+    "required_start_count": 1,
+    "maximum_end_count": 1,
+    "end_boundary": "exclusive"
+  },
+  "precision_gate": {
+    "status": "approved",
+    "metric": "primary_contrast",
+    "unit": "absolute_metric_units",
+    "max_primary_confidence_interval_width": 0.06,
+    "bootstrap_iterations": 10000,
+    "bootstrap_seed": 20260910,
+    "confidence": 0.95
+  }
+}

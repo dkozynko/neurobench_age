@@ -54,6 +54,14 @@ linear probes at layers -4, -3, and -2 against the final-layer baseline. It
 uses the same sealed external cohort and seeds, and its aggregate results do
 not modify the primary confirmatory estimand or decision rule.
 
+The ds006780 extension is a separate secondary transfer evaluation of two
+final-layer heads at HBN training sizes 200 and 800. It uses 126 eligible
+subjects from a different public EEG cohort, but was motivated by earlier
+results and therefore is not a new blinded confirmatory test. Its positive
+`n=800` seed pattern is uncertainty-limited because the predeclared precision
+gate failed; it does not establish cross-cohort superiority or an
+encoder-unseen guarantee.
+
 See [`docs/research/article_ready_protocol.md`](docs/research/article_ready_protocol.md)
 for the execution contract and
 [`docs/research/article_evidence_registry.md`](docs/research/article_evidence_registry.md)

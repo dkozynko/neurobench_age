@@ -10,6 +10,7 @@ from neurobench_age.data.mipdb import (
     parse_mipdb_rest_segments,
     preprocess_rest_blocks,
 )
+from neurobench_age.data.preprocessing import preprocess_rest_blocks as shared_preprocess_rest_blocks
 from neurobench_age.research.protocol import load_study_protocol
 from pathlib import Path
 
@@ -39,6 +40,27 @@ def test_preprocessing_resamples_windows_and_records_qc() -> None:
     assert qc["output_frequency_hz"] == 200.0
     assert qc["window_count"] == 1
     assert qc["spatial_interpolation"] is False
+
+
+def test_mipdb_wrapper_matches_shared_preprocessing_exactly() -> None:
+    rng = np.random.default_rng(707)
+    blocks = [rng.normal(size=(3, 1200)), rng.normal(size=(3, 600))]
+
+    wrapped_windows, wrapped_qc = preprocess_rest_blocks(
+        blocks,
+        original_frequency_hz=100.0,
+        channel_labels=("Cz", "Fz", "Pz"),
+        contract=PREPROCESSING,
+    )
+    shared_windows, shared_qc = shared_preprocess_rest_blocks(
+        blocks,
+        original_frequency_hz=100.0,
+        channel_labels=("Cz", "Fz", "Pz"),
+        contract=PREPROCESSING,
+    )
+
+    np.testing.assert_array_equal(wrapped_windows, shared_windows)
+    assert wrapped_qc == shared_qc
 
 
 def test_preprocessing_never_builds_a_window_across_blocks() -> None:

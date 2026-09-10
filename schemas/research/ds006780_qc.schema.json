@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neurobench-age.local/schemas/ds006780_qc.schema.json",
+  "title": "ds006780 target-free QC report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_sha256",
+    "subject_id",
+    "run_id",
+    "channel_labels",
+    "mapped_channel_count",
+    "rejected_channels",
+    "reference_policy",
+    "reference_provenance",
+    "reference_operation",
+    "source_reference_value",
+    "montage_identity",
+    "original_frequency_hz",
+    "output_frequency_hz",
+    "selected_duration_seconds",
+    "window_count",
+    "window_shape",
+    "cross_block_windows",
+    "spatial_interpolation",
+    "finite_output",
+    "qc_reasons",
+    "qc_sha256"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "subject_id": {"type": "string", "pattern": "^sub-[A-Za-z0-9]+$"},
+    "run_id": {"type": "string", "const": "run-01"},
+    "channel_labels": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "mapped_channel_count": {"type": "integer", "minimum": 0, "maximum": 64},
+    "rejected_channels": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "reference_policy": {
+      "type": "string",
+      "enum": ["preserve_acquisition", "average_reference"]
+    },
+    "reference_provenance": {
+      "type": "string",
+      "enum": ["declared", "unknown", "not_applicable"]
+    },
+    "reference_operation": {
+      "type": "string",
+      "enum": ["none", "average_reference_applied"]
+    },
+    "source_reference_value": {"type": "string", "minLength": 1},
+    "montage_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "mne_version", "coordinates_sha256", "coordinate_frame"],
+      "properties": {
+        "name": {"type": "string", "const": "biosemi64"},
+        "mne_version": {"type": "string", "minLength": 1},
+        "coordinates_sha256": {"$ref": "#/$defs/sha256"},
+        "coordinate_frame": {"type": "string", "enum": ["unknown", "head"]}
+      }
+    },
+    "original_frequency_hz": {"type": "number", "exclusiveMinimum": 0},
+    "output_frequency_hz": {"type": "number", "exclusiveMinimum": 0},
+    "selected_duration_seconds": {"type": "number", "minimum": 0},
+    "window_count": {"type": "integer", "minimum": 0},
+    "window_shape": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"type": "integer", "minimum": 0}
+    },
+    "cross_block_windows": {"type": "boolean", "const": false},
+    "spatial_interpolation": {"type": "boolean", "const": false},
+    "finite_output": {"type": "boolean"},
+    "qc_reasons": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "none",
+          "recording_load_failed",
+          "sidecar_mismatch",
+          "channel_layout_mismatch",
+          "event_boundary_invalid",
+          "duration_mismatch",
+          "signal_nonfinite",
+          "no_complete_window",
+          "reference_policy_invalid"
+        ]
+      }
+    },
+    "qc_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "reference_policy": {"const": "preserve_acquisition"},
+            "reference_operation": {"const": "none"}
+          },
+          "required": ["reference_policy", "reference_operation"]
+        },
+        {
+          "properties": {
+            "reference_policy": {"const": "average_reference"},
+            "reference_operation": {"const": "average_reference_applied"}
+          },
+          "required": ["reference_policy", "reference_operation"]
+        }
+      ]
+    },
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "reference_provenance": {"const": "unknown"},
+            "source_reference_value": {"const": "n/a"}
+          },
+          "required": ["reference_provenance", "source_reference_value"]
+        },
+        {
+          "properties": {
+            "reference_provenance": {"const": "declared"},
+            "source_reference_value": {"not": {"const": "n/a"}}
+          },
+          "required": ["reference_provenance", "source_reference_value"]
+        },
+        {
+          "properties": {
+            "reference_provenance": {"const": "not_applicable"},
+            "source_reference_value": {"not": {"const": "n/a"}}
+          },
+          "required": ["reference_provenance", "source_reference_value"]
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

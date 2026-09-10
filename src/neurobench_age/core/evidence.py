@@ -238,7 +238,13 @@ def source_tree_sha256(source_root: Path) -> str:
     digest = hashlib.sha256()
     files: list[Path] = []
     for path in root.rglob("*"):
-        if not path.is_file() or path.is_symlink() or path.suffix.lower() not in _SOURCE_SUFFIXES:
+        if (
+            not path.is_file()
+            or path.is_symlink()
+            or path.name == ".DS_Store"
+            or path.name.startswith("._")
+            or path.suffix.lower() not in _SOURCE_SUFFIXES
+        ):
             continue
         relative = path.relative_to(root)
         if any(

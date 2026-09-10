@@ -95,3 +95,23 @@ sizes. We report a joint seed--subject bootstrap and separate exploratory exact
 seed sign-flip families for the six cells and six training-size contrasts. These
 secondary p-values are descriptive and cannot change the primary stable-
 improvement decision.
+
+\subsection{Secondary ds006780 transfer}
+
+As a separate external-transfer extension, we evaluated the final-layer
+mean-linear and rich-statistics residual heads on OpenNeuro ds006780. The
+extension used the same frozen REVE checkpoint, representation cache contract,
+preprocessing, checkpoint selection rule, and seeds 33--42 as the capacity--data
+analysis, but retained only the $n=200$ and $n=800$ cells. The predeclared
+recording contract used one resting-state run per subject, selected exactly 64
+BioSemi EEG channels in canonical order, excluded EMG and trigger channels,
+resampled from 512 to 200 Hz, and preserved the source reference when it was
+undocumented. The resulting cohort contained 126 eligible subjects.
+
+The primary secondary estimand was the mean paired Pearson difference between
+the rich and mean-linear heads at $n=800$. We used the same 10,000-iteration
+hierarchical paired bootstrap over seeds and subjects. Before target-bearing
+finalization, the study specified a maximum primary interval width of 0.06;
+the observed width was 0.1272. This extension is therefore reported as
+uncertainty-limited transfer evidence, not as a stable-superiority decision or
+an independent replacement for the primary MIPDB test.

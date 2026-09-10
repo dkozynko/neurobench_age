@@ -11,6 +11,7 @@ logs remain external artifacts whose identities are retained by hash.
 | Retrospective secondary evidence | historical HBN R5 records under `results/canonical/` | per-seed metrics, gates, and compact negative results | Motivation and retrospective description only; not model or head selection |
 | Capacity--data extension | finalized 90-run extension lock, prediction inventory, exploratory analysis, and aggregate asset manifest | 3 training sizes, 3 heads, 10 seeds, 6,750 external prediction identities, aggregate tables and figures | Exploratory evidence about paired head behavior across the tested data regimes; does not modify the primary confirmatory claim |
 | Layer-wise extension | finalized four-layer external prediction inventory, exploratory analysis, and aggregate asset manifest | layers -4/-3/-2 versus -1, 10 seeds, 75 external subjects, aggregate table and figures | Exploratory evidence about representation depth; does not modify the primary confirmatory claim |
+| ds006780 external transfer v5 | sealed v5 execution lock, aggregate analysis, precision gate, and manuscript asset manifest | 2 heads, 2 training sizes, 10 seeds, 126 external subjects, 5,040 prediction identities, aggregate table and figure | Secondary cross-cohort transfer evidence; the precision gate failed, so it does not establish stable superiority or modify the primary claim |
 | Contract evidence | `tests/`, `src/neurobench_age/research/`, and `src/neurobench_age/analysis/` | synthetic workflows, strict schemas, tamper checks | Demonstrates code behavior, not empirical model performance |
 
 ## Primary prospective artifact map
@@ -58,6 +59,27 @@ deltas were +0.042, +0.030, and +0.008 for layers -4, -3, and -2; every
 hierarchical-bootstrap interval crossed zero. Exact sign-flip p-values and
 Holm-adjusted values are descriptive exploratory inference and do not modify
 the primary confirmatory claim.
+
+## ds006780 external-transfer artifact map
+
+The completed v5 transfer is retained as aggregate-only evidence under
+`results/extensions/ds006780_external_v5/`. Its execution lock is
+`a68338a1569d73fbbc46cc6a56c8e4ed3b39770edbf71ba85cbe284ec2b499df`; the
+encoder checkpoint identity is
+`4dbd8c07f2322e9f8db156692d5572a653bff83d2b0fd895e41fc2d632cf9986`; and the
+prediction inventory identity is
+`8fccac2fdfce62015bdd3b7ebc729e92beb4469eaf46064657d9b4e5a4b6df6a`.
+The aggregate analysis identity is
+`a357dc6a46492e6e23184dafe6b5ea28ad30419b1df83abd9f820364d34a3a25`.
+
+The v5 primary n=800 rich-versus-linear contrast was +0.0287 with a 95%
+hierarchical paired seed--subject interval of [-0.0349, 0.0922]. The observed
+width 0.1272 exceeded the predeclared 0.06 threshold; the precision-gate
+artifact therefore records `failed` and the allowed interpretation is
+uncertainty-limited transfer evidence. Only aggregate JSON, LaTeX, figure, and
+hash metadata are retained. Target-bearing manifests, participant IDs,
+subject-level predictions, checkpoints, and raw signals remain in the
+access-controlled external workspace.
 
 ## Confirmatory result
 

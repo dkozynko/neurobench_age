@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
   "numpy>=1.23",
   "jsonschema>=4.23",
+  "rfc8785>=0.1.4",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,7 @@ pipeline = [
 reve = [
   "neuralbench==0.2.3",
   "safetensors==0.5.3",
+  "huggingface_hub>=0.24",
 ]
 external = [
   "mne>=1.8",

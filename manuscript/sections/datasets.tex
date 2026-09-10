@@ -48,3 +48,14 @@ The capacity--data and layer-wise extensions also reuse the already evaluated
 MIPDB subjects. Their separately locked execution preserves provenance, not
 independence from earlier observations; they remain exploratory extensions
 rather than additional prospective primary replications.
+
+\paragraph{ds006780 external-transfer cohort.}
+OpenNeuro ds006780 is a separate public EEG cohort with 64-channel BioSemi
+recordings and age-bearing participant metadata. Under the frozen run-01
+contract, 126 subjects had usable ages and signal quality. The cohort includes
+typical-development, autism, and sibling groups and differs from MIPDB in
+hardware, acquisition context, and cohort composition. We use it as a bounded
+cross-cohort transfer test, not as evidence that the encoder never encountered
+related data during pretraining. Participant-level metadata and predictions
+remain outside the repository; only aggregate statistics and provenance hashes
+are retained.

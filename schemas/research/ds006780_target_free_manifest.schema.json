@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neurobench-age.local/schemas/ds006780_target_free_manifest.schema.json",
+  "title": "ds006780 target-free manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "dataset_version",
+    "source_commit",
+    "protocol_sha256",
+    "environment_identity",
+    "reference_policy",
+    "montage_identity",
+    "candidate_runs",
+    "out_of_scope_runs",
+    "dataset_metadata_files",
+    "manifest_sha256"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "dataset_id": {"type": "string", "const": "ds006780"},
+    "dataset_version": {"type": "string", "minLength": 1},
+    "source_commit": {"$ref": "#/$defs/commit"},
+    "protocol_sha256": {"$ref": "#/$defs/sha256"},
+    "environment_identity": {"$ref": "#/$defs/environment"},
+    "reference_policy": {
+      "type": "string",
+      "enum": ["preserve_acquisition", "average_reference"]
+    },
+    "montage_identity": {"$ref": "#/$defs/montage"},
+    "candidate_runs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/candidate_run"}
+    },
+    "out_of_scope_runs": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/out_of_scope_run"}
+    },
+    "dataset_metadata_files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/metadata_file"}
+    },
+    "manifest_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\.\\.).+$"
+    },
+    "subject_id": {
+      "type": "string",
+      "pattern": "^sub-[A-Za-z0-9]+$"
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["python_version", "packages", "lockfile_sha256"],
+      "properties": {
+        "python_version": {"type": "string", "minLength": 1},
+        "packages": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[A-Za-z0-9_.-]+$"},
+          "additionalProperties": {"type": "string", "minLength": 1}
+        },
+        "lockfile_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "montage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "mne_version", "coordinates_sha256", "coordinate_frame"],
+      "properties": {
+        "name": {"type": "string", "const": "biosemi64"},
+        "mne_version": {"type": "string", "minLength": 1},
+        "coordinates_sha256": {"$ref": "#/$defs/sha256"},
+        "coordinate_frame": {
+          "type": "string",
+          "enum": ["unknown", "head"]
+        }
+      }
+    },
+    "channel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "units", "status", "sampling_frequency"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "type": {"type": "string", "enum": ["EEG", "EMG", "TRIG"]},
+        "units": {"type": "string", "minLength": 1},
+        "status": {"type": "string", "enum": ["good", "bad", "n/a"]},
+        "sampling_frequency": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["onset", "duration", "trial_type", "value", "sample"],
+      "properties": {
+        "onset": {"type": "number", "minimum": 0},
+        "duration": {"type": "number", "minimum": 0},
+        "trial_type": {
+          "type": "string",
+          "enum": ["Recording_start", "Recording_end"]
+        },
+        "value": {"type": "string", "minLength": 1},
+        "sample": {"type": "integer", "minimum": 0}
+      }
+    },
+    "candidate_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject_id",
+        "run_id",
+        "recording_path",
+        "channels_path",
+        "events_path",
+        "sidecar_path",
+        "source_sampling_frequency_hz",
+        "source_duration_seconds",
+        "sidecar_recording_duration_seconds",
+        "channel_names",
+        "channel_inventory",
+        "event_inventory",
+        "target_free_status",
+        "target_free_exclusion_code"
+      ],
+      "properties": {
+        "subject_id": {"$ref": "#/$defs/subject_id"},
+        "run_id": {"type": "string", "const": "run-01"},
+        "recording_path": {"$ref": "#/$defs/relative_path"},
+        "channels_path": {"$ref": "#/$defs/relative_path"},
+        "events_path": {"$ref": "#/$defs/relative_path"},
+        "sidecar_path": {"$ref": "#/$defs/relative_path"},
+        "source_sampling_frequency_hz": {"type": "number", "exclusiveMinimum": 0},
+        "source_duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "sidecar_recording_duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "channel_names": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "channel_inventory": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/channel"}
+        },
+        "event_inventory": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/event"}
+        },
+        "acquisition_files": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/acquisition_file"}
+        },
+        "target_free_status": {
+          "type": "string",
+          "enum": ["pending", "signal_qc_passed", "signal_qc_failed"]
+        },
+        "target_free_exclusion_code": {
+          "type": "string",
+          "enum": [
+            "none",
+            "missing_required_file",
+            "duplicate_primary_run",
+            "metadata_mismatch",
+            "channel_layout_mismatch",
+            "event_boundary_invalid",
+            "duration_mismatch",
+            "unsupported_sampling_frequency",
+            "unresolved_git_annex_pointer",
+            "signal_nonfinite",
+            "no_complete_window"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "properties": {
+            "event_inventory": {
+              "contains": {
+                "type": "object",
+                "properties": {"trial_type": {"const": "Recording_start"}},
+                "required": ["trial_type"]
+              },
+              "minContains": 1,
+              "maxContains": 1
+            }
+          }
+        },
+        {
+          "properties": {
+            "event_inventory": {
+              "contains": {
+                "type": "object",
+                "properties": {"trial_type": {"const": "Recording_end"}},
+                "required": ["trial_type"]
+              },
+              "minContains": 0,
+              "maxContains": 1
+            }
+          }
+        },
+        {
+          "properties": {
+            "recording_path": {
+              "pattern": "^sub-[A-Za-z0-9]+/eeg/sub-[A-Za-z0-9]+_task-Restingstate_run-01_eeg\\.bdf$"
+            },
+            "channels_path": {
+              "pattern": "^sub-[A-Za-z0-9]+/eeg/sub-[A-Za-z0-9]+_task-Restingstate_run-01_channels\\.tsv$"
+            },
+            "events_path": {
+              "pattern": "^sub-[A-Za-z0-9]+/eeg/sub-[A-Za-z0-9]+_task-Restingstate_run-01_events\\.tsv$"
+            },
+            "sidecar_path": {
+              "pattern": "^sub-[A-Za-z0-9]+/eeg/sub-[A-Za-z0-9]+_task-Restingstate_run-01_eeg\\.json$"
+            }
+          }
+        },
+        {
+          "required": ["acquisition_files"],
+          "properties": {
+            "acquisition_files": {
+              "type": "array",
+              "minItems": 4,
+              "maxItems": 4,
+              "items": {"$ref": "#/$defs/acquisition_file"},
+              "allOf": [
+                {"contains": {"properties": {"role": {"const": "recording"}}, "required": ["role"]}, "minContains": 1, "maxContains": 1},
+                {"contains": {"properties": {"role": {"const": "channels"}}, "required": ["role"]}, "minContains": 1, "maxContains": 1},
+                {"contains": {"properties": {"role": {"const": "events"}}, "required": ["role"]}, "minContains": 1, "maxContains": 1},
+                {"contains": {"properties": {"role": {"const": "sidecar"}}, "required": ["role"]}, "minContains": 1, "maxContains": 1}
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "out_of_scope_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject_id", "run_id", "recording_path", "exclusion_code"],
+      "properties": {
+        "subject_id": {"$ref": "#/$defs/subject_id"},
+        "run_id": {"type": "string", "minLength": 1},
+        "recording_path": {"$ref": "#/$defs/relative_path"},
+        "exclusion_code": {
+          "type": "string",
+          "enum": [
+            "non_primary_run",
+            "session_variant",
+            "unsupported_path",
+            "duplicate_primary_run",
+            "missing_required_file",
+            "unresolved_git_annex_pointer",
+            "metadata_mismatch",
+            "channel_layout_mismatch",
+            "event_boundary_invalid",
+            "duration_mismatch",
+            "unsupported_sampling_frequency"
+          ]
+        }
+      }
+    },
+    "acquisition_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "path",
+        "size_bytes",
+        "sha256",
+        "openneuro_version",
+        "source_commit",
+        "git_annex_pointer_resolved"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["recording", "channels", "events", "sidecar"]
+        },
+        "path": {"$ref": "#/$defs/relative_path"},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "openneuro_version": {"type": "string", "minLength": 1},
+        "source_commit": {"$ref": "#/$defs/commit"},
+        "git_annex_pointer_resolved": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"role": {"const": "recording"}}, "required": ["role"]},
+          "then": {"properties": {"git_annex_pointer_resolved": {"const": true}}}
+        },
+        {
+          "if": {"properties": {"role": {"enum": ["channels", "events", "sidecar"]}}, "required": ["role"]},
+          "then": {"properties": {"git_annex_pointer_resolved": {"const": false}}}
+        }
+      ]
+    },
+    "metadata_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "path",
+        "size_bytes",
+        "sha256",
+        "openneuro_version",
+        "source_commit",
+        "git_annex_pointer_resolved"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["dataset_description", "participants", "README", "other"]
+        },
+        "path": {"$ref": "#/$defs/relative_path"},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "openneuro_version": {"type": "string", "minLength": 1},
+        "source_commit": {"$ref": "#/$defs/commit"},
+        "git_annex_pointer_resolved": {"type": "boolean", "const": false}
+      }
+    }
+  }
+}

@@ -174,6 +174,17 @@ def test_source_tree_digest_ignores_runtime_artifacts(tmp_path: Path) -> None:
     assert experiment_evidence.source_tree_sha256(source_root) == first
 
 
+def test_source_tree_digest_ignores_macos_metadata_sidecars(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    (source_root / "runner.py").write_text("print('one')\n")
+    first = experiment_evidence.source_tree_sha256(source_root)
+    (source_root / ".DS_Store").write_text("metadata\n")
+    (source_root / "._runner.py").write_text("AppleDouble sidecar\n")
+
+    assert experiment_evidence.source_tree_sha256(source_root) == first
+
+
 def test_git_metadata_hashes_repository_root_after_src_migration() -> None:
     metadata = experiment_evidence._git_metadata()
     repository_root = Path(__file__).resolve().parents[1]

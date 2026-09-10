@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neurobench-age.local/schemas/ds006780_target_manifest.schema.json",
+  "title": "ds006780 target-bearing cohort manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "target_free_manifest_sha256",
+    "participant_metadata_sha256",
+    "participant_metadata_path",
+    "hbn_age_support_years",
+    "subjects",
+    "exclusions",
+    "manifest_sha256"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "target_free_manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "participant_metadata_sha256": {"$ref": "#/$defs/sha256"},
+    "participant_metadata_path": {"type": "string", "minLength": 1},
+    "hbn_age_support_years": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {"type": "number", "const": 5.06},
+        {"type": "number", "const": 21.67}
+      ],
+      "items": false
+    },
+    "subjects": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^sub-[A-Za-z0-9]+$"},
+      "additionalProperties": {"$ref": "#/$defs/subject"}
+    },
+    "exclusions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["subject_id", "reason", "signal_qc_sha256"],
+        "properties": {
+          "subject_id": {"type": "string", "pattern": "^sub-[A-Za-z0-9]+$"},
+          "reason": {"type": "string", "enum": ["missing_age", "invalid_age", "missing_participant_metadata"]},
+          "signal_qc_sha256": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "manifest_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signal_qc_sha256", "age_years", "age_units", "age_support_eligible"],
+      "properties": {
+        "signal_qc_sha256": {"$ref": "#/$defs/sha256"},
+        "age_years": {"type": "number", "exclusiveMinimum": 0},
+        "age_units": {"type": "string", "const": "years"},
+        "age_support_eligible": {"type": "boolean"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "age_years": {"minimum": 5.06, "maximum": 21.67},
+            "age_support_eligible": {"const": true}
+          }
+        },
+        {
+          "properties": {
+            "age_years": {"exclusiveMaximum": 5.06},
+            "age_support_eligible": {"const": false}
+          }
+        },
+        {
+          "properties": {
+            "age_years": {"exclusiveMinimum": 21.67},
+            "age_support_eligible": {"const": false}
+          }
+        }
+      ]
+    }
+  }
+}
