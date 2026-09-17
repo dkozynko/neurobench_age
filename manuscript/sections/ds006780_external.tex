@@ -2,7 +2,7 @@
 
 To test whether the head comparison transfers beyond the MIPDB cohort, we
 evaluated a separate public EEG cohort from OpenNeuro ds006780. This extension
-was motivated by the completed primary and capacity--data analyses, so it is a
+was motivated by the completed primary and capacity-data analyses, so it is a
 secondary transfer experiment rather than a new blinded confirmatory test. The
 external contract selected one predeclared resting-state recording per subject,
 mapped the 64 BioSemi EEG channels to the canonical BioSemi-64 layout, and
@@ -11,12 +11,12 @@ one. The frozen encoder and preprocessing remained unchanged.
 
 The extension tested the final-layer mean-linear baseline and the
 rich-statistics residual head at HBN training sizes $n=200$ and $n=800$, with
-the ten fixed seeds 33--42. The sealed execution contained
+the ten fixed seeds 33-42. The sealed execution contained
 \DsRunCount{} selected runs and
 \DsPredictionCount{} subject-level prediction identities for
 \DsSubjectCount{} eligible subjects. Table~\ref{tab:ds006780-summary}
 shows the aggregate results and paired contrasts; Figure~\ref{fig:ds006780}
-visualizes both absolute performance and the paired candidate--baseline
+visualizes both absolute performance and the paired candidate-baseline
 difference.
 
 At $n=200$, the rich head was slightly below the matched baseline, with mean
@@ -33,7 +33,7 @@ useful transfer gain, but the external cohort is not precise enough to
 establish stable superiority. This result is complementary to, and does not
 modify, the primary MIPDB decision.
 
-\begin{table}[t]
+\begin{table}[H]
   \centering
   \scriptsize
   \caption{Secondary ds006780 transfer. Pearson is the mean across ten seeds;
@@ -44,12 +44,12 @@ modify, the primary MIPDB decision.
   \input{../results/extensions/ds006780_external_v5/ds006780_summary.tex}
 \end{table}
 
-\begin{figure}[t]
+\begin{figure}[!ht]
   \centering
   \includegraphics[width=0.98\linewidth]{../results/extensions/ds006780_external_v5/ds006780_external.pdf}
   \caption{Secondary ds006780 transfer. Left: absolute external Pearson scores
   with seed-level standard-deviation bars. Right: paired rich-head minus
-  mean-linear Pearson differences with hierarchical seed--subject bootstrap
+  mean-linear Pearson differences with hierarchical seed-subject bootstrap
   intervals. Both intervals include zero.}
   \label{fig:ds006780}
 \end{figure}
