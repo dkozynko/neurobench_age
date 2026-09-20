@@ -144,7 +144,8 @@ def audit_layerwise_article(repository_root: Path) -> dict[str, Any]:
     results = _read_text(root / "manuscript/sections/results.tex")
     _require(r"\LayerwiseSubjectCount{}" in results, "results section duplicates subject count")
     _require("crossed zero" in results, "results section omits interval boundary")
-    _require("primary superiority claim" in results, "results section omits exploratory boundary")
+    _require("primary superiority claim" in " ".join(results.split()),
+             "results section omits exploratory boundary")
     _require("stable improvement" not in results.casefold(),
              "results section promotes exploratory result")
 

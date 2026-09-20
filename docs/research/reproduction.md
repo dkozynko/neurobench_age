@@ -8,10 +8,12 @@ boundary and hashes are recorded in
 [`readiness_audit.md`](readiness_audit.md), and the submission checklist is in
 [`submission_readiness.md`](submission_readiness.md).
 
-The repository is intentionally aggregate-only. It contains code, schemas,
-configuration, manuscript assets, and compact result summaries. Raw EEG,
-participant-level metadata, participant-level predictions, representation
-caches, and checkpoints must remain in access-controlled storage.
+The result bundles contain aggregate evidence. The repository also retains a
+historical HBN subject/split manifest with ages; its identity matches the
+primary study. The cohort recovery audit documents this source and the public
+ds006780 metadata used to recover the selected sample description. Raw EEG,
+participant-level predictions, representation caches, and checkpoints are not
+included in the public result bundles.
 
 ## What can be reproduced from Git
 
@@ -79,9 +81,8 @@ Run the contract and regression suite before adding private inputs:
 uv run --frozen --extra test pytest -q
 ```
 
-The current repository baseline is 808 passing tests. A different count after
-future changes is acceptable only when the complete suite still passes and the
-diff explains the change.
+The latest verified test count is recorded in the submission-readiness checklist.
+Changes in test count should be explained by the corresponding source changes.
 
 Run the layer-wise article audit when the aggregate layer-wise evidence is
 present:
@@ -96,10 +97,28 @@ Run the manuscript verification target from the repository root:
 make --directory=manuscript verify
 ```
 
-This target regenerates deterministic manuscript assets from retained evidence,
-runs the LaTeX build, and rejects undefined references. Local TeX font warnings
-or `Underfull \\hbox` diagnostics are layout warnings, not evidence changes;
-they should still be visually inspected before release.
+This target validates retained evidence, regenerates the primary and editorial
+presentation assets, and builds the manuscript with standard Latin Modern fonts.
+It rejects undefined references, missing font shapes and overfull boxes.
+Underfull-box diagnostics should still be visually inspected.
+
+The editorial assets are stored separately from the original result bundles.
+Shorter table labels and re-rendered capacity figures preserve the retained
+numeric values; their manifest records the source and output hashes.
+
+For a self-contained arXiv archive, run:
+
+```bash
+make --directory=manuscript arxiv
+```
+
+This creates `dist/arxiv-source.zip` with only the referenced TeX, bibliography
+and figure files. Extension paths are rewritten to work from the archive root.
+Extract into an empty directory and run `pdflatex main`, `bibtex main`, and
+`pdflatex main` twice to verify it independently of the repository layout.
+The archive does not contain raw data, execution manifests or participant-level
+predictions. A successful build does not resolve missing cohort metadata or
+constitute approval to submit; consult the readiness checklist.
 
 ## 4. Public aggregate asset checks
 

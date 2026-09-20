@@ -54,16 +54,13 @@ def test_repository_root_has_no_experiment_implementation_files() -> None:
     assert not (ROOT / "neurobench_age").exists()
 
 
-def test_public_research_surface_does_not_advertise_internal_manuscript() -> None:
+def test_public_research_surface_does_not_use_obsolete_scope_claims() -> None:
     paths = [ROOT / "README.md", ROOT / "ARTICLE_SCOPE.md"] + sorted(
         (ROOT / "docs" / "research").glob("*.md")
     )
     text = "\n".join(path.read_text(encoding="utf-8") for path in paths).casefold()
     for forbidden in (
-        "manuscript/",
-        "make -c manuscript",
         "when more expressive probes do not generalize",
-        "download the compiled pdf",
         "retrospective hbn evidence only",
     ):
         assert forbidden not in text

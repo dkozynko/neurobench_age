@@ -11,8 +11,10 @@ The primary protocol and selected checkpoints were locked before external
 inference, and analysis required a complete prediction inventory. Artifact
 hashes allow the retained outputs to be checked against that record; they are
 not a public timestamped preregistration. Appendix~\ref{sec:audit} describes
-these checks. Raw EEG, participant metadata, prediction vectors, representation
-caches, and checkpoints are not redistributed. Consequently, rebuilding the
+these checks. The repository also retains the HBN source split manifest;
+a recovery note documents its identity check and the ds006780 metadata checks.
+Raw EEG, participant-level prediction vectors, representation caches, and
+checkpoints are not redistributed. Consequently, rebuilding the
 published tables and figures is possible from the aggregate bundle, whereas
 recomputing the participant-level metrics requires access to the original
 artifacts and datasets.

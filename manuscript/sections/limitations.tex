@@ -23,11 +23,12 @@ The bootstrap treats participants as independent; any unaccounted family
 clustering could make its intervals too narrow. A family-aware sensitivity
 analysis would require the original cohort metadata.
 
-The public summaries do not retain the primary HBN split counts, complete
-recording/window counts, or demographic summaries of the selected cohorts.
-They therefore cannot support a full assessment of sampling imbalance or an
-independent recalculation of participant-level metrics. The restricted analysis
-manifests and prediction files are needed for those checks.
+The HBN source manifest records age and split membership but not sex or
+diagnostic group, limiting the assessment of sampling imbalance. We recovered
+the selected ds006780 sample description from public metadata and verified its
+participant and age hashes. These checks do not recover the original prediction
+vectors or execution caches. Independent recalculation of participant-level
+metrics requires those artifacts or a rerun using the original data.
 
 MIPDB participants outside the HBN training-age range were excluded from the
 primary analysis. REVE's published pretraining inventory includes HBN releases,

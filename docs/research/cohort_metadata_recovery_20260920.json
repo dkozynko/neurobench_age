@@ -1,0 +1,72 @@
+{
+  "hbn": {
+    "source_manifest": "results/canonical/data/age_medium_1000_nested.csv",
+    "source_manifest_sha256": "a5542dcbd49c0d6e0e591594c777bb66fb6cf80b61ac63f6639928d48225a7ac",
+    "primary_source_hash_matches": true,
+    "split_statistics": {
+      "train": {
+        "participants": 800,
+        "recordings": 800,
+        "age_mean": 10.173743,
+        "age_sample_sd": 3.377076872422927,
+        "age_min": 5.0558,
+        "age_max": 21.674,
+        "release_counts": {
+          "R1": 100,
+          "R10": 100,
+          "R2": 100,
+          "R3": 100,
+          "R4": 100,
+          "R6": 100,
+          "R7": 100,
+          "R9": 100
+        }
+      },
+      "val": {
+        "participants": 100,
+        "recordings": 100,
+        "age_mean": 10.168399,
+        "age_sample_sd": 3.344101442944885,
+        "age_min": 5.0552,
+        "age_max": 21.1761,
+        "release_counts": {
+          "R8": 100
+        }
+      }
+    }
+  },
+  "ds006780": {
+    "source_commit": "799d1502296ba5f74033734e149160c3d333e470",
+    "participant_metadata_sha256": "4cd88d950e956bef9cf86c96db68e9be0ab6d30b4e9866b6dd184f2f1baa9838",
+    "metadata_rows": 136,
+    "primary_recordings": 129,
+    "missing_sidecars": {
+      "_events.tsv": 1
+    },
+    "candidates": 128,
+    "exclusions": {
+      "missing_participant_metadata": 1,
+      "missing_age": 1
+    },
+    "selected_n": 126,
+    "subjects_sha256": "e71c351f4e941f49162a6f3be068a4cd5c3418f82048725432c27e01118f7aad",
+    "subjects_hash_matches": true,
+    "target_vector_sha256": "b24016fb9aa97d764d2a895de044ce3a15e3c2e00c3200ed5bb722efb0fb6878",
+    "targets_hash_matches": true,
+    "age": {
+      "mean": 10.601587301587301,
+      "sample_sd": 1.5725131033849797,
+      "min": 7.9,
+      "max": 14.5
+    },
+    "sex": {
+      "m": 80,
+      "f": 46
+    },
+    "group": {
+      "TD": 39,
+      "ASD": 62,
+      "ASD SIBLING": 25
+    }
+  }
+}

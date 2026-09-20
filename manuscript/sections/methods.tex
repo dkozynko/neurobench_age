@@ -8,8 +8,9 @@ band-pass filtered at 0.5--99.5 Hz, standardized and clipped at 15 standard
 units, and divided into non-overlapping two-second windows. At most 120 seconds
 were retained per participant. For MIPDB, standardization was fitted separately
 to each selected recording before windowing, without age labels. Windows did
-not cross condition boundaries. This is recording-level normalization, not a
-global scaler fitted to the HBN training set.
+not cross condition boundaries. They came from the eyes-open and eyes-closed
+segments of block01, selected in acquisition order. This is recording-level
+normalization, not a global scaler fitted to the HBN training set.
 
 Features from the last two encoder layers were cached once for the primary
 comparison. The layer-wise follow-up also extracted the two preceding layers.

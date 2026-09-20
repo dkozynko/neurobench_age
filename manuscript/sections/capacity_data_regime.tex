@@ -9,10 +9,11 @@ of those participants, not independent observations.
 \subsection{Absolute performance and paired differences}
 Table~\ref{tab:capacity-absolute} reports absolute correlations and parameter
 counts. Table~\ref{tab:capacity-cells} gives candidate differences from the
-size-matched baseline. The richer heads improved on all ten seeds in each cell,
-but only the 200-subject intervals excluded zero.
+size-matched baseline. The richer heads improved on all ten seeds in each cell.
+Both 200-subject intervals and the MLP's 400-subject interval excluded zero;
+the other intervals included zero.
 
-\begin{table}[tbp]
+\begin{table}[!htbp]
   \centering
   \small
   \caption{MIPDB correlations by HBN training size. SD is computed across ten
@@ -21,7 +22,7 @@ but only the 200-subject intervals excluded zero.
   \input{presentation/capacity_data_regime_absolute.tex}
 \end{table}
 
-\begin{table}[tbp]
+\begin{table}[!htbp]
   \centering
   \small
   \caption{Paired candidate differences at each training size. W/T/L counts
@@ -40,7 +41,7 @@ which explains their large p-values; they are not tests for any change in
 either direction. Only the MLP's 800-minus-400 bootstrap interval excluded zero.
 The endpoint intervals included zero for both heads.
 
-\begin{table}[tbp]
+\begin{table}[!htbp]
   \centering
   \small
   \caption{Exploratory changes in the paired Pearson advantage. A negative
@@ -56,7 +57,7 @@ Figure~\ref{fig:capacity-absolute} shows absolute performance, and
 Figure~\ref{fig:capacity-seed-deltas} shows individual seed differences.
 The joint intervals are shown once in Figure~\ref{fig:capacity-main}.
 
-\begin{table}[tbp]
+\begin{table}[!htbp]
   \centering
   \small
   \caption{HBN validation and MIPDB correlations for selected candidate heads,
@@ -65,14 +66,14 @@ The joint intervals are shown once in Figure~\ref{fig:capacity-main}.
   \input{presentation/capacity_data_regime_validation_external_transfer.tex}
 \end{table}
 
-\begin{figure}[tbp]
+\begin{figure}[!htbp]
   \centering
   \includegraphics[width=0.80\linewidth]{presentation/capacity_data_regime_absolute.pdf}
   \caption{Absolute MIPDB correlations for each training size and head.}
   \label{fig:capacity-absolute}
 \end{figure}
 
-\begin{figure}[tbp]
+\begin{figure}[!htbp]
   \centering
   \includegraphics[width=0.80\linewidth]{presentation/capacity_data_regime_seed_deltas.pdf}
   \caption{Paired Pearson differences for the rich-statistics and four-unit

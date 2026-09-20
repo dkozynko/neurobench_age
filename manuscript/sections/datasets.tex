@@ -2,15 +2,18 @@
 
 \paragraph{HBN development data.}
 The Healthy Brain Network is a pediatric resource with EEG and other
-measurements \citep{alexander2017hbn}. Heads were fitted on a fixed HBN training
+measurements \citep{alexander2017hbn}. We used resting-state recordings.
+Heads were fitted on a fixed HBN training
 split, and checkpoints were selected on a separate validation split. The
 previously inspected HBN R5 test split was excluded from both steps.
-The training-age range was 5.06--21.67 years. The archived aggregate summaries
-retain hashes of the subject and training manifests, but not the primary
-train/validation counts or their demographic summaries. These quantities cannot
-be recovered from the public aggregate bundle. The 200-, 400-, and 800-subject
-subsets described below belong to the secondary training-size analysis and do
-not document the size of the primary split.
+The source manifest identifies 800 training participants and 100 validation
+participants, with one recording per participant. Mean age was
+$10.17 \pm 3.38$ years in training (range 5.06--21.67) and
+$10.17 \pm 3.34$ years in validation (range 5.06--21.18), where the spread is
+the sample standard deviation. Validation used release R8; training used
+R1--R4, R6--R7, and R9--R10. The manifest's SHA-256 matches the source identity
+retained in the primary analysis. The 200-, 400-, and 800-subject subsets
+described below belong to the secondary training-size analysis.
 
 \paragraph{MIPDB external evaluation.}
 MIPDB contains high-density EEG recorded during tasks and rest across development
@@ -38,13 +41,17 @@ than independent replications.
 \paragraph{Separate transfer cohort.}
 The SFARI\_EEG multi-paradigm dataset, OpenNeuro ds006780 version 1.0.0,
 contains BioSemi-64 EEG recordings from children in typical-development, autism,
-and sibling groups \citep{molholm2025sfari}. Its source description reports
-ages 8--13 years for the overall cohort. Our transfer analysis selected
-\texttt{Restingstate} run-01 and retained \DsSubjectCount{} participants with
-usable ages and signals. The retained analysis does not include the full
-exclusion breakdown, age distribution, group counts, or family relationships
-for these selected participants; the source-cohort description should not be
-read as a summary of the final analysis sample.
+and sibling groups \citep{molholmsfari}. We selected \texttt{Restingstate}
+run-01. Of 129 matching recordings, one lacked the required events file.
+All 128 remaining recordings passed the documented signal checks. One
+participant had no metadata row and another had no age, leaving
+\DsSubjectCount{} participants. Their mean age was $10.60 \pm 1.57$ years
+(range 7.9--14.5); 80 were recorded as male and 46 as female. The source group
+labels identified 39 typically developing participants, 62 with autism, and
+25 in the sibling group. These descriptions were recovered from the pinned
+public metadata: hashes of both the ordered participant list and age vector
+exactly match the retained v5 analysis. Family relationships within this
+sample remain unknown.
 
 \paragraph{Data use.}
 This study reuses existing datasets and involved no new participant recruitment.
@@ -52,7 +59,7 @@ The HBN and MIPDB source publications describe their original ethics and
 consent procedures \citep{alexander2017hbn,langer2017mipdb}. The ds006780
 metadata report approval by the Albert Einstein College of Medicine
 Institutional Review Board (2021-13433), participant assent, parental or guardian
-consent, and a CC0 data license \citep{molholm2025sfari}. These statements concern
-the original data collection. The study repository distributes aggregate
-results, not participant records; access to source recordings remains subject
+consent, and a CC0 data license \citep{molholmsfari}. These statements concern
+the original data collection. The analysis bundles contain aggregate results;
+access to source recordings remains subject
 to the respective providers' terms.

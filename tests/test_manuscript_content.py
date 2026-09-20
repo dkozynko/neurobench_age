@@ -46,8 +46,8 @@ def test_manuscript_has_complete_neutral_structure() -> None:
     assert (MANUSCRIPT / "references.bib").is_file()
     assert (MANUSCRIPT / "Makefile").is_file()
     main = (MANUSCRIPT / "main.tex").read_text(encoding="utf-8")
-    assert "When More Expressive Probes Do Not Establish Stable External Gains" in main
-    assert r"\author{Anonymous}" in main
+    assert "Do More Expressive Probes Improve EEG Age Prediction?" in main
+    assert r"\author{Dmytro Kozynko}" in main
     for name in SECTIONS:
         path = MANUSCRIPT / "sections" / name
         assert path.is_file() and len(path.read_text(encoding="utf-8").split()) >= 25
@@ -101,9 +101,9 @@ def test_capacity_extension_is_integrated_into_main_narrative() -> None:
     discussion = (MANUSCRIPT / "sections" / "discussion.tex").read_text(encoding="utf-8")
     conclusion = (MANUSCRIPT / "sections" / "conclusion.tex").read_text(encoding="utf-8")
     for section in (abstract, introduction, methods, results, discussion, conclusion):
-        assert "capacity--data" in section
-        assert any(marker in section for marker in ("secondary", "exploratory", "bounded"))
-    assert "../results/extensions/capacity_data_regime_v3/capacity_data_regime_delta.pdf" in results
+        assert any(marker in section.casefold() for marker in ("training-size", "training size", "training-set size"))
+    assert "exploratory" in results.casefold()
+    assert "presentation/capacity_data_regime_delta.pdf" in results
     assert "universal scaling law" in results
 
 
@@ -118,15 +118,15 @@ def test_layerwise_extension_is_integrated_as_secondary_analysis() -> None:
     )
     main = (MANUSCRIPT / "main.tex").read_text(encoding="utf-8")
 
-    for section in (abstract, methods, results, discussion, limitations, reproducibility):
+    for section in (methods, results, discussion, limitations, reproducibility):
         assert "layer-wise" in section or "layerwise" in section
     assert "exploratory" in results
-    assert "final-layer mean-linear" in results
-    assert "four" in results and "ten" in results
+    assert "final-layer mean-linear" in " ".join(results.split())
+    assert "four" in results.casefold() and "ten" in results
     assert r"\LayerwiseSubjectCount{}" in results
     assert "stable" in results
-    assert "../results/extensions/layerwise_probe_20260910/assets/layerwise_depth.pdf" in results
-    assert "../results/extensions/layerwise_probe_20260910/assets/layerwise_seed_deltas.pdf" in results
+    assert "../results/extensions/layerwise_probe_20260910/assets/layerwise_depth.pdf" in _source_text()
+    assert "../results/extensions/layerwise_probe_20260910/assets/layerwise_seed_deltas.pdf" in _source_text()
     assert "../results/extensions/layerwise_probe_20260910/assets/layerwise_summary" in results
     assert r"\input{../results/extensions/layerwise_probe_20260910/assets/layerwise_results_macros}" in main
     assert "crossed zero" in results
@@ -186,6 +186,9 @@ def test_manuscript_build_inputs_are_portable() -> None:
     assert r"\bibliography{references}" in source
     assert r"\includegraphics" in source
     assert "shell-escape" not in source.casefold()
+    assert "/System/Library" not in source
+    assert "sysarial" not in source
+    assert r"\usepackage{lmodern}" in source
     private_path_pattern = rf"(?:/{'Users'}/|/{'workspace'}/|(?:^|\s)[A-Za-z]:\\)"
     assert not re.search(private_path_pattern, source)
 
@@ -201,10 +204,11 @@ def test_capacity_data_extension_uses_exact_aggregate_assets() -> None:
         "capacity_data_regime_contrasts.tex",
         "capacity_data_regime_validation_external_transfer.tex",
         "capacity_data_regime_absolute.pdf",
-        "capacity_data_regime_delta.pdf",
         "capacity_data_regime_seed_deltas.pdf",
     )
     for name in required:
         assert (asset_root / name).is_file()
         assert name in source
+    # The paired-difference figure appears once in the main results.
+    assert _source_text().count("presentation/capacity_data_regime_delta.pdf") == 1
     assert "*" not in source

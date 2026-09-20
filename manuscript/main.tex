@@ -8,6 +8,7 @@
 \usepackage{amsmath}
 \usepackage{booktabs}
 \usepackage{graphicx}
+\usepackage{flafter}
 \usepackage{array}
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage[hidelinks]{hyperref}
@@ -47,9 +48,11 @@ A Cross-Cohort Study with Frozen REVE}
 \input{sections/limitations}
 \input{sections/conclusion}
 \input{sections/reproducibility}
-\clearpage
+\begingroup
+\small
 \bibliographystyle{unsrtnat}
 \bibliography{references}
+\endgroup
 \clearpage
 \appendix
 \input{sections/supplementary}
