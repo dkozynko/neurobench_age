@@ -47,7 +47,7 @@ def test_manuscript_has_complete_neutral_structure() -> None:
     assert (MANUSCRIPT / "Makefile").is_file()
     main = (MANUSCRIPT / "main.tex").read_text(encoding="utf-8")
     assert "Do More Expressive Probes Improve EEG Age Prediction?" in main
-    assert r"\author{Dmytro Kozynko}" in main
+    assert r"\author{Dmytro Kozynko\\" in main
     for name in SECTIONS:
         path = MANUSCRIPT / "sections" / name
         assert path.is_file() and len(path.read_text(encoding="utf-8").split()) >= 25

@@ -79,8 +79,8 @@ recovery does not recreate the full experiment archive.
 
 The remaining items are author decisions or external review:
 
-- [ ] Confirm the final author list, affiliation and contact details. The
-  manuscript currently names Dmytro Kozynko; no affiliation was invented.
+- [x] Author details confirmed: Dmytro Kozynko, Independent Researcher,
+  dmytro.kozynko@gmail.com.
 - [ ] Confirm that the data-use statement accurately covers the author's
   institutional requirements and the terms under which the data were accessed.
 - [ ] Have at least one independent reader check the methods, numerical claims,
