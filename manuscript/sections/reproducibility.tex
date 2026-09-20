@@ -1,66 +1,18 @@
-\section{Reproducibility and Artifact Integrity}
+\section{Code and Data Availability}
 
-The experiment used an immutable study lock, a complete content-addressed
-checkpoint inventory, create-only external predictions, and analysis permitted
-only after an exact completion marker. The retained compact bundle contains no
-raw EEG, model weights, checkpoints, representation caches, participant-level
-predictions, or private storage paths. Instead it records counts, aggregate and
-per-seed statistics, bounded resource summaries, and the hashes needed to bind
-those summaries to the external artifacts.
+The project repository is \url{https://github.com/dkozynko/neurobench_age}.
+It contains the analysis code, executable protocols, validation tests, aggregate
+results, and manuscript build instructions. Primary, training-size, layer-wise,
+and ds006780 results are stored separately. The reproduction guide explains
+which outputs can be rebuilt from these summaries and which require the
+original data and execution artifacts.
 
-All reported primary values, table rows, and figures are generated from the
-compact confirmatory artifact. Hand-authored section files reference LaTeX
-commands rather than duplicating result literals. The source analysis identity
-is \texttt{\SourceAnalysisHash}; the full external prediction inventory
-identity is \texttt{\PredictionInventoryHash}. A renderer validates the compact
-manifest, writes into a temporary directory, hashes every payload, and publishes
-only a complete bundle. Fixed ordering, plotting configuration, fonts, and PDF
-metadata make two clean asset builds byte-identical.
-
-These artifacts provide content-addressed auditability and exact re-execution
-metadata, but they do not by themselves make participant-level metrics
-independently recomputable from the Git repository: the underlying EEG,
-checkpoints, and prediction vectors remain external. An independent rerun
-therefore requires the declared data-access path and the sealed environment.
-
-The secondary capacity-data extension is retained separately under
-the aggregate extension directory. Its tables and figures are bound by a
-manifest to the finalized extension lock, checkpoint
-inventory, external prediction inventory, and exploratory inference
-specification. The package contains no subject-level rows, recordings,
-representations, or checkpoints.
-
-The exploratory layer-wise report is retained under the aggregate extension
-directory \texttt{layerwise\_probe\_20260910/}. It binds the four
-tested layers, ten seeds, and the \LayerwiseSubjectCount{}-subject inventory,
-analysis configuration, and
-aggregate-only figures and tables by SHA-256. The repository includes no
-participant-level layer-wise predictions or representation caches; the report
-is therefore suitable for manuscript audit and controlled rerendering without
-redistributing the underlying data.
-
-The secondary ds006780 transfer is retained under
-\texttt{ds006780\_external\_v5/}. Its aggregate analysis and failed precision
-gate are bound by the v5 execution, encoder, prediction-inventory, and
-analysis identities. The deterministic renderer produces the manuscript table,
-macros, and figure from those two aggregate JSON artifacts. The public bundle
-contains no target-bearing manifest, participant ID, raw recording, checkpoint,
-or subject-level prediction.
-
-The codebase also keeps evidence classes explicit. Prospective MIPDB evidence
-supports the confirmatory conclusion; official NeuralBench-style end-to-end
-experiments support reproduction context; historical HBN test results remain
-retrospective. This prevents an already inspected split from silently becoming
-new confirmatory evidence.
-
-\paragraph{Code and data availability.}
-The analysis code, executable protocol, validation tests, compact aggregate
-evidence, and deterministic manuscript renderer are included with the study
-materials. The primary source-analysis identity is
-\texttt{\SourceAnalysisHash}, and the external prediction inventory is bound by
-\texttt{\PredictionInventoryHash}. Raw HBN and MIPDB recordings, REVE weights,
-representation caches, and participant-level prediction vectors are not
-redistributed in the compact release. A rerun therefore requires the declared
-dataset access permissions and the corresponding content-addressed artifacts;
-the release is intended to support auditability and controlled reproduction,
-not unrestricted redistribution of participant data.
+The primary protocol and selected checkpoints were locked before external
+inference, and analysis required a complete prediction inventory. Artifact
+hashes allow the retained outputs to be checked against that record; they are
+not a public timestamped preregistration. Appendix~\ref{sec:audit} describes
+these checks. Raw EEG, participant metadata, prediction vectors, representation
+caches, and checkpoints are not redistributed. Consequently, rebuilding the
+published tables and figures is possible from the aggregate bundle, whereas
+recomputing the participant-level metrics requires access to the original
+artifacts and datasets.

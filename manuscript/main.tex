@@ -1,73 +1,43 @@
 \ifdefined\pdfinfoomitdate\pdfinfoomitdate=1\fi
 \ifdefined\pdftrailerid\pdftrailerid{}\fi
 \documentclass[11pt]{article}
-
 \usepackage[margin=1in]{geometry}
-\setlength{\emergencystretch}{3em}
 \usepackage[T1]{fontenc}
+\usepackage{lmodern}
 \usepackage{microtype}
+\usepackage{amsmath}
 \usepackage{booktabs}
 \usepackage{graphicx}
-\usepackage{float}
-\usepackage{flafter}
-\usepackage[numbers]{natbib}
+\usepackage{array}
+\usepackage[numbers,sort&compress]{natbib}
 \usepackage[hidelinks]{hyperref}
+\setlength{\emergencystretch}{2em}
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.1}
+\renewcommand{\floatpagefraction}{0.7}
 
-% Keep any package-internal mathematical scripts on font sizes present in the
-% offline bundle; the manuscript tables themselves use prose labels.
-\DeclareMathSizes{10.95}{10}{7}{5}
-\DeclareMathSizes{10}{10}{7}{5}
-\DeclareMathSizes{9}{9}{7}{5}
-
-% Use a locally installed system font when building on macOS without a full
-% TeX font bundle. A standard Latin Modern fallback keeps the source portable
-% on ordinary TeX installations.
-\IfFileExists{/System/Library/Fonts/Supplemental/Arial.ttf}{%
-  \DeclareFontFamily{T1}{sysarial}{}
-  \DeclareFontShape{T1}{sysarial}{m}{n}{<-> "[/System/Library/Fonts/Supplemental/Arial.ttf]"}{}
-  \DeclareFontShape{T1}{sysarial}{b}{n}{<-> "[/System/Library/Fonts/Supplemental/Arial.ttf]"}{}
-  \DeclareFontShape{T1}{sysarial}{bx}{n}{<-> "[/System/Library/Fonts/Supplemental/Arial.ttf]"}{}
-  \DeclareFontShape{T1}{sysarial}{m}{it}{<-> "[/System/Library/Fonts/Supplemental/Arial.ttf]"}{}
-  \DeclareFontShape{T1}{sysarial}{b}{it}{<-> "[/System/Library/Fonts/Supplemental/Arial.ttf]"}{}
-  \DeclareFontShape{T1}{sysarial}{bx}{it}{<-> "[/System/Library/Fonts/Supplemental/Arial.ttf]"}{}
-  \renewcommand{\rmdefault}{sysarial}
-  \renewcommand{\sfdefault}{sysarial}
-  \renewcommand{\ttdefault}{sysarial}
-  \renewcommand{\familydefault}{sysarial}
-  \AtBeginDocument{\fontencoding{T1}\fontfamily{sysarial}\selectfont}
-}{%
-  \usepackage{lmodern}
-}
-
+\title{Do More Expressive Probes Improve EEG Age Prediction?\\
+A Cross-Cohort Study with Frozen REVE}
+\author{Dmytro Kozynko}
+\date{}
 \hypersetup{
-  pdftitle={When More Expressive Probes Do Not Establish Stable External Gains},
-  pdfauthor={Anonymous},
+  pdftitle={Do More Expressive Probes Improve EEG Age Prediction? A Cross-Cohort Study with Frozen REVE},
+  pdfauthor={Dmytro Kozynko},
   pdfsubject={Frozen EEG representation probing},
-  pdfkeywords={EEG, foundation models, representation probing, age decoding}
+  pdfkeywords={EEG, foundation models, representation probing, age prediction}
 }
-
-\author{Anonymous}
-
 \input{macros}
 \input{generated/results_macros}
+\input{presentation/head_parameters}
 \input{../results/extensions/layerwise_probe_20260910/assets/layerwise_results_macros}
 \input{../results/extensions/ds006780_external_v5/ds006780_results_macros}
-
 \begin{document}
-\fontencoding{T1}\fontfamily{sysarial}\selectfont
-\begin{center}
-{\bfseries\fontsize{14}{17}\selectfont
-When More Expressive Probes Do Not Establish Stable External Gains:\\
-Age Probing in Frozen EEG Representations\par}
-\vspace{0.5em}
-{\fontsize{11}{13}\selectfont Anonymous\par}
-\end{center}
-\mdseries\normalfont
-
+\maketitle
 \begin{abstract}
 \input{sections/abstract}
 \end{abstract}
-
 \input{sections/introduction}
 \input{sections/related_work}
 \input{sections/datasets}
@@ -77,11 +47,10 @@ Age Probing in Frozen EEG Representations\par}
 \input{sections/limitations}
 \input{sections/conclusion}
 \input{sections/reproducibility}
-
+\clearpage
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+\clearpage
 \appendix
 \input{sections/supplementary}
-
-\clearpage
-\bibliographystyle{references}
-\bibliography{references}
 \end{document}

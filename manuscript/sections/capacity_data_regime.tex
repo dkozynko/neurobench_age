@@ -1,112 +1,81 @@
-\section{Capacity-Data Regime Extension}
+\section{Training-Size Analysis}
+\label{sec:capacity}
 
-This secondary extension asks whether the observed behavior of expressive probe
-heads changes with the amount of HBN training data. It reuses the frozen REVE
-representation, preprocessing, external cohort, checkpoint rule, and training
-contract of the primary study. The only planned factors are training size
-($n\in\{200,400,800\}$), head family, and optimization seed. The matrix has
-three heads, three training sizes, and ten seeds, for 90 frozen-head runs. The
-external evaluation contains one prediction for every declared head-seed-subject
-combination on the previously evaluated 75-subject primary cohort;
-participant-level outputs are not included in this repository. The extension
-does not add independent external subjects.
+This exploratory analysis used three heads, three nested HBN training subsets,
+and ten seeds, for 90 runs. Each selected checkpoint was evaluated on the same
+75 MIPDB participants. The resulting 6,750 predictions are repeated evaluations
+of those participants, not independent observations.
 
-\subsection{Aggregate results}
+\subsection{Absolute performance and paired differences}
+Table~\ref{tab:capacity-absolute} reports absolute correlations and parameter
+counts. Table~\ref{tab:capacity-cells} gives candidate differences from the
+size-matched baseline. The richer heads improved on all ten seeds in each cell,
+but only the 200-subject intervals excluded zero.
 
-The parameter counts are derived from the validated checkpoint metadata rather
-than entered as manuscript constants. The aggregate external metrics and seed
-variability are shown in Table~\ref{tab:capacity-absolute}. Paired candidate
-contrasts against the training-size-matched mean-linear baseline are shown in
-Table~\ref{tab:capacity-cells}. The six cell comparisons are positive for every
-observed seed, but the uncertainty intervals are the primary indication of how
-strongly those effects are supported.
-
-\begin{table}[H]
+\begin{table}[tbp]
   \centering
-  \scriptsize
-  \caption{Aggregate external Pearson performance in the capacity-data
-  extension. Seed SD is computed across the ten matched optimization seeds.}
+  \small
+  \caption{MIPDB correlations by HBN training size. SD is computed across ten
+  seeds. The MLP has four hidden units.}
   \label{tab:capacity-absolute}
-  \input{../results/extensions/capacity_data_regime_v3/capacity_data_regime_absolute.tex}
+  \input{presentation/capacity_data_regime_absolute.tex}
 \end{table}
 
-\begin{table}[H]
+\begin{table}[tbp]
   \centering
-  \scriptsize
-  \caption{Paired candidate-baseline differences by training size. Intervals
-  use the joint seed-subject bootstrap; Holm-adjusted p-values are exploratory
-  and do not replace the primary sealed decision rule.}
+  \small
+  \caption{Paired candidate differences at each training size. W/T/L counts
+  positive, zero, and negative seed differences. Intervals resample seeds and
+  participants; p-values are exploratory.}
   \label{tab:capacity-cells}
-  \input{../results/extensions/capacity_data_regime_v3/capacity_data_regime_cells.tex}
+  \input{presentation/capacity_data_regime_cells.tex}
 \end{table}
 
-The training-size contrasts quantify whether the candidate advantage itself
-changes between nested training regimes. The endpoint and adjacent contrasts
-are reported in Table~\ref{tab:capacity-contrasts}; none should be interpreted
-as a universal scaling law. In particular, a larger training subset can change
-both the baseline and candidate, so the relevant quantity is the paired change
-in their difference, not the raw candidate score alone.
+\subsection{Changes in the candidate advantage}
+Table~\ref{tab:capacity-contrasts} compares paired advantages between training
+sizes. For example, 800 minus 200 subtracts the candidate's advantage at 200
+subjects from its advantage at 800. All observed changes were negative. The
+one-sided sign-flip tests retained the prespecified positive-change alternative,
+which explains their large p-values; they are not tests for any change in
+either direction. Only the MLP's 800-minus-400 bootstrap interval excluded zero.
+The endpoint intervals included zero for both heads.
 
-\begin{table}[H]
+\begin{table}[tbp]
   \centering
-  \scriptsize
-  \caption{Exploratory changes in the paired candidate-baseline difference
-  across training sizes.}
+  \small
+  \caption{Exploratory changes in the paired Pearson advantage. A negative
+  value means a smaller candidate advantage at the larger training size.
+  Holm p-values test the positive direction; SD describes seed differences.}
   \label{tab:capacity-contrasts}
-  \input{../results/extensions/capacity_data_regime_v3/capacity_data_regime_contrasts.tex}
+  \input{presentation/capacity_data_regime_contrasts.tex}
 \end{table}
 
-For context, the selected-head HBN validation scores and the corresponding
-external scores are shown in Table~\ref{tab:capacity-transfer}. This is a
-descriptive transfer view rather than a second selection criterion: the MIPDB
-targets remain excluded from training and checkpoint selection.
+Table~\ref{tab:capacity-transfer} shows HBN validation and MIPDB correlations for
+the selected candidate checkpoints. External scores did not select checkpoints.
+Figure~\ref{fig:capacity-absolute} shows absolute performance, and
+Figure~\ref{fig:capacity-seed-deltas} shows individual seed differences.
+The joint intervals are shown once in Figure~\ref{fig:capacity-main}.
 
-\begin{table}[H]
+\begin{table}[tbp]
   \centering
-  \scriptsize
-  \caption{Descriptive validation-to-external transfer for the candidate heads.}
+  \small
+  \caption{HBN validation and MIPDB correlations for selected candidate heads,
+  averaged over seeds.}
   \label{tab:capacity-transfer}
-  \input{../results/extensions/capacity_data_regime_v3/capacity_data_regime_validation_external_transfer.tex}
+  \input{presentation/capacity_data_regime_validation_external_transfer.tex}
 \end{table}
 
-\subsection{Figures and robustness interpretation}
-
-Figure~\ref{fig:capacity-absolute} displays the absolute external scores,
-Figure~\ref{fig:capacity-delta} displays the paired deltas and bootstrap
-intervals, and Figure~\ref{fig:capacity-seed-deltas} displays the per-seed
-contrasts. The same 10,000-iteration hierarchical bootstrap is used throughout:
-seeds and external subjects are resampled jointly while preserving candidate-
-baseline pairing.
-
-\begin{figure}[!ht]
+\begin{figure}[tbp]
   \centering
-  \includegraphics[width=0.94\linewidth]{../results/extensions/capacity_data_regime_v3/capacity_data_regime_absolute.pdf}
-  \caption{Aggregate external Pearson scores across training sizes and probe
-  heads.}
+  \includegraphics[width=0.80\linewidth]{presentation/capacity_data_regime_absolute.pdf}
+  \caption{Absolute MIPDB correlations for each training size and head.}
   \label{fig:capacity-absolute}
 \end{figure}
 
-\begin{figure}[!ht]
+\begin{figure}[tbp]
   \centering
-  \includegraphics[width=0.94\linewidth]{../results/extensions/capacity_data_regime_v3/capacity_data_regime_delta.pdf}
-  \caption{Paired external Pearson deltas relative to the matched mean-linear
-  baseline, with joint bootstrap intervals.}
-  \label{fig:capacity-delta}
-\end{figure}
-
-\begin{figure}[!ht]
-  \centering
-  \includegraphics[width=0.94\linewidth]{../results/extensions/capacity_data_regime_v3/capacity_data_regime_seed_deltas.pdf}
-  \caption{Seed-level paired external deltas for the two candidate heads.}
+  \includegraphics[width=0.80\linewidth]{presentation/capacity_data_regime_seed_deltas.pdf}
+  \caption{Paired Pearson differences for the rich-statistics and four-unit
+  MLP heads across seeds and HBN training sizes.}
   \label{fig:capacity-seed-deltas}
 \end{figure}
-
-The exact seed sign-flip tests and Holm correction are exploratory descriptive
-inference for this extension. Their configuration, family order, and canonical
-digest are retained in the aggregate asset manifest. They do not alter the
-primary predeclared superiority boundary: the sealed primary conclusion is
-still determined by its hierarchical bootstrap, cohort, win-count, and
-worst-seed criteria. The extension therefore supports a bounded statement
-about head capacity under the tested data regimes, not a claim that a more
-complex head is generally better or that additional training subjects have a
-monotone effect.

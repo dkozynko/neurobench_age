@@ -1,0 +1,42 @@
+{
+  "description": "Editorial labels and figures derived from retained aggregate evidence; no new inference.",
+  "files": {
+    "capacity_data_regime_absolute.pdf": {
+      "bytes": 26192,
+      "sha256": "f638adb2cfeee8b2b6760b945ebc19bd8bd3aaf77fb777185f308b22d8c0a1c5"
+    },
+    "capacity_data_regime_absolute.tex": {
+      "bytes": 559,
+      "sha256": "8f312a47dc9e56548995ca602505898de8656b968037040c98a1b94e04a126c1"
+    },
+    "capacity_data_regime_cells.tex": {
+      "bytes": 584,
+      "sha256": "12cbc20a23c6f5d2d16c1d6bc09968e443fc229077dd72408976cf3506d81e82"
+    },
+    "capacity_data_regime_contrasts.tex": {
+      "bytes": 597,
+      "sha256": "2dd99053476727c167d4072d67a0a37202486ad9ad7e863838be3b891ff53855"
+    },
+    "capacity_data_regime_delta.pdf": {
+      "bytes": 31114,
+      "sha256": "bc35d4706a3ea09b52a81e90706b9478bfee2587e4735d6af84943ebeae38c78"
+    },
+    "capacity_data_regime_seed_deltas.pdf": {
+      "bytes": 36849,
+      "sha256": "0a6fcc0dd8bbd8971639fa54ea7de39864e4d4a07d043041f26c5ceb3dad4e94"
+    },
+    "capacity_data_regime_validation_external_transfer.tex": {
+      "bytes": 359,
+      "sha256": "7d26c1a1d0bf557b5c2fae4d4f86406ac425958cf5b3670b7ea1ddcb99298e98"
+    },
+    "head_parameters.tex": {
+      "bytes": 190,
+      "sha256": "abc2603dd147a395c4970dd4a23e5231e95a0f26d55be5f92651dfc6d787e873"
+    }
+  },
+  "sources": {
+    "results/canonical/prospective/artifact_manifest.json": "472784323d244712bc1abe590c3081df05a1609231371f59d939ceefc4d2460a",
+    "results/canonical/prospective/study_summary.json": "337c1502ff2838f96020cb06efaceca31fcceebf3e115791f51402944e7681f8",
+    "results/extensions/capacity_data_regime_v3/capacity_data_regime_asset_manifest.json": "0fda7a0d80f8f2cb94d617ce3a13beb087770277ae0041dd0dd9ce03fe7b04a0"
+  }
+}

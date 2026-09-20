@@ -1,61 +1,58 @@
-\section{Datasets and Evidence Boundaries}
+\section{Datasets}
 
 \paragraph{HBN development data.}
-The Healthy Brain Network is a large transdiagnostic pediatric resource with
-multimodal measurements, including EEG \citep{alexander2017hbn}. Only the
-predeclared HBN train and validation subjects were used to fit heads and select
-checkpoints. The repeatedly inspected HBN R5 split was excluded from candidate
-selection and is retained solely as retrospective context. Compact source
-artifacts available for this report preserve hashes of the HBN subject and
-training manifests but intentionally do not reproduce participant-level rows.
+The Healthy Brain Network is a pediatric resource with EEG and other
+measurements \citep{alexander2017hbn}. Heads were fitted on a fixed HBN training
+split, and checkpoints were selected on a separate validation split. The
+previously inspected HBN R5 test split was excluded from both steps.
+The training-age range was 5.06--21.67 years. The archived aggregate summaries
+retain hashes of the subject and training manifests, but not the primary
+train/validation counts or their demographic summaries. These quantities cannot
+be recovered from the public aggregate bundle. The 200-, 400-, and 800-subject
+subsets described below belong to the secondary training-size analysis and do
+not document the size of the primary split.
 
-\paragraph{MIPDB external data.}
-The MIPDB resource includes high-density task-based and task-free EEG for
-studying information processing across development \citep{langer2017mipdb}. The
-study pinned the NEMAR dataset identity \texttt{nm000153} and content-addressed
-the selected acquisition snapshot. A deterministic \PilotSubjects{}-subject
-pilot was used only for engineering and target-free signal checks. After
-predeclared signal QC, \PrimarySubjects{} subjects within HBN training-age
-support formed the primary cohort; \ExtrapolationSubjects{} out-of-support
-subjects were reserved for descriptive boundary analyses and were not part of
-the confirmatory result.
+\paragraph{MIPDB external evaluation.}
+MIPDB contains high-density EEG recorded during tasks and rest across development
+\citep{langer2017mipdb}. We used a fixed acquisition snapshot from NEMAR
+\texttt{nm000153}. Of 126 candidate records, 17 had no EEG recording. The
+remaining 109 participants were assigned to a 10-person engineering pilot,
+79 primary candidates within HBN's training-age range, and 20 participants
+outside that range. Four primary candidates failed the prespecified signal
+quality checks, leaving \PrimarySubjects{} participants for the main analysis.
+The pilot was used only to check the recording pipeline, without age-prediction
+metrics. The out-of-range group was excluded from the primary comparison.
 
-The cohort flow was also fixed before model evaluation. Of 126 candidate
-records, 17 lacked an EEG recording and were excluded before allocation. The
-remaining 109 subjects yielded 10 pilot subjects, 79 primary candidates, and
-20 extrapolation subjects; four primary candidates then failed the predeclared
-signal-QC contract, leaving 75 primary subjects. The HBN training-age support
-used for the primary restriction was 5.06-21.67 years. Exceeding the
-predeclared minimum of 50 primary subjects is a cohort-size gate, not a formal
-power analysis.
-
-\begin{table}[H]
+\begin{table}[tbp]
   \centering
-  \caption{Externally retained cohort counts. Participant-level identities are
-  excluded from the repository bundle.}
+  \caption{MIPDB groups after allocation and signal quality checks.}
   \label{tab:cohorts}
   \input{generated/cohort_summary}
 \end{table}
 
-\paragraph{Prospective versus secondary evidence.}
-No MIPDB primary sample was passed through the study model before the evaluation
-start marker. The primary prediction inventory was create-only and analysis was
-permitted only after exact completion. In contrast, NeuralBench full fine-tuning
-results are secondary reproduction evidence because the encoder is trainable,
-and historical HBN R5 comparisons are retrospective because repeated access
-eliminates an untouched-holdout interpretation.
-The capacity-data and layer-wise extensions also reuse the already evaluated
-MIPDB subjects. Their separately locked execution preserves provenance, not
-independence from earlier observations; they remain exploratory extensions
-rather than additional prospective primary replications.
+MIPDB predictions and targets were not used to select the primary heads,
+checkpoints, or decision thresholds. The later training-size and layer-wise
+analyses reused these participants, so they are exploratory follow-ups rather
+than independent replications.
 
-\paragraph{ds006780 external-transfer cohort.}
-OpenNeuro ds006780 is a separate public EEG cohort with 64-channel BioSemi
-recordings and age-bearing participant metadata. Under the frozen run-01
-contract, 126 subjects had usable ages and signal quality. The cohort includes
-typical-development, autism, and sibling groups and differs from MIPDB in
-hardware, acquisition context, and cohort composition. We use it as a bounded
-cross-cohort transfer test, not as evidence that the encoder never encountered
-related data during pretraining. Participant-level metadata and predictions
-remain outside the repository; only aggregate statistics and provenance hashes
-are retained.
+\paragraph{Separate transfer cohort.}
+The SFARI\_EEG multi-paradigm dataset, OpenNeuro ds006780 version 1.0.0,
+contains BioSemi-64 EEG recordings from children in typical-development, autism,
+and sibling groups \citep{molholm2025sfari}. Its source description reports
+ages 8--13 years for the overall cohort. Our transfer analysis selected
+\texttt{Restingstate} run-01 and retained \DsSubjectCount{} participants with
+usable ages and signals. The retained analysis does not include the full
+exclusion breakdown, age distribution, group counts, or family relationships
+for these selected participants; the source-cohort description should not be
+read as a summary of the final analysis sample.
+
+\paragraph{Data use.}
+This study reuses existing datasets and involved no new participant recruitment.
+The HBN and MIPDB source publications describe their original ethics and
+consent procedures \citep{alexander2017hbn,langer2017mipdb}. The ds006780
+metadata report approval by the Albert Einstein College of Medicine
+Institutional Review Board (2021-13433), participant assent, parental or guardian
+consent, and a CC0 data license \citep{molholm2025sfari}. These statements concern
+the original data collection. The study repository distributes aggregate
+results, not participant records; access to source recordings remains subject
+to the respective providers' terms.

@@ -1,28 +1,19 @@
-Frozen-probe scores reflect both an encoder and the protocol used to read out
-its representations. We study how age decoding from frozen \REVE{} EEG
-representations depends on the head, development-set size, evaluation metric,
-and external uncertainty. In a predeclared comparison, four heads trained on
-the same HBN development split with \ProbeSeeds{} optimization seeds were
-evaluated on a sealed cohort of \PrimarySubjects{} MIPDB subjects. The
-mean-linear baseline obtained Pearson correlation \BaselinePearson{}.
-Candidate mean paired Pearson differences were \LayerLinearPearsonDelta{},
-\RichResidualPearsonDelta{}, and \MultiQueryPearsonDelta{}, but every joint
-seed-subject bootstrap interval included zero. Thus no candidate met the
-predeclared stability criterion; this result does not establish equivalence.
-Metric rankings differed descriptively: the rich-statistics residual head had
-the highest mean Pearson, whereas the multi-query head had the lowest MAE and
-RMSE. Secondary capacity-data experiments compared three heads at 200, 400,
-and 800 HBN training subjects. Candidate advantages were positive at every size,
-but their point estimates did not grow monotonically with training size.
-Exploratory layer-wise comparisons likewise gave positive earlier-layer
-differences with intervals that crossed zero. These extensions reused the same
-external subjects and are not independent replications. The bounded practical
-contribution is an evaluation example in which head ranking depends on the
-metric, head contrasts depend on the training regime, and consistent seed
-directions coexist with substantial external-subject uncertainty. Frozen
-representation comparisons should therefore declare the readout and metric,
-match training regimes, and report subject-aware uncertainty alongside seed
-variation. A separate ds006780 transfer reproduced the same distinction: the
-$n=800$ rich head was positive on all ten seeds, but its 95\% interval was
-[\DsPrimaryCILow{},\,\DsPrimaryCIHigh{}] and failed the prespecified
-precision gate.
+Do more expressive prediction heads improve age prediction from frozen EEG
+representations? We compared four heads using a fixed \REVE{} encoder, the same
+Healthy Brain Network development split, and \ProbeSeeds{} training seeds. The
+primary external evaluation included \PrimarySubjects{} MIPDB participants.
+The mean-pooled linear baseline achieved a mean Pearson correlation of
+\BaselinePearson{}. The three alternatives increased correlation by
+\LayerLinearPearsonDelta{}--\RichResidualPearsonDelta{} on average, but all
+95\% confidence intervals included zero when both seeds and participants were
+resampled. None met our prespecified criterion for a reliable improvement.
+The head with the highest correlation differed from the head with the lowest
+prediction error. Exploratory analyses varied training-set size and
+representation layer on the same MIPDB participants. A separate evaluation on
+\DsSubjectCount{} participants from OpenNeuro ds006780 also found a positive
+mean difference at 800 training subjects, but its interval included zero.
+These results illustrate why repeated training runs alone cannot assess
+uncertainty in external performance. Comparisons of frozen EEG representations
+should report the prediction head, training-set size, evaluation metric, and
+uncertainty across participants. This study does not establish equivalence
+between heads; its findings apply to the tested REVE setup.

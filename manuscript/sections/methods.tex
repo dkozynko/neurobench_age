@@ -1,121 +1,128 @@
 \section{Methods}
 
-\subsection{Frozen representation pipeline}
+\subsection{Frozen EEG features}
+We used \texttt{brain-bzh/reve-base} with the encoder frozen and in evaluation
+mode. HBN and MIPDB recordings were mapped to the ordered EGI HydroCel E1--E128
+layout without spatial interpolation. Signals were resampled to 200 Hz,
+band-pass filtered at 0.5--99.5 Hz, standardized and clipped at 15 standard
+units, and divided into non-overlapping two-second windows. At most 120 seconds
+were retained per participant. For MIPDB, standardization was fitted separately
+to each selected recording before windowing, without age labels. Windows did
+not cross condition boundaries. This is recording-level normalization, not a
+global scaler fitted to the HBN training set.
 
-We used the \texttt{brain-bzh/reve-base} checkpoint with encoder parameters
-frozen, evaluation mode enabled, and inference-mode extraction. EEG was mapped
-to the ordered EGI HydroCel E1-E128 layout without spatial interpolation,
-resampled to 200 Hz, band-pass filtered from 0.5 to 99.5 Hz, standardized with
-a clamp of 15, and divided into non-overlapping two-second windows. For MIPDB,
-the StandardScaler was fitted separately to all retained samples from each
-subject's selected recording before windowing. This is target-free,
-recording-level normalization and is part of the external estimand; it is not
-a train-fitted global scaler. At most 120 seconds were retained per subject.
-Windows were never allowed to cross MIPDB condition boundaries.
-For the primary confirmatory comparison, representations from layers $-2$ and
-$-1$ were materialized once and content-addressed; all primary heads consumed
-these immutable caches. The separate exploratory layer-wise extension
-additionally used layers $-4$ and $-3$, yielding a four-layer representation
-matrix.
+Features from the last two encoder layers were cached once for the primary
+comparison. The layer-wise follow-up also extracted the two preceding layers.
+Each head predicted age for individual windows; the arithmetic mean of those
+predictions gave one age estimate per participant.
 
-\subsection{Probe heads}
+\subsection{Prediction heads}
+The baseline averages the final-layer tokens and applies an affine regressor.
+The penultimate-layer probe applies the same readout to layer $-2$, so this
+comparison changes depth without increasing the number of parameters.
+The rich-statistics head adds a linear correction based on four summaries of
+each token feature: standard deviation, range, mean absolute deviation, and
+mean absolute value. These summaries allow a nonlinear dependence on the
+original tokens, although the regression on the summaries is linear.
 
-The baseline averages final-layer tokens and applies one affine regressor. The
-penultimate-layer linear probe makes the same readout from the preceding layer,
-isolating layer choice without adding capacity. The rich-statistics residual
-head adds a zero-initialized correction over per-feature standard deviation,
-range, mean absolute deviation, and mean absolute magnitude. The multi-query
-head uses two deterministic signed-basis attention queries and a
-zero-initialized residual over weighted location, spread, range, deviation, and
-magnitude statistics. Zero initialization makes both residual heads exactly
-match the baseline prediction at initialization, so subsequent differences
-arise through training rather than an unmatched initial function.
+The multi-query head uses two trainable attention queries, initialized to
+opposite signed basis vectors. Each query produces a weighted mean, standard
+deviation, mean absolute deviation, and mean absolute value. Both queries also
+receive the same unweighted token range. The correction uses the resulting ten
+feature vectors. Both richer heads multiply their correction by 0.5 and
+initialize its weights to zero. With matched seeds, they therefore start with
+the same predictions as the baseline.
 
-\subsection{Training and selection}
+\begin{table}[tbp]
+  \centering
+  \small
+  \caption{Primary heads. Feature dimension is 512. Parameter counts include
+  all trainable head parameters; the encoder remains frozen.}
+  \label{tab:heads}
+  \begin{tabular}{p{0.26\linewidth}cp{0.40\linewidth}r}
+  \toprule
+  Head & Layer & Trainable components & Parameters \\
+  \midrule
+  Mean-pooled linear & $-1$ & Affine regression & \BaselineParameters{} \\
+  Penultimate-layer linear & $-2$ & Affine regression & \LayerParameters{} \\
+  Rich-statistics residual & $-1$ & Affine baseline and correction on four summaries & \RichParameters{} \\
+  Multi-query rich-statistics & $-1$ & Affine baseline, two queries, and correction on ten summaries & \QueryParameters{} \\
+  \bottomrule
+  \end{tabular}
+\end{table}
 
-Each head was trained for seeds 33-42 using global seeded window shuffling,
-AdamW \citep{loshchilov2019adamw} with learning rate 1e-4 and weight decay
-0.05, batch size 64, OneCycleLR \citep{smith2018superconvergence} with cosine
-annealing, gradient clipping at norm 1, and mean-squared error. Training had a
-maximum of 40 epochs and patience 7. For each seed and
-head, the earliest checkpoint attaining the best HBN validation Pearson
-correlation was selected. For the primary comparison, neither MIPDB targets nor
-predictions influenced training, checkpoint selection, candidate membership,
-or thresholds. Subsequent extensions retain development-only checkpoint
-selection but reuse the previously evaluated external cohort rather than
-introducing a new untouched external cohort.
+\subsection{Training and checkpoint selection}
+For each head we trained seeds 33--42, shuffling windows with the corresponding
+seed. Training used AdamW \citep{loshchilov2019adamw}, learning rate $10^{-4}$,
+weight decay 0.05, batch size 64, a cosine OneCycleLR schedule
+\citep{smith2018superconvergence}, gradient clipping at norm 1, and mean squared
+error. The budget was 40 epochs with patience 7. We selected the earliest
+checkpoint with the best participant-level HBN validation Pearson correlation.
+For the primary comparison, neither external predictions nor age labels
+influenced training or selection.
 
-\subsection{External estimand and descriptive metrics}
-
-For each candidate head and optimization seed, we computed subject-level Pearson
-correlation on the primary external cohort. The primary seed-level contrast is
-the candidate Pearson correlation minus the matched baseline correlation, and
-the estimand is its arithmetic mean over the ten matched seeds. We also report
-MAE, RMSE, R-squared, calibration
-slope and intercept, the sample standard deviation across seed correlations,
-the number of positive, zero, and negative seed contrasts, and the worst seed
-contrast. These additional metrics are descriptive and do not replace the
-predeclared decision rule.
+\subsection{Metrics}
+For each seed, we computed Pearson correlation between predicted and observed
+ages across external participants. The primary effect is the candidate's
+correlation minus the matched baseline's correlation, averaged over the ten
+seeds. We also report MAE and RMSE in years, $R^2$, and calibration. Calibration
+fits observed age as intercept plus slope times predicted age; ideal values
+are zero and one, respectively. These additional metrics describe prediction
+quality but do not replace the primary Pearson endpoint.
 
 \subsection{Uncertainty and decision rule}
+We used 10,000 paired bootstrap iterations to estimate a percentile 95\%
+confidence interval. Each iteration sampled ten seeds with replacement and
+sampled external participants with replacement. The same participant sample
+was used for every sampled seed and for both heads. We recomputed their
+correlations and averaged the paired differences over sampled seeds. This
+joint seed-and-participant bootstrap preserves the shared evaluation cohort;
+participants are not independently resampled within each seed.
 
-The interval estimate uses 10,000 deterministic hierarchical paired bootstrap
-iterations and reports percentile 95\% intervals. Each iteration resamples
-seeds with replacement and subjects with replacement, preserving
-candidate-baseline pairing. A paired one-sided seed-level sign-flip
-permutation test enumerates all 1,024 sign assignments for the ten paired seed
-deltas. Its p-value is exact conditional on the null-model assumption that the
-seed-level signs are exchangeable or symmetric under no improvement; it is not
-a design-based randomization of candidate labels. Raw p-values for the three
-candidates are adjusted in a fixed order with Holm's step-down method.
+A separate one-sided sign-flip test enumerated all $2^{10}=1{,}024$ sign
+assignments to the observed seed differences. Exactness requires the joint
+null distribution to be invariant under these sign flips, as would hold for
+independent seed contrasts symmetric about zero. The test concerns training
+variation conditional on the observed cohort; it does not resample participants.
+We applied Holm's step-down correction to the three candidate p-values
+\citep{holm1979simple}, sorting by p-value and using the declared candidate
+order only to break ties.
 
-A candidate establishes stable external improvement only if all conditions are
-true: the primary cohort meets the 50-subject minimum; adjusted p is below
-0.05; the
-95\% bootstrap lower bound is above zero; at least eight of ten seeds improve;
-and the worst seed delta is at least minus 0.01. This conjunction was fixed before
-external analysis. Failure of any condition blocks a superiority claim.
+The prespecified rule required all five conditions: at least 50 external
+participants; adjusted $p<0.05$; a bootstrap lower bound above zero; positive
+differences for at least eight seeds; and a worst-seed difference no lower than
+$-0.01$. The 50-person threshold was a minimum sample-size requirement, not a
+power calculation. We retained this rule after seeing the results.
 
-\subsection{Secondary layer-wise analysis}
+\subsection{Exploratory analyses}
+\paragraph{Training-set size.}
+We trained the baseline, rich-statistics head, and a residual MLP on nested HBN
+subsets of 200, 400, and 800 participants, using the same ten seeds and fixed
+validation set. The MLP has four hidden units and 2,569 parameters, close to
+the rich head's 2,561. All 90 runs were evaluated on the same 75 MIPDB
+participants. We estimated both the candidate advantage at each size and the
+change in that advantage between sizes. The six cell comparisons and six
+size contrasts formed separate exploratory sign-flip/Holm families.
 
-To examine whether the final-layer choice itself was decisive, we ran a
-separate exploratory comparison using the same previously evaluated external cohort, ten
-optimization seeds, and the completed four-layer representation matrix. The
-final-layer mean-linear probe (layer $-1$) was the baseline; matched linear
-probes at layers $-4$, $-3$, and $-2$ were the three comparisons. The analysis
-used the same hierarchical bootstrap and exact seed sign-flip procedures, with
-Holm adjustment in the fixed order $-4$, $-3$, $-2$. It was specified after the
-primary protocol and was not allowed to alter the primary stability decision.
+\paragraph{Representation depth.}
+The layer-wise analysis compared linear probes at layers $-4$, $-3$, and $-2$
+with the final-layer baseline, using the same ten seeds and MIPDB participants.
+It used the joint bootstrap and a separate three-comparison sign-flip/Holm
+family. Both follow-ups were planned after the primary protocol and leave its
+decision unchanged.
 
-\subsection{Secondary capacity-data analysis}
+\paragraph{Transfer to ds006780.}
+We evaluated the HBN-trained baseline and rich-statistics heads from the
+200- and 800-subject training conditions on ds006780. Temporal filtering,
+standardization, window length, aggregation, and checkpoint selection followed
+the same protocol. The montage adapter instead selected 64 BioSemi EEG channels,
+excluded auxiliary and trigger channels, used canonical electrode coordinates,
+and resampled from 512 Hz. The source reference was undocumented and was
+preserved rather than replaced.
 
-The secondary extension repeats the frozen-head protocol at HBN training sizes
-of 200, 400, and 800 subjects for the mean-linear baseline, the rich-statistics
-residual head, and the matched four-unit MLP residual head. Each cell uses the
-same ten seeds and is evaluated on the same previously evaluated 75-subject MIPDB cohort,
-yielding 90 runs and 6,750 external prediction identities. The estimand is the
-change in the paired candidate-baseline Pearson difference across training
-sizes. We report a joint seed-subject bootstrap and separate exploratory exact
-seed sign-flip families for the six cells and six training-size contrasts. These
-secondary p-values are descriptive and cannot change the primary stable-
-improvement decision.
-
-\subsection{Secondary ds006780 transfer}
-
-As a separate external-transfer extension, we evaluated the final-layer
-mean-linear and rich-statistics residual heads on OpenNeuro ds006780. The
-extension used the same frozen REVE checkpoint, representation cache contract,
-preprocessing, checkpoint selection rule, and seeds 33-42 as the capacity-data
-analysis, but retained only the $n=200$ and $n=800$ cells. The predeclared
-recording contract used one resting-state run per subject, selected exactly 64
-BioSemi EEG channels in canonical order, excluded EMG and trigger channels,
-resampled from 512 to 200 Hz, and preserved the source reference when it was
-undocumented. The resulting cohort contained 126 eligible subjects.
-
-The primary secondary estimand was the mean paired Pearson difference between
-the rich and mean-linear heads at $n=800$. We used the same 10,000-iteration
-hierarchical paired bootstrap over seeds and subjects. Before target-bearing
-finalization, the study specified a maximum primary interval width of 0.06;
-the observed width was 0.1272. This extension is therefore reported as
-uncertainty-limited transfer evidence, not as a stable-superiority decision or
-an independent replacement for the primary MIPDB test.
+The main comparison in this secondary analysis was the rich head versus the
+baseline at 800 training subjects. Before adding external age labels to the
+final cohort manifest, we specified a maximum 95\% interval width of
+\DsPrecisionMaxWidth{}, corresponding to an intended precision of approximately
+$\pm0.03$ Pearson units. We used the same 10,000-iteration joint bootstrap.
+This precision requirement is distinct from evidence that an effect is positive.

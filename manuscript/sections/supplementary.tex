@@ -1,92 +1,80 @@
-\section{Supplementary Protocol Detail}
+\section{Protocol and Reproduction Details}
+\label{sec:audit}
 
-\subsection{Fail-closed study lifecycle}
+\subsection{Study record}
+Before the primary MIPDB evaluation, a study lock recorded the encoder,
+preprocessing, statistical specification, HBN manifests, external cohort,
+training environment, and all 40 selected checkpoints. Evaluation recorded its
+start before extracting features for primary participants. Existing valid
+predictions could not be overwritten, and resumed runs had to use the same
+inputs. Analysis required exactly one prediction for each head, seed, and
+participant: 3,000 predictions in total.
 
-The external workflow progressed through sealed, started, and completed states.
-Sealing bound the representation protocol, final training protocol, source tree,
-environment, REVE checkpoint, HBN manifests, MIPDB acquisition and QC manifests,
-subject lists, preprocessing, statistical specification, and all selected head
-checkpoints. A started study could not be resealed. Infrastructure failures
-could append diagnostic records and resume only against the same identities;
-they could not replace an existing valid prediction.
+The compact evidence records the primary analysis hash
+\texttt{\SourceAnalysisHash} and prediction-inventory hash
+\texttt{\PredictionInventoryHash}. These identify the retained result and its
+source inventory. They do not replace access to the inventory or provide an
+independent public timestamp for the protocol.
 
-The external evaluator had no optimizer, scheduler, checkpoint selection, or
-aggregate metric capability. It first validated the lock and exact checkpoint
-matrix, wrote the start marker, and then lazily extracted representations for
-missing primary subjects. Completion required one immutable prediction for each
-head-seed-subject triple. Confirmatory analysis refused incomplete or extra
-entries.
+The source analyses, figures, and tables are linked by file manifests. Numeric
+commands in the manuscript are generated from aggregate results. The editorial
+presentation assets use the same retained values with shorter labels; their
+manifest records their source files separately. Rebuilding those assets does
+not rerun participant-level inference.
 
-\subsection{Interpretation of the joint criterion}
+\subsection{Interpretation of the decision rule}
+The five primary conditions serve different purposes. The minimum cohort size
+sets a floor on the evaluation sample. Holm correction addresses the three
+seed-level tests, while the bootstrap lower bound requires a positive estimate
+when seeds and participants are resampled. The win count and worst-seed floor
+limit dependence on favorable training runs. No candidate passed the bootstrap
+condition. The multi-query head lost on two seeds, but still met the eight-win
+and worst-seed thresholds. Passing those thresholds did not compensate for an
+interval containing zero.
 
-The five decision conditions answer complementary questions. The cohort-size
-floor blocks a claim below the declared minimum but does not guarantee adequate
-power or precision. Holm adjustment
-controls the family-wise error rate across the three candidate comparisons.
-The bootstrap lower bound requires the paired mean effect to remain positive
-when both seeds and subjects vary. The win count guards against an average
-driven by a minority of seeds, and the worst-seed threshold limits severe
-optimization instability. The rule is intentionally stricter than selecting a
-head by mean validation or external performance.
+\subsection{Earlier and later analyses}
+Previously inspected HBN R5 screens motivated candidate families but are
+retrospective evidence. NeuralBench-compatible end-to-end runs update the
+encoder and provide implementation context, not frozen-probe scores. Neither
+is part of the primary MIPDB effect estimate.
 
-In this study, all candidates failed the bootstrap-lower-bound condition. The
-multi-query candidate additionally exhibited losses on two seeds, although its
-worst observed delta remained above the predeclared floor. Because the rule is
-conjunctive, passing the adjusted test, win-count, and worst-seed checks cannot
-compensate for an interval that includes zero.
+The training-size and layer-wise follow-ups reuse the MIPDB cohort after its
+first evaluation. Their separate protocol records preserve what was run but
+cannot make those participants an untouched holdout again. The ds006780
+transfer adds a separate cohort and uses the configuration recorded in
+\texttt{configs/research/ds006780\_external\_transfer.json}. Its configuration
+hash matches the v5 aggregate execution record, including dataset version
+1.0.0 and the pinned source revision. It remains secondary because the
+comparison was motivated by earlier findings.
 
-\subsection{Evidence taxonomy}
+\subsection{Additional primary and layer-wise figures}
+Figure~\ref{fig:calibration} summarizes calibration. Figures~\ref{fig:layerwise-depth}
+and \ref{fig:layerwise-seed-deltas} show the exploratory depth comparison.
 
-The primary analysis compares frozen heads on MIPDB. The separate
-NeuralBench-compatible training schedule aligns optimization mechanics, not the
-overall benchmark task: official end-to-end NeuralBench training updates the
-encoder, whereas the present encoder never receives a gradient. Historical HBN
-screens motivated the choice of candidate families but are not used to estimate
-the prospective effect. This distinction is necessary to avoid both benchmark
-mislabeling and post-selection inference on repeatedly viewed outcomes.
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.80\linewidth]{generated/calibration_summary.pdf}
+  \caption{Mean MIPDB calibration slopes and intercepts across seeds. Dashed
+  lines mark one and zero, respectively. Calibration regresses observed age on
+  predicted age; no external recalibration was applied.}
+  \label{fig:calibration}
+\end{figure}
 
-\subsection{Evidence map and availability boundary}
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.80\linewidth]{../results/extensions/layerwise_probe_20260910/assets/layerwise_depth.pdf}
+  \caption{Exploratory layer-wise differences from the final layer, with joint
+  seed-and-participant intervals. All intervals include zero.}
+  \label{fig:layerwise-depth}
+\end{figure}
 
-The following map states which evidence supports which claim. It is included to
-prevent a secondary benchmark result or a repeatedly inspected split from being
-read as part of the sealed external estimand.
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.80\linewidth]{../results/extensions/layerwise_probe_20260910/assets/layerwise_seed_deltas.pdf}
+  \caption{Paired layer-wise Pearson differences across seeds on the same
+  MIPDB participants.}
+  \label{fig:layerwise-seed-deltas}
+\end{figure}
 
-\paragraph{Primary prospective.} Frozen REVE heads on sealed MIPDB, comprising
-40 runs and 3,000 subject-level predictions. This supports the confirmatory
-statement about stable external gains under the declared protocol.
-
-\paragraph{Secondary reproduction.} NeuralBench-compatible end-to-end runs with
-a trainable encoder. These provide reproduction and implementation context, not
-a frozen-probe or MIPDB score.
-
-\paragraph{Retrospective secondary.} Previously inspected HBN R5 screens. These
-provide motivation and implementation history, not untouched confirmation.
-
-\paragraph{Exploratory layer-wise.} A separate four-layer, ten-seed analysis
-compares matched linear probes at REVE layers $-4$, $-3$, and $-2$ with the
-final-layer mean-linear baseline on the same previously evaluated
-\LayerwiseSubjectCount{}-subject MIPDB cohort.
-Its report and figures are aggregate-only and are bound to the completed
-external prediction inventory; its intervals and sign-flip values are
-descriptive and cannot modify the primary decision rule.
-
-The compact release preserves protocol and artifact identities while excluding
-raw recordings, model weights, participant identifiers, and subject-level
-predictions. This boundary is deliberate: it permits source and analysis
-audits without turning a restricted neuroimaging dataset into a public data
-copy. An additional access-controlled demographic and recording-level
-supplement is not included. The reported cohort flow should not be mistaken
-for a comprehensive account of recruitment or acquisition differences.
-
-\paragraph{Secondary ds006780 transfer.} The separate v5 transfer evaluates
-the final-layer mean-linear and rich-statistics residual heads at HBN training
-sizes 200 and 800 on 126 eligible ds006780 subjects and ten seeds. Its compact
-aggregate bundle is retained under
-\texttt{results/extensions/ds006780\_external\_v5/}; the bundle contains the
-analysis report, failed precision-gate report, deterministic table, figure,
-macros, and asset manifest, but no participant-level identifiers, target-bearing
-manifest, predictions, checkpoints, or recordings. The primary n=800 interval
-width was 0.1272 versus the predeclared maximum 0.06, so the extension is
-reported as uncertainty-limited transfer evidence.
-
+\clearpage
 \input{sections/capacity_data_regime}

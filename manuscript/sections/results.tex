@@ -1,169 +1,108 @@
 \section{Results}
 
-\subsection{Absolute external performance}
+\subsection{Primary external performance}
+The primary evaluation included \ProbeRuns{} selected checkpoints and
+\ExternalPredictions{} predictions for \PrimarySubjects{} MIPDB participants.
+The baseline achieved mean Pearson correlation \BaselinePearson{}, MAE
+\BaselineMAE{} years, and RMSE \BaselineRMSE{} years
+(Table~\ref{tab:absolute-metrics}). The rich-statistics head had the highest
+mean correlation, while the multi-query head had the lowest MAE and RMSE.
+All four heads had negative $R^2$ and calibration slopes above one, indicating
+substantial absolute error despite positive correlations.
 
-The complete external inventory contained \ProbeRuns{} selected checkpoints and
-\ExternalPredictions{} subject-level predictions. The final-layer mean-linear
-baseline achieved mean Pearson correlation \BaselinePearson{}, MAE
-\BaselineMAE{} years, RMSE \BaselineRMSE{} years, and R-squared
-\BaselineRSquared{}. Its mean calibration slope was
-\BaselineCalibrationSlope{}, indicating that correlation alone did not imply
-well-calibrated age estimates.
-
-\begin{table}[H]
+\begin{table}[tbp]
   \centering
   \small
-  \caption{Mean primary-cohort metrics across ten optimization seeds. MAE and
-  RMSE are in years. Calibration parameters are descriptive.}
+  \caption{Mean MIPDB metrics across ten training seeds. MAE and RMSE are in
+  years. Calibration fits observed age against predicted age.}
   \label{tab:absolute-metrics}
   \input{generated/main_metrics}
 \end{table}
 
-The rich-statistics residual head had the largest average Pearson among the
-tested heads, while the multi-query head had the lowest mean absolute and root
-mean-squared errors. These rankings are descriptive: the primary question was
-whether paired Pearson gains were stable under the complete decision rule.
-
-\subsection{Paired confirmatory comparisons}
-
-Relative to the matched baseline, mean Pearson increased by
+\subsection{Paired primary comparisons}
+Mean Pearson differences from the matched baseline were
 \LayerLinearPearsonDelta{} for the penultimate-layer linear probe,
-\RichResidualPearsonDelta{} for the rich-statistics residual head, and
+\RichResidualPearsonDelta{} for the rich-statistics head, and
 \MultiQueryPearsonDelta{} for the multi-query head. All three Holm-adjusted
-one-sided p-values were below the predeclared threshold. Nevertheless, their
-95\% hierarchical-bootstrap intervals extended below zero: the respective
-lower bounds were \LayerLinearCILow{}, \RichResidualCILow{}, and
-\MultiQueryCILow{}. Thus none satisfied every required condition.
+sign-flip p-values were below 0.05. However, every joint bootstrap interval
+included zero (Table~\ref{tab:confirmatory} and Figure~\ref{fig:bootstrap}), so
+none met all conditions of the prespecified decision rule.
 
-\begin{table}[H]
+\begin{table}[tbp]
   \centering
   \small
-  \caption{Paired confirmatory comparisons against the final-layer mean-linear
-  baseline. W/T/L denotes wins, ties, and losses across seeds.}
+  \caption{Primary paired differences from the final-layer linear baseline.
+  Intervals resample seeds and participants. W/T/L counts positive, zero, and
+  negative seed differences; Stable denotes passing all five decision criteria.}
   \label{tab:confirmatory}
   \input{generated/confirmatory_comparisons}
 \end{table}
 
-\begin{figure}[!ht]
+\begin{figure}[tbp]
   \centering
-  \includegraphics[width=0.93\linewidth]{generated/seed_deltas.pdf}
-  \caption{Paired external Pearson differences for each optimization seed.
-  Positive values favor the candidate head.}
-  \label{fig:seed-deltas}
-\end{figure}
-
-The per-seed view shows that layer selection and rich-statistics residualization
-were directionally consistent across the observed seeds, whereas the
-multi-query model lost on \MultiQueryLosses{} seeds. Directional seed
-consistency did not remove uncertainty induced by the finite external cohort,
-as visualized by the joint seed-and-subject bootstrap intervals.
-
-\begin{figure}[!ht]
-  \centering
-  \includegraphics[width=0.90\linewidth]{generated/bootstrap_intervals.pdf}
-  \caption{Mean paired Pearson differences and 95\% hierarchical-bootstrap
-  intervals. Every interval intersects the no-difference line.}
+  \includegraphics[width=0.82\linewidth]{generated/bootstrap_intervals.pdf}
+  \caption{Mean primary Pearson differences and joint 95\% confidence intervals.
+  Every interval includes the no-difference line.}
   \label{fig:bootstrap}
 \end{figure}
 
-\subsection{Secondary capacity-data regime}
+The penultimate-layer and rich-statistics heads improved on every seed. The
+multi-query head improved on eight seeds and lost on \MultiQueryLosses{}.
+Figure~\ref{fig:seed-deltas} shows these differences. The consistent signs in
+the first two comparisons describe training variability on this cohort;
+they do not remove uncertainty across participants.
 
-We next asked whether the external behavior of the richer heads changes with
-the amount of HBN development data. The secondary matrix contains the
-mean-linear baseline and two candidate heads at 200, 400, and 800 training
-subjects, with ten fixed seeds per cell. It therefore contributes 90 training
-runs and 6,750 external prediction identities on the previously evaluated
-75-subject MIPDB cohort. Full aggregate tables and transfer details
-are provided in the supplementary section. These are repeated evaluations of
-the same people, not 6,750 independent external subjects or a new replication.
-
-Both candidate heads had positive mean paired Pearson differences at every
-training size, and every observed seed-level difference was positive. However,
-the point-estimate advantage did not increase monotonically with the training
-subset. At 200 subjects, both candidates' paired intervals were above zero;
-at 800 subjects, both included zero. This difference between interval decisions
-does not itself establish a training-size interaction. The direct contrasts
-reported in the supplement are needed to assess whether the paired advantage
-changes with size. Figure~\ref{fig:capacity-main} summarizes the cell estimates;
-neither these estimates nor the bounded direct comparisons establish a
-universal scaling law or a general superiority claim for richer heads.
-
-\begin{figure}[!ht]
+\begin{figure}[tbp]
   \centering
-  \includegraphics[width=0.92\linewidth]{../results/extensions/capacity_data_regime_v3/capacity_data_regime_delta.pdf}
-  \caption{Secondary capacity-data analysis. Paired external Pearson deltas
-  relative to the training-size-matched mean-linear baseline. Intervals are
-  joint seed-subject bootstrap intervals; the extension is exploratory.}
+  \includegraphics[width=0.86\linewidth]{generated/seed_deltas.pdf}
+  \caption{Primary paired Pearson differences by training seed, all evaluated
+  on the same 75 participants. Positive values favor the candidate.}
+  \label{fig:seed-deltas}
+\end{figure}
+
+\subsection{Exploratory training-size analysis}
+The 90 runs at 200, 400, and 800 HBN training subjects produced 6,750 predictions
+for the same 75 MIPDB participants. Both the rich-statistics and matched MLP
+heads had positive mean advantages at every size, with all ten seed differences
+positive in each comparison (Figure~\ref{fig:capacity-main}). Their mean
+advantages decreased across the tested sizes. The 200-subject intervals were
+above zero, while the 800-subject intervals included zero.
+
+Comparing those interval decisions alone does not test whether the effects
+changed. Direct 800-minus-200 contrasts were $-0.046$ for the rich head
+(95\% CI $[-0.112,0.023]$) and $-0.039$ for the MLP
+($[-0.090,0.012]$). Both included zero. One adjacent MLP contrast, 800 minus
+400, had an interval below zero ($[-0.061,-0.004]$); its one-sided test of a
+positive change gave an adjusted p-value of 1.000. These exploratory results
+are reported in full in Appendix~\ref{sec:capacity}; they do not establish a
+universal scaling law.
+
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=0.86\linewidth]{presentation/capacity_data_regime_delta.pdf}
+  \caption{Exploratory training-size analysis. Mean paired Pearson differences
+  from the size-matched linear baseline, with joint 95\% intervals.}
   \label{fig:capacity-main}
 \end{figure}
 
-The exact seed sign-flip tests and Holm corrections reported for this extension
-are descriptive exploratory inference. They do not modify the primary
-predeclared stability rule, whose conclusion remains that no tested complex
-head established a stable external gain.
+\subsection{Exploratory layer-wise analysis}
+Four linear probes were evaluated across ten seeds on the same
+\LayerwiseSubjectCount{} MIPDB participants. Relative to the final-layer
+mean-linear baseline, the mean differences were \LayerwiseMFourDelta{},
+\LayerwiseMThreeDelta{}, and \LayerwiseMTwoDelta{} at layers $-4$, $-3$, and
+$-2$, respectively. All intervals crossed zero (Table~\ref{tab:layerwise}).
+The positive estimates do not establish a stable layer advantage or a primary
+superiority claim. Figures~\ref{fig:layerwise-depth} and
+\ref{fig:layerwise-seed-deltas} in the appendix show the depth and seed patterns.
 
-\subsection{Secondary layer-wise analysis}
-
-The layer-wise extension asked whether age information was more reliably
-accessible before the final REVE layer without changing probe capacity. We used
-the final-layer mean-linear probe as the baseline and compared matched linear
-probes at layers $-4$, $-3$, and $-2$. The analysis covered four layers, ten
-matched seeds, and the same previously evaluated
-\LayerwiseSubjectCount{}-subject external cohort. It was
-exploratory and was not a primary superiority claim.
-
-\begin{table}[H]
+\begin{table}[tbp]
   \centering
   \small
-  \caption{Exploratory layer-wise comparison against the final-layer mean-linear
-  baseline. Intervals are hierarchical seed-subject bootstrap intervals;
-  Holm-adjusted sign-flip values are descriptive.}
+  \caption{Exploratory layer-wise differences from the final-layer baseline.
+  Intervals resample seeds and participants; Holm-adjusted p-values refer to
+  seed sign-flip tests.}
   \label{tab:layerwise}
   \input{../results/extensions/layerwise_probe_20260910/assets/layerwise_summary}
 \end{table}
 
-The earlier-layer point estimates were positive for all three comparisons:
-mean deltas were \LayerwiseMFourDelta{}, \LayerwiseMThreeDelta{}, and
-\LayerwiseMTwoDelta{} for layers $-4$, $-3$, and $-2$, respectively. However,
-all 95\% intervals crossed zero, ranging from
-[\LayerwiseMFourCILow{},\,\LayerwiseMFourCIHigh{}] at layer $-4$ to
-[\LayerwiseMTwoCILow{},\,\LayerwiseMTwoCIHigh{}] at layer $-2$.
-The exact sign-flip results are consequently best read as directional evidence
-under ten matched seeds, not as proof of a stable layer advantage. This
-secondary analysis does not establish a primary superiority claim and does not
-change the main conclusion.
-
-\begin{figure}[!ht]
-  \centering
-  \includegraphics[width=0.85\linewidth]{../results/extensions/layerwise_probe_20260910/assets/layerwise_depth.pdf}
-  \caption{Exploratory layer-wise mean paired Pearson deltas with
-  hierarchical bootstrap intervals. The final layer is the matched baseline;
-  every earlier-layer interval intersects zero.}
-  \label{fig:layerwise-depth}
-\end{figure}
-
-\begin{figure}[!ht]
-  \centering
-  \includegraphics[width=0.85\linewidth]{../results/extensions/layerwise_probe_20260910/assets/layerwise_seed_deltas.pdf}
-  \caption{Per-seed paired Pearson deltas for the three earlier-layer probes.
-  Positive values favor the earlier layer, but seed direction alone does not
-  account for external-subject uncertainty.}
-  \label{fig:layerwise-seed-deltas}
-\end{figure}
-
 \input{sections/ds006780_external}
-
-\subsection{Calibration}
-
-All heads had mean calibration slopes above one, with the multi-query model
-closest to the ideal slope among the four. Intercepts were also displaced from
-zero. These patterns reinforce that a ranking by correlation is not a complete
-assessment of the resulting age predictions.
-
-\begin{figure}[!ht]
-  \centering
-  \includegraphics[width=0.92\linewidth]{generated/calibration_summary.pdf}
-  \caption{Descriptive mean calibration slopes and intercepts. Dashed lines
-  denote the ideal slope of one and intercept of zero.}
-  \label{fig:calibration}
-\end{figure}

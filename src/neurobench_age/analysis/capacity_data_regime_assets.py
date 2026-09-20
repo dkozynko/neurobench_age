@@ -24,7 +24,7 @@ class CapacityDataRegimeAssetError(ValueError):
 _HEAD_LABELS = {
     "mean_linear": "Mean-pooled linear",
     "mean_rich_stats_residual": "Rich-statistics residual",
-    "mean_mlp_residual_matched(hidden_dim=4)": "Matched MLP (hidden_dim=4)",
+    "mean_mlp_residual_matched(hidden_dim=4)": "MLP (4 hidden units)",
 }
 _CANDIDATE_HEADS = tuple(name for name in _HEAD_LABELS if name != "mean_linear")
 _SIZES = (200, 400, 800)

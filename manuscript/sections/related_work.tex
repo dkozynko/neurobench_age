@@ -1,66 +1,38 @@
 \section{Related Work}
 
-\paragraph{EEG foundation models and benchmarking.}
-REVE uses masked reconstruction over a large, heterogeneous EEG corpus and was
-introduced as a representation model that can accommodate arbitrary electrode
-arrangements and recording lengths \citep{elouahidi2025reve}. NeuralBench
-provides a broader framework for standardized evaluation across neuroimaging
-models, datasets, and tasks \citep{banville2026neuralbench}. Our experiment
-borrows the optimization budget and age-prediction context but changes the
-scientific estimand: the encoder is frozen and only representation heads are
-trained. The external MIPDB result must therefore not be compared as though it
-were an official NeuralBench leaderboard number.
+\paragraph{EEG representations and benchmarks.}
+REVE was designed to handle heterogeneous EEG recordings
+\citep{elouahidi2025reve}. NeuralBench provides a framework for comparing
+neuroimaging models across datasets and tasks \citep{banville2026neuralbench}.
+We follow its age-prediction context and training-budget conventions, but train
+only the prediction heads. MIPDB is not an official NeuralBench score.
 
-Recent EEG foundation-model studies make this distinction consequential.
-STST-JEPA reports strong age decoding with a lightweight attentive probe over
-frozen embeddings, but its validation is tied to its own pretraining and
-evaluation mixture rather than to a sealed cross-cohort head comparison
-\citep{segal2026ststjepa}. NeuroAtlas likewise finds that model rankings vary
-across EEG domains and that current pretrained models do not provide a
-uniformly superior out-of-the-box representation \citep{kontras2026neuroatlas}.
-More generally, comparisons of foundation models as EEG feature extractors
-show that the value of frozen features can differ from the value obtained after
-task-specific adaptation \citep{turgut2026feature}. These studies motivate
-testing readout capacity while holding the representation and data exposure
-fixed, rather than treating a single attentive or fine-tuned result as evidence
-that additional head capacity is generally beneficial.
+Recent studies illustrate the importance of this distinction. STST-JEPA reports
+strong age prediction with an attentive probe of frozen embeddings in its own
+training and evaluation setting \citep{segal2026ststjepa}. NeuroAtlas finds that
+model rankings vary across EEG domains \citep{kontras2026neuroatlas}, while
+comparisons of EEG feature extractors distinguish the usefulness of frozen
+features from performance after task-specific adaptation
+\citep{turgut2026feature}. Our study isolates head choice within one encoder and
+one development protocol, then tests transfer across cohorts.
 
-\paragraph{Representation probing.}
-Linear probes were introduced as deliberately restricted readouts of hidden
-representations \citep{alain2016probes}. Their restriction is informative: if a
-target is linearly decodable, the representation has organized the relevant
-signal into a particularly accessible form. Nonlinear or statistics-rich heads
-can answer a different question: whether the information can be recovered by
-a larger downstream computation. Comparing probes of different capacities is
-therefore meaningful only when optimization, data exposure, and evaluation are
-matched and when extra expressivity is not silently attributed to the encoder.
+\paragraph{Probing and age prediction.}
+Linear probes use a deliberately restricted predictor to examine what a
+representation makes accessible \citep{alain2016probes}. Richer heads ask a
+broader question: whether additional computation can recover useful information
+from those features. Comparing them therefore requires matching data exposure
+and training conditions.
 
-\paragraph{EEG age decoding.}
-Prior work has shown that age can be predicted from sleep EEG and that derived
-brain-age measures capture maturational or health-related variation
-\citep{sun2019brainage,vandenbosch2019age}. We do not claim a clinical brain-age
-biomarker. Chronological age is used here as a continuous decoding target for
-testing the accessibility and external stability of frozen representations.
-Developmental EEG work has also demonstrated independent-cohort validation of
-age trajectories, while broader brain-age benchmarks show that performance can
-change substantially across acquisition sites and datasets
-\citep{iyer2024growthchart,tveitstol2026robustness}. This makes the external
-MIPDB evaluation part of the estimand rather than an optional replication.
+EEG age-prediction studies have examined sleep, childhood development, and
+validation across datasets \citep{sun2019brainage,vandenbosch2019age,
+iyer2024growthchart,tveitstol2026robustness}. Here chronological age is a
+prediction target for studying representations, rather than a proposed clinical
+biomarker.
 
-\paragraph{External validation and reproducibility.}
-External neuroimaging validation has a separate training-sample and
-evaluation-sample power problem; small external cohorts can produce both broad
-uncertainty and unstable effect estimates \citep{rosenblatt2024power}. Our
-subject-and-seed resampling and conjunctive decision rule are designed to keep
-that uncertainty visible when asking whether a richer head improves over the
-linear baseline.
-
-\paragraph{Nested uncertainty.}
-Neuroscience measurements often have multiple levels of variation, and treating
-all observations as independent can understate uncertainty. Hierarchical
-bootstrap procedures explicitly preserve such structure
-\citep{saravanan2020hierarchical}. We resample both optimization seeds and
-subjects, then complement that interval with a paired seed-level sign-flip
-permutation test.
-The three candidate hypotheses are adjusted using Holm's sequential procedure
-\citep{holm1979simple}.
+\paragraph{Uncertainty in external evaluation.}
+External neuroimaging studies face uncertainty from both training and evaluation
+samples \citep{rosenblatt2024power}. Resampling methods can account for multiple
+sources of variation \citep{saravanan2020hierarchical}. We resample seeds and
+participants while preserving paired predictions, and separately test the
+seed-level differences on the observed cohort. Holm correction accounts for
+the three primary candidate comparisons \citep{holm1979simple}.

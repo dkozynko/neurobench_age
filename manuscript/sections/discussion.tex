@@ -1,93 +1,50 @@
 \section{Discussion}
 
-The central result is a separation between favorable point estimates and
-stable external evidence. Each candidate produced a positive mean paired
-Pearson difference, and each passed the adjusted one-sided randomization
-threshold. Two candidates improved on every observed seed. Yet the
-hierarchical intervals remained compatible with zero once both seed and subject
-variation were propagated. Under the predeclared conjunction, no tested complex
-head therefore established a stable gain.
+All three primary candidates had higher mean correlations than the baseline,
+but every confidence interval included zero. The layer-$-2$ and rich-statistics
+heads improved on every seed. Their consistency across training runs did not
+resolve uncertainty about the external participants.
 
-\paragraph{The metric changes the descriptive ranking.}
-The rich-statistics residual head obtained mean Pearson
-\RichResidualPearson{} with MAE \RichResidualMAE{} years, whereas the
-multi-query head obtained Pearson \MultiQueryPearson{} with MAE
-\MultiQueryMAE{} years (Table~\ref{tab:absolute-metrics}). Thus the highest
-correlation and lowest absolute error did not identify the same readout.
-Pearson measures linear association, not agreement in years; a favorable
-correlation cannot replace an error or calibration assessment. These secondary
-metrics are descriptive, not additional confirmatory wins, and were not used
-to replace the original Pearson endpoint after evaluation.
+The sign-flip tests and bootstrap intervals describe different sources of
+variation. The former compare training runs on the fixed MIPDB cohort; the
+latter also change which participants enter the evaluation. Small seed-level
+p-values can therefore coexist with wide intervals when the estimated
+advantage depends on the people being evaluated. Ten seeds provide ten training
+runs, not ten independently recruited external cohorts.
 
-Descriptively, the earlier-layer linear result is compatible with age-relevant
-signal being accessible before the final REVE layer, and the rich-statistics
-head is compatible with token dispersion and magnitude being useful to a
-downstream predictor. The multi-query result has lower observed error metrics
-without establishing a reliable Pearson advantage. None of these observations
-warrants a general claim that a richer readout reveals a better representation.
+\paragraph{The metric changes the preferred head.}
+The rich-statistics head had the highest mean Pearson correlation
+(\RichResidualPearson{}), whereas the multi-query head had the lowest MAE
+(\MultiQueryMAE{} years). Pearson measures association, not agreement in years.
+All four heads had negative external $R^2$, and their calibration slopes
+exceeded one. Thus a moderate correlation did not imply accurate or
+well-calibrated age estimates. These descriptive differences are useful for
+understanding the heads, but they were not substituted for the prespecified
+endpoint.
 
-\paragraph{The readout and training regime define the comparison.}
-Probe capacity is part of the scientific intervention. A nonlinear head can
-recover information that is present but not linearly accessible, but it can
-also exploit development-set regularities that do not transfer. Matched seeds,
-identical cached representations, common optimization, and paired external
-subjects reduce avoidable comparison noise; they do not eliminate cohort
-uncertainty.
+\paragraph{More training data did not yield a larger observed advantage.}
+In the training-size analysis, the richer heads' mean advantages on MIPDB were
+smaller at 800 training subjects than at 200. The endpoint confidence intervals
+included zero, so this pattern alone does not establish that the advantage
+shrinks with more data. Additional training data may improve the baseline and
+candidate together; transfer between cohorts may also limit either predictor.
+The experiment does not isolate these explanations. Choosing a new training
+size from its MIPDB score would require a fresh external test.
 
-The capacity-data extension sharpens this interpretation. The point estimates
-of the richer heads' paired external advantage were smaller at 800 training
-subjects than at 200, and both 800-subject intervals included zero. This pattern
-is consistent with additional data improving the baseline and candidate
-together, or with cross-cohort transfer limiting the comparison rather than head
-capacity. Neither explanation is isolated by this experiment. In particular,
-a positive interval at one size and a zero-crossing interval at another are
-not by themselves evidence that the effects differ. The direct training-size
-contrasts, rather than separate significance decisions, address that question.
-The observed MIPDB maximum must not be used to choose a new training size and
-then described as an untouched external test. With only three nested sizes,
-this is a bounded observation, not evidence against scaling more generally.
+The layer-wise analysis likewise found higher point estimates before the final
+layer, but no interval excluded zero. The separate ds006780 transfer produced
+a different training-size pattern: the rich head was below the baseline at
+200 subjects and above it at 800. At 800, all ten differences were positive,
+but the interval again included zero and exceeded the planned width. This
+second cohort extends the comparison to another acquisition setting without
+establishing a reliable advantage.
 
-The secondary layer-wise analysis provides a similarly bounded result. Earlier
-layers showed positive paired point estimates relative to the final-layer
-baseline, but the subject-aware intervals crossed zero for all three tested
-depths. This is compatible with age-relevant information being available before
-the final layer, yet it does not show that an earlier layer is reliably better
-under this cohort, seed set, and linear probe.
-
-\paragraph{Transfer to a separate EEG cohort.}
-The ds006780 extension provides a useful stress test because its 126 eligible
-subjects are separate from MIPDB and its BioSemi acquisition differs from the
-primary cohort. The rich head was below the matched linear baseline at $n=200$
-and above it at $n=800$; at $n=800$, all ten seed-level differences were
-positive. This pattern is consistent with a data-regime-dependent transfer
-benefit, but the 95\% interval [\DsPrimaryCILow{},\,
-\DsPrimaryCIHigh{}] is wide and crosses zero. The failed precision gate
-therefore limits the result to external evidence that motivates a larger,
-prospectively powered replication. It does not turn repeated seed direction
-into a cross-cohort superiority claim, and it does not provide an encoder-unseen
-guarantee.
-
-\paragraph{Seed consistency is not independent cohort replication.}
-Changing the seed interrogates training variability on the observed subjects;
-it does not recruit new external subjects. All three analyses here reuse the
-same MIPDB cohort. Their agreement can describe this cohort more fully but
-cannot establish that the same pattern will recur in another population.
-Likewise, a zero-crossing interval does not exclude a useful benefit: the
-intervals permit both unfavorable and favorable effects, and no practical
-equivalence margin was prespecified.
-
-\paragraph{Implications for evaluating frozen representations.}
-The concrete reporting recommendation is to declare the head, layer,
-development-set size, and primary metric as part of the evaluation protocol;
-compare heads within matched training regimes; and show paired subject-aware
-intervals alongside repeated-seed summaries. Absolute error and calibration
-should accompany correlation without silently becoming replacement endpoints.
-These recommendations are illustrated by this controlled case, not established
-as a new general theory of representation quality.
-
-The next discriminating experiment is an independently recruited,
-age-compatible external cohort evaluated with frozen checkpoints and a
-prospectively specified transfer protocol. Such a replication could extend the
-same investigation while remaining separate from the original primary test.
-A second encoder would test encoder specificity, whereas a larger HBN training
-set alone would not resolve the lack of independent external replication.
+\paragraph{Implications.}
+A frozen-encoder score describes an encoder used with a particular head,
+training set, and metric. Reporting these choices, absolute prediction errors,
+and participant-aware intervals makes comparisons easier to interpret. Our
+primary, training-size, and layer-wise MIPDB analyses all reuse the same
+participants; only the ds006780 extension adds a separate cohort. A larger
+external evaluation with a protocol fixed in advance would test whether the
+observed gains persist. Evaluating another encoder would address a different
+question: how specific these findings are to REVE.

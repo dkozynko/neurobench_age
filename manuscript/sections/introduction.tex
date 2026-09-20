@@ -1,54 +1,36 @@
 \section{Introduction}
 
-EEG foundation models promise reusable representations across heterogeneous
-montages, recording systems, cohorts, and downstream tasks. REVE was designed
-for this setting through large-scale masked pretraining and position encodings
-that accommodate varying electrode layouts \citep{elouahidi2025reve}. At the
-same time, a good downstream score does not by itself identify what a frozen
-representation makes readily accessible: a sufficiently flexible head may learn
-dataset-specific structure that a linear readout cannot exploit.
+EEG foundation models aim to provide features that can be reused across
+recording systems, electrode layouts, and prediction tasks. REVE addresses
+this goal through large-scale pretraining and position encodings that support
+different electrode arrangements \citep{elouahidi2025reve}. Evaluating a frozen
+encoder, however, also requires choosing a prediction head. A linear head tests
+whether the target can be recovered by a simple readout; a more expressive head
+may exploit additional structure in the features, but its gains may depend on
+the training data.
 
-Age is a useful stress test. It is continuously valued, strongly reflected in
-EEG physiology, and studied as a marker of maturation and aging
-\citep{sun2019brainage,vandenbosch2019age}. Yet age decoding is also vulnerable
-to acquisition and cohort shift. A result that improves on an internal split
-may fail when hardware, recruitment, and recording details change.
+Age prediction offers a useful test. Age-related changes are reflected in EEG,
+and previous work has used them to study maturation and aging
+\citep{sun2019brainage,vandenbosch2019age}. Yet a model trained on one cohort may
+perform differently on another because participants, hardware, and recording
+procedures change. Repeating training with several random seeds measures one
+source of variability, while all runs may still be evaluated on the same small
+group of people.
 
-We therefore ask a deliberately narrow question: when the REVE encoder,
-development data, preprocessing, optimization seeds, and checkpoint rule are
-held fixed, do alternative or richer representation heads improve reliably over
-a mean-pooled linear probe? The study separates three evidence classes. The
-primary evidence is a prospective frozen-probe comparison developed on HBN and
-evaluated once on a sealed MIPDB cohort. Official NeuralBench-style end-to-end
-experiments provide reproduction context, while previously inspected HBN test
-results are retrospective only. MIPDB is not an official NeuralBench score.
+We ask whether richer heads improve external age prediction when the REVE
+encoder, development data, preprocessing, training budget, and checkpoint
+selection rule are held fixed. We compare a mean-pooled linear baseline with a
+linear probe of the preceding layer and two richer final-layer heads. All heads
+are developed on the Healthy Brain Network (HBN) and evaluated on a held-out
+MIPDB cohort using a decision rule specified before external evaluation.
 
-We additionally examine whether the paired head comparison changes with the
-amount of development data. A secondary capacity-data extension trains the
-mean-linear baseline and two richer heads on nested HBN subsets of 200, 400,
-and 800 subjects, using ten fixed optimization seeds and the same, now
-previously evaluated, MIPDB subjects. This extension is explicitly exploratory:
-it probes whether more
-development data makes a richer head more reliable, but it does not expand the
-primary confirmatory claim or represent a full-dataset scaling law.
+Three secondary analyses examine training-set size, representation depth, and
+transfer to a separate cohort, OpenNeuro ds006780. The first two reuse MIPDB;
+the third adds new participants but was motivated by the earlier results.
 
-An exploratory layer-wise comparison then holds the linear readout family
-fixed while varying representation depth. Neither extension supplies a new
-external cohort; a separate ds006780 transfer extension supplies a second
-cross-cohort stress test but remains secondary because it was motivated by the
-earlier results. Together with the original comparison, they address a
-practical question: what must an evaluation specify before a frozen-probe score
-can support a claim about a representation?
-
-Our contribution is a controlled empirical case study, not a new encoder or a
-claim that more expressive probes are generally ineffective. First, different
-heads lead to different descriptive rankings by correlation and absolute
-error, so a preferred readout depends on the evaluation objective. Second,
-training-size-matched comparisons distinguish changes in absolute performance
-from changes in a candidate's advantage over a linear baseline. Third, the
-joint uncertainty analysis demonstrates that favorable repeated-seed results
-on one cohort do not by themselves establish a reliable external advantage.
-We make these distinctions inspectable through exact run inventories, paired
-comparisons, and separate primary and exploratory evidence. The resulting
-guidance concerns how to evaluate frozen representations under this protocol,
-not a universal ordering of heads, layers, or encoders.
+The contribution is a controlled empirical study of frozen EEG features. We
+show how the preferred head changes with the metric, how a candidate's
+advantage can change with training-set size, and why agreement across seeds
+can coexist with substantial uncertainty across participants. These findings
+help interpret probe comparisons without attributing every downstream gain
+to the encoder itself.
